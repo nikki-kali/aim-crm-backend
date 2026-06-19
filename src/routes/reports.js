@@ -12,27 +12,32 @@ router.get('/dashboard', auth, async (req, res, next) => {
     const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
     const coldThreshold = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()
 
-    const [kpiRes, coldRes, recentRes, brandRes, intakeRes] = await Promise.all([
+    const [kpiRes, coldRes, recentRes, brandRes, intakeRes, casePipelineRes] = await Promise.all([
       db.query(`
         SELECT
-          (SELECT COUNT(*) FROM leads WHERE status NOT IN ('Won','Lost')) AS active_leads,
+          (SELECT COUNT(*) FROM leads WHERE status NOT IN ('Won','Lost') AND is_archived=false) AS active_leads,
           (SELECT COUNT(*) FROM clients) AS total_clients,
           (SELECT COALESCE(SUM(total_revenue),0) FROM clients) AS total_revenue,
           (SELECT COUNT(*) FROM leads WHERE status='Lost') AS lost_leads
       `),
       db.query(`
         SELECT * FROM leads
-        WHERE status NOT IN ('Won','Lost')
+        WHERE status NOT IN ('Won','Lost') AND is_archived=false
           AND COALESCE(last_contacted_at, created_at) < $1
         ORDER BY last_contacted_at ASC NULLS FIRST LIMIT 5
       `, [coldThreshold]),
-      db.query(`SELECT * FROM leads ORDER BY created_at DESC LIMIT 5`),
+      db.query(`SELECT * FROM leads WHERE is_archived=false ORDER BY created_at DESC LIMIT 5`),
       db.query(`SELECT brand, total_revenue FROM clients`),
       db.query(`
         SELECT * FROM leads
         WHERE created_via='api' AND status='Lead' AND created_at >= $1
         ORDER BY created_at DESC LIMIT 10
       `, [since7d]),
+      db.query(`
+        SELECT status, COUNT(*) AS count FROM cases
+        WHERE status != 'Completed'
+        GROUP BY status ORDER BY status
+      `).catch(() => ({ rows: [] })),
     ])
 
     res.json({
@@ -41,6 +46,7 @@ router.get('/dashboard', auth, async (req, res, next) => {
       recent_leads: recentRes.rows,
       brand_revenue: brandRes.rows,
       intake_leads: intakeRes.rows,
+      case_pipeline: casePipelineRes.rows,
     })
   } catch (err) { next(err) }
 })
@@ -319,6 +325,52 @@ router.post('/send', auth, requireAdmin, async (req, res, next) => {
 
     await sendEmail({ to: email, subject: `Aim Dental CRM — ${month} Summary Report`, html })
     res.json({ success: true, message: `Report sent to ${email}` })
+  } catch (err) { next(err) }
+})
+
+// GET /api/reports/operations
+router.get('/operations', auth, requireAdmin, async (req, res, next) => {
+  try {
+    const [volumeRes, techRes, caseTypeRes, stageRes] = await Promise.all([
+      db.query(`
+        SELECT
+          COUNT(*) AS total_cases,
+          COUNT(*) FILTER (WHERE status='Completed') AS completed,
+          COUNT(*) FILTER (WHERE status NOT IN ('Completed','Dispatched')) AS active,
+          COUNT(*) FILTER (WHERE due_date < NOW() AND status != 'Completed') AS overdue,
+          COALESCE(SUM(value),0) AS total_value,
+          COALESCE(AVG(value),0) AS avg_value
+        FROM cases
+      `),
+      db.query(`
+        SELECT
+          COALESCE(assigned_technician, 'Unassigned') AS technician,
+          COUNT(*) AS total,
+          COUNT(*) FILTER (WHERE status='Completed') AS completed,
+          COALESCE(SUM(value),0) AS value
+        FROM cases
+        GROUP BY assigned_technician ORDER BY total DESC
+      `),
+      db.query(`
+        SELECT
+          case_type, COUNT(*) AS total,
+          COUNT(*) FILTER (WHERE status='Completed') AS completed,
+          COALESCE(AVG(value),0) AS avg_value,
+          COALESCE(SUM(value),0) AS total_value
+        FROM cases WHERE case_type IS NOT NULL AND case_type != ''
+        GROUP BY case_type ORDER BY total DESC
+      `),
+      db.query(`
+        SELECT status, COUNT(*) AS count, COALESCE(SUM(value),0) AS value
+        FROM cases GROUP BY status ORDER BY status
+      `),
+    ])
+    res.json({
+      volume: volumeRes.rows[0],
+      technicians: techRes.rows.map(r => ({ ...r, total: Number(r.total), completed: Number(r.completed), value: Number(r.value) })),
+      case_types: caseTypeRes.rows.map(r => ({ ...r, total: Number(r.total), completed: Number(r.completed), avg_value: Number(r.avg_value), total_value: Number(r.total_value) })),
+      by_stage: stageRes.rows.map(r => ({ ...r, count: Number(r.count), value: Number(r.value) })),
+    })
   } catch (err) { next(err) }
 })
 
