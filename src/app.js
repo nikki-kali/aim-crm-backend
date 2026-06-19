@@ -15,6 +15,7 @@ const clinicRoutes = require('./routes/clinics')
 const activityRoutes = require('./routes/activities')
 const taskRoutes = require('./routes/tasks')
 const emailTemplateRoutes = require('./routes/emailTemplates')
+const reportScheduleRoutes = require('./routes/reportSchedules')
 
 const app = express()
 
@@ -39,7 +40,8 @@ app.use('/api/email-templates', emailTemplateRoutes)
 app.use('/api/alerts',          alertRoutes)
 app.use('/api/automations',     automationRoutes)
 app.use('/api/reports',         reportRoutes)
-app.use('/api/users',           userRoutes)
+app.use('/api/users',            userRoutes)
+app.use('/api/report-schedules', reportScheduleRoutes)
 
 app.use(errorHandler)
 

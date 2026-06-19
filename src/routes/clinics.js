@@ -79,6 +79,30 @@ router.put('/:id', auth, async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+// GET /api/clinics/:id/notification-prefs
+router.get('/:id/notification-prefs', auth, async (req, res, next) => {
+  try {
+    const { rows } = await db.query(
+      'SELECT * FROM clinic_notification_prefs WHERE clinic_id=$1', [req.params.id]
+    )
+    res.json(rows)
+  } catch (err) { next(err) }
+})
+
+// PUT /api/clinics/:id/notification-prefs — upsert a stage toggle
+router.put('/:id/notification-prefs', auth, async (req, res, next) => {
+  try {
+    const { stage, enabled } = req.body
+    await db.query(
+      `INSERT INTO clinic_notification_prefs (clinic_id, stage, enabled)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (clinic_id, stage) DO UPDATE SET enabled=$3`,
+      [req.params.id, stage, enabled !== false]
+    )
+    res.json({ success: true })
+  } catch (err) { next(err) }
+})
+
 // DELETE /api/clinics/:id (admin only)
 router.delete('/:id', auth, requireAdmin, async (req, res, next) => {
   try {
