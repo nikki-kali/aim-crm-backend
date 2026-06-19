@@ -184,8 +184,7 @@ router.post('/send', auth, requireAdmin, async (req, res, next) => {
           (SELECT COUNT(*) FROM leads WHERE status='Won') AS total_won,
           (SELECT COUNT(*) FROM leads WHERE status='Lost') AS total_lost,
           (SELECT COUNT(*) FROM clients) AS total_clients,
-          (SELECT COALESCE(SUM(total_revenue),0) FROM clients) AS total_revenue,
-          (SELECT COUNT(*) FROM cases WHERE status != 'Delivered') AS open_cases
+          (SELECT COALESCE(SUM(total_revenue),0) FROM clients) AS total_revenue
       `),
       db.query(`
         SELECT
@@ -200,10 +199,10 @@ router.post('/send', auth, requireAdmin, async (req, res, next) => {
         SELECT COUNT(*) AS count FROM leads
         WHERE status NOT IN ('Won','Lost') AND COALESCE(last_contacted_at, created_at) < $1
       `, [coldThreshold]),
-      db.query(`SELECT COUNT(*) AS overdue FROM cases WHERE due_date < NOW() AND status != 'Delivered'`),
+      db.query(`SELECT COUNT(*) AS overdue FROM cases WHERE due_date < NOW() AND status != 'Delivered'`).catch(() => ({ rows: [{ overdue: 0 }] })),
     ])
 
-    const kpi = kpiRes.rows[0]
+    const kpi = { ...kpiRes.rows[0], open_cases: caseRes.rows[0]?.overdue ?? 0 }
     const ytd = ytdRes.rows[0]
     const total = Number(ytd.ytd_leads)
     const won = Number(ytd.ytd_won)
