@@ -6,8 +6,8 @@ const { sendEmail } = require('../services/email')
 
 const router = express.Router()
 
-// GET /api/dashboard — all data needed for the Dashboard page in one call
-router.get('/dashboard', auth, async (req, res, next) => {
+// GET /api/dashboard — matches both when mounted at /api/dashboard (path→/) or /api/reports (path→/dashboard)
+router.get(['/', '/dashboard'], auth, async (req, res, next) => {
   try {
     const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
     const coldThreshold = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()
