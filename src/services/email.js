@@ -1,33 +1,22 @@
-const nodemailer = require('nodemailer')
+const { Resend } = require('resend')
 
-let transporter
+let resend
 
-function getTransporter() {
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT) || 465,
-      secure: true,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000,
-    })
-  }
-  return transporter
+function getResend() {
+  if (!resend) resend = new Resend(process.env.RESEND_API_KEY)
+  return resend
 }
 
 async function sendEmail({ to, subject, html }) {
-  const t = getTransporter()
-  await t.sendMail({
-    from: `"Aim Dental CRM" <${process.env.SMTP_USER}>`,
+  const client = getResend()
+  const from = process.env.RESEND_FROM || 'Aim Dental CRM <onboarding@resend.dev>'
+  const { error } = await client.emails.send({
+    from,
     to: to || process.env.ALERT_EMAIL,
     subject,
     html,
   })
+  if (error) throw new Error(error.message)
 }
 
 function coldLeadEmail(leads) {
