@@ -35,9 +35,12 @@ router.post('/login', async (req, res, next) => {
   }
 })
 
-// GET /api/auth/me
-router.get('/me', auth, (req, res) => {
-  res.json({ user: req.user })
+// GET /api/auth/me — returns full profile including avatar
+router.get('/me', auth, async (req, res, next) => {
+  try {
+    const { rows } = await db.query('SELECT avatar FROM users WHERE id=$1', [req.user.id])
+    res.json({ user: { ...req.user, avatar: rows[0]?.avatar || null } })
+  } catch (err) { next(err) }
 })
 
 module.exports = router

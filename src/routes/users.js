@@ -10,16 +10,34 @@ const router = express.Router()
 router.get('/reps', auth, async (req, res, next) => {
   try {
     const { rows } = await db.query(
-      "SELECT id, name, email FROM users WHERE role='staff' ORDER BY name"
+      "SELECT id, name, email, avatar FROM users WHERE role='staff' ORDER BY name"
     )
     res.json(rows)
+  } catch (err) { next(err) }
+})
+
+// PUT /api/users/me/avatar — upload own profile photo (base64)
+router.put('/me/avatar', auth, async (req, res, next) => {
+  try {
+    const { avatar } = req.body
+    if (!avatar || !avatar.startsWith('data:image/')) {
+      return res.status(400).json({ error: 'Invalid image data' })
+    }
+    if (avatar.length > 150000) {
+      return res.status(400).json({ error: 'Image too large — please use a smaller photo' })
+    }
+    const { rows } = await db.query(
+      'UPDATE users SET avatar=$1 WHERE id=$2 RETURNING avatar',
+      [avatar, req.user.id]
+    )
+    res.json({ avatar: rows[0].avatar })
   } catch (err) { next(err) }
 })
 
 router.get('/', auth, requireAdmin, async (req, res, next) => {
   try {
     const { rows } = await db.query(
-      'SELECT id, email, name, role, created_at FROM users ORDER BY created_at'
+      'SELECT id, email, name, role, avatar, created_at FROM users ORDER BY created_at'
     )
     res.json(rows)
   } catch (err) { next(err) }
