@@ -27,15 +27,15 @@ router.get('/', auth, async (req, res, next) => {
 // POST /api/weekly-focus — upsert for current (or specified) week
 router.post('/', auth, async (req, res, next) => {
   try {
-    const { focus, week } = req.body
-    if (!focus?.trim()) return res.status(400).json({ error: 'Focus text is required' })
+    const { focus_text, week } = req.body
+    if (!focus_text?.trim()) return res.status(400).json({ error: 'Focus text is required' })
     const weekStart = week || getMondayOfWeek(new Date())
     const { rows } = await db.query(
-      `INSERT INTO weekly_focus (user_id, week_start, focus, updated_at)
+      `INSERT INTO weekly_focus (user_id, week_start, focus_text, updated_at)
        VALUES ($1,$2,$3,NOW())
-       ON CONFLICT (user_id, week_start) DO UPDATE SET focus=$3, updated_at=NOW()
+       ON CONFLICT (user_id, week_start) DO UPDATE SET focus_text=$3, updated_at=NOW()
        RETURNING *`,
-      [req.user.id, weekStart, focus.trim()]
+      [req.user.id, weekStart, focus_text.trim()]
     )
     res.json(rows[0])
   } catch (err) { next(err) }

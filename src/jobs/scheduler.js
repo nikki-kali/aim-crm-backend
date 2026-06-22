@@ -2,6 +2,7 @@ const cron = require('node-cron')
 const { runAutomationLogic } = require('../services/automations')
 const db = require('../config/db')
 const { sendEmail } = require('../services/email')
+const { getMondayDate } = require('../routes/weeklyTodos')
 
 async function sendScheduledReports(frequency) {
   try {
@@ -65,6 +66,130 @@ async function sendScheduledReports(frequency) {
   }
 }
 
+async function carryOverTodos() {
+  try {
+    const currentWeek = getMondayDate()
+    const nextMonday = new Date(currentWeek + 'T00:00:00Z')
+    nextMonday.setUTCDate(nextMonday.getUTCDate() + 7)
+    const nextWeek = nextMonday.toISOString().split('T')[0]
+
+    // Archive completed, carry over incomplete
+    await db.query(
+      `UPDATE weekly_todos SET archived=true WHERE week_start=$1 AND completed=true`,
+      [currentWeek]
+    )
+
+    const { rows: incomplete } = await db.query(
+      `SELECT * FROM weekly_todos WHERE week_start=$1 AND completed=false AND archived=false`,
+      [currentWeek]
+    )
+
+    for (const todo of incomplete) {
+      await db.query(`
+        INSERT INTO weekly_todos (owner_id, created_by, description, due_date, rock_id, week_start, carried_over)
+        VALUES ($1,$2,$3,$4,$5,$6,true)
+        ON CONFLICT DO NOTHING
+      `, [todo.owner_id, todo.owner_id, todo.description,
+          new Date(nextWeek + 'T00:00:00Z').toISOString().split('T')[0],
+          todo.rock_id, nextWeek])
+      await db.query('UPDATE weekly_todos SET archived=true WHERE id=$1', [todo.id])
+    }
+
+    // Send wrap-up emails
+    const { rows: users } = await db.query("SELECT id, name, email FROM users WHERE role='staff'")
+    for (const user of users) {
+      const { rows: summary } = await db.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE completed=true) AS done,
+          COUNT(*) AS total
+        FROM weekly_todos
+        WHERE owner_id=$1 AND week_start=$2
+      `, [user.id, currentWeek])
+      const { done, total } = summary[0]
+      const carried = incomplete.filter(t => t.owner_id === user.id).length
+
+      const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,sans-serif">
+<div style="max-width:540px;margin:40px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08)">
+  <div style="background:linear-gradient(135deg,#06babe,#207290);padding:24px 32px">
+    <p style="color:rgba(255,255,255,0.8);font-size:12px;margin:0 0 4px">Aim Dental CRM — EOS</p>
+    <h1 style="color:#fff;margin:0;font-size:20px;font-weight:700">Weekly Wrap-Up</h1>
+  </div>
+  <div style="padding:28px 32px">
+    <p style="font-size:16px;color:#111;margin:0 0 16px">Good work this week, ${user.name?.split(' ')[0] || 'there'}!</p>
+    <div style="display:flex;gap:16px;margin-bottom:20px">
+      <div style="flex:1;text-align:center;background:#f0fdf4;border-radius:12px;padding:16px">
+        <p style="margin:0;font-size:28px;font-weight:700;color:#16a34a">${done}</p>
+        <p style="margin:4px 0 0;font-size:12px;color:#6b7280">Completed</p>
+      </div>
+      <div style="flex:1;text-align:center;background:#fff8f0;border-radius:12px;padding:16px">
+        <p style="margin:0;font-size:28px;font-weight:700;color:#d97706">${carried}</p>
+        <p style="margin:4px 0 0;font-size:12px;color:#6b7280">Carried over</p>
+      </div>
+    </div>
+    ${carried > 0 ? `<p style="font-size:13px;color:#6b7280;margin:0 0 20px">${carried} to-do${carried !== 1 ? 's' : ''} moved to next week.</p>` : '<p style="font-size:13px;color:#16a34a;margin:0 0 20px;font-weight:600">All to-dos complete — great week!</p>'}
+    <a href="${process.env.FRONTEND_URL||''}/eos" style="display:inline-block;background:#06babe;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">View Next Week's To-Dos →</a>
+  </div>
+  <div style="background:#f9fafb;padding:14px 32px;font-size:11px;color:#9ca3af;border-top:1px solid #f3f4f6">Aim Dental CRM · EOS System</div>
+</div></body></html>`
+
+      await sendEmail({
+        to: user.email,
+        subject: `Weekly Wrap-Up — ${done}/${total} To-Dos complete`,
+        html,
+      }).catch(console.error)
+    }
+
+    console.log(`[cron] EOS carry-over complete: ${incomplete.length} todos moved to ${nextWeek}`)
+  } catch (err) {
+    console.error('[cron] EOS carry-over error:', err.message)
+  }
+}
+
+async function sendTodoReminders() {
+  try {
+    const weekStart = getMondayDate()
+    const { rows: users } = await db.query("SELECT id, name, email FROM users WHERE role='staff'")
+
+    for (const user of users) {
+      const { rows: todos } = await db.query(
+        `SELECT description, carried_over FROM weekly_todos WHERE owner_id=$1 AND week_start=$2 AND archived=false ORDER BY carried_over DESC, created_at ASC`,
+        [user.id, weekStart]
+      )
+      if (todos.length === 0) continue
+
+      const todoRows = todos.map(t =>
+        `<li style="padding:6px 0;font-size:14px;color:#374151">${t.carried_over ? '↩ ' : ''}${t.description}</li>`
+      ).join('')
+
+      const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,sans-serif">
+<div style="max-width:540px;margin:40px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08)">
+  <div style="background:linear-gradient(135deg,#06babe,#207290);padding:24px 32px">
+    <p style="color:rgba(255,255,255,0.8);font-size:12px;margin:0 0 4px">Aim Dental CRM — EOS</p>
+    <h1 style="color:#fff;margin:0;font-size:20px;font-weight:700">Your To-Dos This Week</h1>
+  </div>
+  <div style="padding:28px 32px">
+    <p style="font-size:15px;color:#111;margin:0 0 16px">Good morning, ${user.name?.split(' ')[0] || 'there'}! Here's your list for the week:</p>
+    <ul style="margin:0;padding:0 0 0 20px;border-left:3px solid #06babe">${todoRows}</ul>
+    <div style="margin-top:24px">
+      <a href="${process.env.FRONTEND_URL||''}/eos" style="display:inline-block;background:#06babe;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Open EOS →</a>
+    </div>
+  </div>
+  <div style="background:#f9fafb;padding:14px 32px;font-size:11px;color:#9ca3af;border-top:1px solid #f3f4f6">Aim Dental CRM · EOS System</div>
+</div></body></html>`
+
+      await sendEmail({
+        to: user.email,
+        subject: `Your ${todos.length} To-Do${todos.length !== 1 ? 's' : ''} This Week`,
+        html,
+      }).catch(console.error)
+    }
+
+    console.log('[cron] EOS Monday To-Do reminders sent')
+  } catch (err) {
+    console.error('[cron] EOS To-Do reminders error:', err.message)
+  }
+}
+
 function startScheduler() {
   // Daily at 8:00 AM — cold leads + case due reminders + daily reports
   cron.schedule('0 8 * * *', async () => {
@@ -75,13 +200,20 @@ function startScheduler() {
     await sendScheduledReports('daily')
   })
 
-  // Every Monday at 9:00 AM — lost recovery + win streak + weekly reports
+  // Every Monday at 9:00 AM — lost recovery + win streak + weekly reports + EOS To-Do reminders
   cron.schedule('0 9 * * 1', async () => {
     console.log('[cron] Running lost_recovery check')
     await runAutomationLogic('lost_recovery').catch(console.error)
     console.log('[cron] Running win_streak check')
     await runAutomationLogic('win_streak').catch(console.error)
     await sendScheduledReports('weekly')
+    await sendTodoReminders().catch(console.error)
+  })
+
+  // Every Friday at 5:00 PM — EOS To-Do carry-over + weekly wrap-up emails
+  cron.schedule('0 17 * * 5', async () => {
+    console.log('[cron] Running EOS Friday todo carry-over')
+    await carryOverTodos().catch(console.error)
   })
 
   // 1st of every month at 8:00 AM — monthly reports
