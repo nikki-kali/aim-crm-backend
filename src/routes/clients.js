@@ -12,6 +12,9 @@ router.get('/', auth, async (req, res, next) => {
     if (req.user.role === 'staff') {
       query += ` WHERE c.assigned_to = $1`
       params.push(req.user.id)
+    } else if (req.query.rep) {
+      query += ` WHERE c.assigned_to = $1`
+      params.push(req.query.rep)
     }
     query += ' ORDER BY c.total_revenue DESC'
     const { rows } = await db.query(query, params)

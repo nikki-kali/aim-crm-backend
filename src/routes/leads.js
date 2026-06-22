@@ -52,9 +52,12 @@ router.get('/', auth, async (req, res, next) => {
     let query = `SELECT l.*, u.name AS assigned_to_name FROM leads l LEFT JOIN users u ON u.id = l.assigned_to WHERE l.is_archived = $1`
     const params = [archived === 'true']
 
-    // Staff only see their own leads
+    // Staff only see their own leads; admin can filter by a specific rep
     if (req.user.role === 'staff') {
       params.push(req.user.id)
+      query += ` AND l.assigned_to = $${params.length}`
+    } else if (req.query.rep) {
+      params.push(req.query.rep)
       query += ` AND l.assigned_to = $${params.length}`
     }
 
