@@ -374,6 +374,177 @@ router.get('/operations', auth, requireAdmin, async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+// GET /api/reports/my-summary — rep-scoped KPIs and recent leads
+router.get('/my-summary', auth, async (req, res, next) => {
+  try {
+    const repId = req.user.id
+    const now = new Date()
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+    const weekStart = (() => {
+      const d = new Date(now)
+      const day = d.getDay()
+      d.setDate(d.getDate() - (day === 0 ? 6 : day - 1))
+      d.setHours(0, 0, 0, 0)
+      return d.toISOString()
+    })()
+
+    const [weekRes, monthRes, allTimeRes, recentLeads] = await Promise.all([
+      db.query(
+        `SELECT
+          COUNT(*) AS leads_created,
+          COUNT(*) FILTER (WHERE status='Won') AS wins,
+          COUNT(*) FILTER (WHERE status IN ('Proposal','Won')) AS proposals,
+          COUNT(*) FILTER (WHERE status IN ('Contacted','Proposal','Won')) AS contacted
+         FROM leads WHERE assigned_to=$1 AND created_at >= $2`,
+        [repId, weekStart]
+      ),
+      db.query(
+        `SELECT
+          COUNT(*) AS leads_created,
+          COUNT(*) FILTER (WHERE status='Won') AS wins,
+          COUNT(*) FILTER (WHERE status IN ('Proposal','Won')) AS proposals,
+          COUNT(*) FILTER (WHERE status IN ('Contacted','Proposal','Won')) AS contacted,
+          COALESCE(SUM(estimated_value) FILTER (WHERE status='Won'), 0) AS revenue
+         FROM leads WHERE assigned_to=$1 AND created_at >= $2`,
+        [repId, monthStart]
+      ),
+      db.query(
+        `SELECT
+          COUNT(*) FILTER (WHERE status NOT IN ('Won','Lost') AND is_archived=false) AS active_leads,
+          COUNT(*) AS total_leads,
+          COUNT(*) FILTER (WHERE status='Won') AS total_wins,
+          COUNT(*) FILTER (WHERE status='Lost') AS total_lost,
+          COALESCE(SUM(estimated_value) FILTER (WHERE status='Won'), 0) AS total_revenue
+         FROM leads WHERE assigned_to=$1`,
+        [repId]
+      ),
+      db.query(
+        `SELECT doctor_name, clinic_name, status, estimated_value, created_at
+         FROM leads WHERE assigned_to=$1 AND is_archived=false
+         ORDER BY created_at DESC LIMIT 10`,
+        [repId]
+      ),
+    ])
+
+    const week = weekRes.rows[0]
+    const month = monthRes.rows[0]
+    const allTime = allTimeRes.rows[0]
+    const mTotal = Number(month.leads_created)
+    const mWon = Number(month.wins)
+    const aTotal = Number(allTime.total_leads)
+    const aWon = Number(allTime.total_wins)
+
+    res.json({
+      week: {
+        leads_created: Number(week.leads_created),
+        wins: Number(week.wins),
+        proposals: Number(week.proposals),
+        contacted: Number(week.contacted),
+      },
+      month: {
+        leads_created: mTotal,
+        wins: mWon,
+        proposals: Number(month.proposals),
+        contacted: Number(month.contacted),
+        revenue: Number(month.revenue),
+        conversion_rate: mTotal > 0 ? Math.round(mWon / mTotal * 100) : 0,
+      },
+      allTime: {
+        active_leads: Number(allTime.active_leads),
+        total_leads: aTotal,
+        total_wins: aWon,
+        total_lost: Number(allTime.total_lost),
+        total_revenue: Number(allTime.total_revenue),
+        conversion_rate: aTotal > 0 ? Math.round(aWon / aTotal * 100) : 0,
+      },
+      recent_leads: recentLeads.rows,
+      rep: { id: req.user.id, name: req.user.name, email: req.user.email },
+    })
+  } catch (err) { next(err) }
+})
+
+// GET /api/reports/my-summary/csv — rep leads as downloadable CSV
+router.get('/my-summary/csv', auth, async (req, res, next) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT doctor_name, clinic_name, brand, case_interest, status, estimated_value, intent_level, lead_source, created_at
+       FROM leads WHERE assigned_to=$1 AND is_archived=false ORDER BY created_at DESC`,
+      [req.user.id]
+    )
+    const headers = ['Doctor Name', 'Clinic', 'Brand', 'Case Interest', 'Status', 'Value', 'Intent', 'Source', 'Created']
+    const csvLines = [
+      headers.join(','),
+      ...rows.map(r => [
+        `"${(r.doctor_name || '').replace(/"/g, '""')}"`,
+        `"${(r.clinic_name || '').replace(/"/g, '""')}"`,
+        r.brand || '',
+        r.case_interest || '',
+        r.status || '',
+        r.estimated_value || 0,
+        r.intent_level || '',
+        r.lead_source || '',
+        new Date(r.created_at).toLocaleDateString('en-US'),
+      ].join(','))
+    ]
+    const safeName = (req.user.name || req.user.id).replace(/\s+/g, '-')
+    res.setHeader('Content-Type', 'text/csv')
+    res.setHeader('Content-Disposition', `attachment; filename="my-leads-${safeName}.csv"`)
+    res.send(csvLines.join('\n'))
+  } catch (err) { next(err) }
+})
+
+// GET /api/reports/team-comparison — admin: side-by-side rep stats by period
+router.get('/team-comparison', auth, requireAdmin, async (req, res, next) => {
+  try {
+    const { rows: reps } = await db.query(
+      "SELECT id, name, email FROM users WHERE role='staff' ORDER BY name"
+    )
+    const now = new Date()
+
+    const weekStart = (() => {
+      const d = new Date(now)
+      const day = d.getDay()
+      d.setDate(d.getDate() - (day === 0 ? 6 : day - 1))
+      d.setHours(0, 0, 0, 0)
+      return d
+    })()
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const quarterStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1)
+
+    const getStats = async (repId, start) => {
+      const { rows: [r] } = await db.query(
+        `SELECT
+          COUNT(*) AS leads_assigned,
+          COUNT(*) FILTER (WHERE status='Won') AS leads_won,
+          COUNT(*) FILTER (WHERE status IN ('Proposal','Won')) AS proposals_sent,
+          COUNT(*) FILTER (WHERE status IN ('Contacted','Proposal','Won')) AS leads_contacted
+         FROM leads WHERE assigned_to=$1 AND created_at >= $2`,
+        [repId, start]
+      )
+      const total = Number(r.leads_assigned)
+      const won = Number(r.leads_won)
+      return {
+        leads_assigned: total,
+        leads_won: won,
+        proposals_sent: Number(r.proposals_sent),
+        leads_contacted: Number(r.leads_contacted),
+        conversion_rate: total > 0 ? Math.round(won / total * 100) : 0,
+      }
+    }
+
+    const result = await Promise.all(reps.map(async (rep) => {
+      const [week, month, quarter] = await Promise.all([
+        getStats(rep.id, weekStart),
+        getStats(rep.id, monthStart),
+        getStats(rep.id, quarterStart),
+      ])
+      return { rep, week, month, quarter }
+    }))
+
+    res.json(result)
+  } catch (err) { next(err) }
+})
+
 // GET /api/reports/import-history
 router.get('/import-history', auth, requireAdmin, async (req, res, next) => {
   try {

@@ -6,6 +6,16 @@ const requireAdmin = require('../middleware/requireAdmin')
 
 const router = express.Router()
 
+// GET /api/users/reps — staff users only, available to all authenticated users (for assign dropdowns)
+router.get('/reps', auth, async (req, res, next) => {
+  try {
+    const { rows } = await db.query(
+      "SELECT id, name, email FROM users WHERE role='staff' ORDER BY name"
+    )
+    res.json(rows)
+  } catch (err) { next(err) }
+})
+
 router.get('/', auth, requireAdmin, async (req, res, next) => {
   try {
     const { rows } = await db.query(

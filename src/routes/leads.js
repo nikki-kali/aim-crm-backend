@@ -52,13 +52,19 @@ router.get('/', auth, async (req, res, next) => {
     let query = `SELECT l.*, u.name AS assigned_to_name FROM leads l LEFT JOIN users u ON u.id = l.assigned_to WHERE l.is_archived = $1`
     const params = [archived === 'true']
 
-    // Staff only see their own leads; admin can filter by a specific rep
-    if (req.user.role === 'staff') {
+    // ?view=mine|all|unassigned; default: staff→mine, admin→all
+    const view = req.query.view || (req.user.role === 'staff' ? 'mine' : 'all')
+    if (view === 'mine') {
       params.push(req.user.id)
       query += ` AND l.assigned_to = $${params.length}`
-    } else if (req.query.rep) {
-      params.push(req.query.rep)
-      query += ` AND l.assigned_to = $${params.length}`
+    } else if (view === 'unassigned') {
+      query += ` AND l.assigned_to IS NULL`
+    } else {
+      // 'all' view — admin can still narrow by ?rep=
+      if (req.query.rep) {
+        params.push(req.query.rep)
+        query += ` AND l.assigned_to = $${params.length}`
+      }
     }
 
     if (brand && brand !== 'All') { params.push(brand); query += ` AND l.brand = $${params.length}` }
@@ -129,6 +135,31 @@ router.put('/:id', auth, async (req, res, next) => {
 
     const { rows } = await db.query(`UPDATE leads SET ${set} ${where} RETURNING *`, params)
     if (!rows[0]) return res.status(404).json({ error: 'Lead not found' })
+    res.json(rows[0])
+  } catch (err) { next(err) }
+})
+
+// PUT /api/leads/:id/assign — any authenticated user can reassign any lead
+router.put('/:id/assign', auth, async (req, res, next) => {
+  try {
+    const { assigned_to } = req.body
+    const { rows } = await db.query(
+      'UPDATE leads SET assigned_to=$1, updated_at=NOW() WHERE id=$2 RETURNING *',
+      [assigned_to || null, req.params.id]
+    )
+    if (!rows[0]) return res.status(404).json({ error: 'Lead not found' })
+
+    let desc = 'Lead unassigned'
+    if (assigned_to) {
+      const { rows: uRows } = await db.query('SELECT name FROM users WHERE id=$1', [assigned_to])
+      desc = `Lead assigned to ${uRows[0]?.name || assigned_to}`
+    }
+    await db.query(
+      `INSERT INTO activities (entity_type, entity_id, type, description, created_by)
+       VALUES ('lead',$1,'assigned',$2,$3)`,
+      [req.params.id, desc, req.user.id]
+    ).catch(() => {})
+
     res.json(rows[0])
   } catch (err) { next(err) }
 })
