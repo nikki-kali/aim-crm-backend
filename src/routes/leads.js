@@ -100,30 +100,31 @@ router.put('/:id', auth, async (req, res, next) => {
     const estimatedValue = Number(data.estimated_value) || 0
     const aiScore = scoreFromLead({ ...data, estimated_value: estimatedValue })
 
-    // Staff can only update their own leads; admin can also reassign
-    let assignClause = ''
-    const baseParams = [data.doctor_name, data.clinic_name || '', data.brand || 'Aim Dental',
-       data.case_interest || '', data.phone || '', data.email || '', data.lead_source || '',
-       estimatedValue, data.status || 'Lead', data.intent_level || 'Medium',
-       data.notes || '', aiScore, req.params.id]
+    const params = [
+      data.doctor_name, data.clinic_name || '', data.brand || 'Aim Dental',
+      data.case_interest || '', data.phone || '', data.email || '', data.lead_source || '',
+      estimatedValue, data.status || 'Lead', data.intent_level || 'Medium',
+      data.notes || '', aiScore,
+    ] // $1–$12
 
-    let queryStr = `UPDATE leads SET doctor_name=$1, clinic_name=$2, brand=$3, case_interest=$4,
-       phone=$5, email=$6, lead_source=$7, referral_source=$7, estimated_value=$8,
-       status=$9, intent_level=$10, notes=$11, ai_score=$12, updated_at=NOW()`
+    let set = `doctor_name=$1, clinic_name=$2, brand=$3, case_interest=$4,
+      phone=$5, email=$6, lead_source=$7, referral_source=$7, estimated_value=$8,
+      status=$9, intent_level=$10, notes=$11, ai_score=$12, updated_at=NOW()`
 
-    if (req.user.role !== 'staff' && data.assigned_to !== undefined) {
-      baseParams.splice(baseParams.length - 1, 0, data.assigned_to)
-      queryStr += `, assigned_to=$${baseParams.length - 1}`
+    if (req.user.role === 'admin' && data.assigned_to !== undefined) {
+      params.push(data.assigned_to)
+      set += `, assigned_to=$${params.length}`
     }
+
+    params.push(req.params.id)
+    let where = `WHERE id=$${params.length}`
 
     if (req.user.role === 'staff') {
-      queryStr += ` WHERE id=$13 AND assigned_to=$14 RETURNING *`
-      baseParams.push(req.user.id)
-    } else {
-      queryStr += ` WHERE id=$13 RETURNING *`
+      params.push(req.user.id)
+      where += ` AND assigned_to=$${params.length}`
     }
 
-    const { rows } = await db.query(queryStr, baseParams)
+    const { rows } = await db.query(`UPDATE leads SET ${set} ${where} RETURNING *`, params)
     if (!rows[0]) return res.status(404).json({ error: 'Lead not found' })
     res.json(rows[0])
   } catch (err) { next(err) }
