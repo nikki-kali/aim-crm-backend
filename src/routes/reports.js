@@ -374,21 +374,23 @@ router.get('/operations', auth, requireAdmin, async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
-// GET /api/reports/my-summary — rep-scoped KPIs and recent leads
+// GET /api/reports/my-summary — rep-scoped KPIs, recent leads, and EOS snapshot
 router.get('/my-summary', auth, async (req, res, next) => {
   try {
     const repId = req.user.id
     const now = new Date()
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-    const weekStart = (() => {
+    const weekStartDate = (() => {
       const d = new Date(now)
       const day = d.getDay()
       d.setDate(d.getDate() - (day === 0 ? 6 : day - 1))
       d.setHours(0, 0, 0, 0)
-      return d.toISOString()
+      return d
     })()
+    const weekStartISO = weekStartDate.toISOString()
+    const weekStartSQL = weekStartDate.toISOString().split('T')[0]
 
-    const [weekRes, monthRes, allTimeRes, recentLeads] = await Promise.all([
+    const [weekRes, monthRes, allTimeRes, recentLeads, rocksRes, todosRes, issuesRes] = await Promise.all([
       db.query(
         `SELECT
           COUNT(*) AS leads_created,
@@ -396,7 +398,7 @@ router.get('/my-summary', auth, async (req, res, next) => {
           COUNT(*) FILTER (WHERE status IN ('Proposal','Won')) AS proposals,
           COUNT(*) FILTER (WHERE status IN ('Contacted','Proposal','Won')) AS contacted
          FROM leads WHERE assigned_to=$1 AND created_at >= $2`,
-        [repId, weekStart]
+        [repId, weekStartISO]
       ),
       db.query(
         `SELECT
@@ -424,6 +426,19 @@ router.get('/my-summary', auth, async (req, res, next) => {
          ORDER BY created_at DESC LIMIT 10`,
         [repId]
       ),
+      db.query(
+        `SELECT status, COUNT(*) AS count FROM rocks WHERE owner_id=$1 GROUP BY status`,
+        [repId]
+      ).catch(() => ({ rows: [] })),
+      db.query(
+        `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE completed=true) AS done
+         FROM weekly_todos WHERE owner_id=$1 AND week_start=$2 AND archived=false`,
+        [repId, weekStartSQL]
+      ).catch(() => ({ rows: [{ total: 0, done: 0 }] })),
+      db.query(
+        `SELECT COUNT(*) AS open FROM issues WHERE raised_by=$1 AND status != 'Solved'`,
+        [repId]
+      ).catch(() => ({ rows: [{ open: 0 }] })),
     ])
 
     const week = weekRes.rows[0]
@@ -433,6 +448,10 @@ router.get('/my-summary', auth, async (req, res, next) => {
     const mWon = Number(month.wins)
     const aTotal = Number(allTime.total_leads)
     const aWon = Number(allTime.total_wins)
+
+    const rocksByStatus = {}
+    rocksRes.rows.forEach(r => { rocksByStatus[r.status] = Number(r.count) })
+    const todosRow = todosRes.rows[0] || { total: 0, done: 0 }
 
     res.json({
       week: {
@@ -458,8 +477,176 @@ router.get('/my-summary', auth, async (req, res, next) => {
         conversion_rate: aTotal > 0 ? Math.round(aWon / aTotal * 100) : 0,
       },
       recent_leads: recentLeads.rows,
+      eos: {
+        rocks: {
+          on_track: rocksByStatus['On Track'] || 0,
+          off_track: rocksByStatus['Off Track'] || 0,
+          done: rocksByStatus['Done'] || 0,
+        },
+        todos: { done: Number(todosRow.done), total: Number(todosRow.total) },
+        open_issues: Number(issuesRes.rows[0]?.open || 0),
+      },
       rep: { id: req.user.id, name: req.user.name, email: req.user.email },
     })
+  } catch (err) { next(err) }
+})
+
+// POST /api/reports/my-summary/email — email the rep's own report to themselves
+router.post('/my-summary/email', auth, async (req, res, next) => {
+  try {
+    const repId = req.user.id
+    const repName = req.user.name || req.user.email
+    const repEmail = req.user.email
+    const now = new Date()
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+    const weekStartDate = (() => {
+      const d = new Date(now)
+      const day = d.getDay()
+      d.setDate(d.getDate() - (day === 0 ? 6 : day - 1))
+      d.setHours(0, 0, 0, 0)
+      return d
+    })()
+    const weekStartISO = weekStartDate.toISOString()
+    const weekStartSQL = weekStartDate.toISOString().split('T')[0]
+
+    const [weekRes, monthRes, allTimeRes, rocksRes, todosRes, issuesRes] = await Promise.all([
+      db.query(
+        `SELECT COUNT(*) AS leads_created, COUNT(*) FILTER (WHERE status='Won') AS wins,
+          COUNT(*) FILTER (WHERE status IN ('Proposal','Won')) AS proposals,
+          COUNT(*) FILTER (WHERE status IN ('Contacted','Proposal','Won')) AS contacted
+         FROM leads WHERE assigned_to=$1 AND created_at >= $2`,
+        [repId, weekStartISO]
+      ),
+      db.query(
+        `SELECT COUNT(*) AS leads_created, COUNT(*) FILTER (WHERE status='Won') AS wins,
+          COUNT(*) FILTER (WHERE status IN ('Proposal','Won')) AS proposals,
+          COALESCE(SUM(estimated_value) FILTER (WHERE status='Won'), 0) AS revenue
+         FROM leads WHERE assigned_to=$1 AND created_at >= $2`,
+        [repId, monthStart]
+      ),
+      db.query(
+        `SELECT COUNT(*) FILTER (WHERE status NOT IN ('Won','Lost') AND is_archived=false) AS active_leads,
+          COUNT(*) AS total_leads, COUNT(*) FILTER (WHERE status='Won') AS total_wins,
+          COALESCE(SUM(estimated_value) FILTER (WHERE status='Won'), 0) AS total_revenue
+         FROM leads WHERE assigned_to=$1`,
+        [repId]
+      ),
+      db.query(`SELECT status, COUNT(*) AS count FROM rocks WHERE owner_id=$1 GROUP BY status`, [repId]).catch(() => ({ rows: [] })),
+      db.query(`SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE completed=true) AS done FROM weekly_todos WHERE owner_id=$1 AND week_start=$2 AND archived=false`, [repId, weekStartSQL]).catch(() => ({ rows: [{ total: 0, done: 0 }] })),
+      db.query(`SELECT COUNT(*) AS open FROM issues WHERE raised_by=$1 AND status != 'Solved'`, [repId]).catch(() => ({ rows: [{ open: 0 }] })),
+    ])
+
+    const w = weekRes.rows[0]
+    const m = monthRes.rows[0]
+    const a = allTimeRes.rows[0]
+    const mTotal = Number(m.leads_created)
+    const mWon = Number(m.wins)
+    const aTotal = Number(a.total_leads)
+    const aWon = Number(a.total_wins)
+
+    const rocksByStatus = {}
+    rocksRes.rows.forEach(r => { rocksByStatus[r.status] = Number(r.count) })
+    const todosRow = todosRes.rows[0] || { total: 0, done: 0 }
+    const onTrack = rocksByStatus['On Track'] || 0
+    const offTrack = rocksByStatus['Off Track'] || 0
+    const doneRocks = rocksByStatus['Done'] || 0
+    const totalRocks = onTrack + offTrack + doneRocks
+    const openIssues = Number(issuesRes.rows[0]?.open || 0)
+    const todosDone = Number(todosRow.done)
+    const todosTotal = Number(todosRow.total)
+
+    const monthLabel = now.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+    const dateLabel = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+
+    const kpiCell = (label, val, color = '#111') => `
+      <div style="flex:1;background:#f9fafb;border-radius:10px;padding:14px;text-align:center;margin:0 4px">
+        <p style="margin:0;font-size:20px;font-weight:700;color:${color}">${val}</p>
+        <p style="margin:4px 0 0;font-size:11px;color:#9ca3af">${label}</p>
+      </div>`
+
+    const badge = (text, color) =>
+      `<span style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600;background:${color}20;color:${color}">${text}</span>`
+
+    const html = `<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+<div style="max-width:640px;margin:40px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08)">
+
+  <div style="background:linear-gradient(135deg,#06babe,#207290);padding:28px 32px">
+    <p style="color:rgba(255,255,255,0.8);font-size:13px;margin:0 0 4px">Aim Dental Laboratory</p>
+    <h1 style="color:#fff;margin:0;font-size:22px;font-weight:700">My Performance Report</h1>
+    <p style="color:rgba(255,255,255,0.75);margin:6px 0 0;font-size:14px">${repName} &nbsp;·&nbsp; ${dateLabel}</p>
+  </div>
+
+  <div style="padding:28px 32px">
+
+    <h2 style="color:#111;font-size:16px;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #06babe">This Week</h2>
+    <div style="display:flex;gap:0;margin-bottom:28px">
+      ${kpiCell('Leads Created', Number(w.leads_created))}
+      ${kpiCell('Contacted', Number(w.contacted))}
+      ${kpiCell('Proposals', Number(w.proposals))}
+      ${kpiCell('Wins', Number(w.wins), '#16a34a')}
+    </div>
+
+    <h2 style="color:#111;font-size:16px;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #06babe">This Month — ${monthLabel}</h2>
+    <div style="display:flex;gap:0;margin-bottom:28px">
+      ${kpiCell('Leads Created', mTotal)}
+      ${kpiCell('Wins', mWon, '#16a34a')}
+      ${kpiCell('Revenue', '$' + Number(m.revenue).toLocaleString(), '#06babe')}
+      ${kpiCell('Conversion', mTotal > 0 ? Math.round(mWon / mTotal * 100) + '%' : '—', mTotal > 0 && mWon / mTotal >= 0.5 ? '#16a34a' : '#f59e0b')}
+    </div>
+
+    <h2 style="color:#111;font-size:16px;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #06babe">All-Time</h2>
+    <div style="display:flex;gap:0;margin-bottom:28px">
+      ${kpiCell('Active Leads', Number(a.active_leads))}
+      ${kpiCell('Total Leads', aTotal)}
+      ${kpiCell('Total Wins', aWon, '#16a34a')}
+      ${kpiCell('Revenue', '$' + Number(a.total_revenue).toLocaleString(), '#06babe')}
+    </div>
+
+    <h2 style="color:#111;font-size:16px;margin:0 0 16px;padding-bottom:8px;border-bottom:2px solid #06babe">EOS Track</h2>
+    <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:28px">
+      <thead><tr style="background:#f9fafb">
+        <th style="text-align:left;padding:8px 14px;color:#6b7280;font-weight:600;font-size:12px">Area</th>
+        <th style="text-align:left;padding:8px 14px;color:#6b7280;font-weight:600;font-size:12px">Status</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td style="padding:10px 14px;border-bottom:1px solid #f3f4f6;font-weight:500">Rocks (90-day)</td>
+          <td style="padding:10px 14px;border-bottom:1px solid #f3f4f6">
+            ${totalRocks === 0
+              ? '<span style="color:#9ca3af;font-size:13px">No rocks assigned</span>'
+              : badge(onTrack + ' On Track', '#16a34a') +
+                (offTrack > 0 ? ' ' + badge(offTrack + ' Off Track', '#ef4444') : '') +
+                (doneRocks > 0 ? ' ' + badge(doneRocks + ' Done', '#6b7280') : '')}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:10px 14px;border-bottom:1px solid #f3f4f6;font-weight:500">Weekly To-Dos</td>
+          <td style="padding:10px 14px;border-bottom:1px solid #f3f4f6">
+            ${badge(todosDone + ' / ' + todosTotal + ' done', todosDone === todosTotal && todosTotal > 0 ? '#16a34a' : '#06babe')}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:10px 14px;font-weight:500">Open Issues</td>
+          <td style="padding:10px 14px">${badge(openIssues + ' open', openIssues > 0 ? '#f59e0b' : '#16a34a')}</td>
+        </tr>
+      </tbody>
+    </table>
+
+  </div>
+
+  <div style="padding:0 32px 28px">
+    <a href="${process.env.FRONTEND_URL || '#'}/reports" style="display:inline-block;background:#06babe;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:600;font-size:14px">Open My Reports →</a>
+  </div>
+
+  <div style="background:#f9fafb;padding:16px 32px;font-size:12px;color:#9ca3af;border-top:1px solid #f3f4f6">
+    Aim Dental Laboratory CRM &nbsp;·&nbsp; Personal report for ${repName}
+  </div>
+</div>
+</body></html>`
+
+    await sendEmail({ to: repEmail, subject: `My Performance Report — ${monthLabel}`, html })
+    res.json({ success: true, message: `Report sent to ${repEmail}` })
   } catch (err) { next(err) }
 })
 
