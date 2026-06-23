@@ -12,12 +12,12 @@ router.post('/import', auth, async (req, res, next) => {
     const { rows, filename, assigned_to } = req.body
     if (!Array.isArray(rows) || rows.length === 0) return res.status(400).json({ error: 'No rows provided' })
 
-    // Staff always import to themselves; admin can specify a target user
     const assignedTo = req.user.role === 'staff' ? req.user.id : (assigned_to || req.user.id)
 
     const { rows: existing } = await db.query(`SELECT email FROM leads WHERE email IS NOT NULL AND email != ''`)
     const existingEmails = new Set(existing.map(r => r.email.toLowerCase().trim()))
     const now = new Date().toISOString()
+
     const toInsert = []
     let skipped = 0
     for (const row of rows) {
@@ -25,20 +25,44 @@ router.post('/import', auth, async (req, res, next) => {
       const val = Number(row.estimated_value) || 0
       toInsert.push({ ...row, estimated_value: val, ai_score: scoreFromLead({ ...row, estimated_value: val }) })
     }
+
     let added = 0
-    for (const row of toInsert) {
+    // Batch INSERT in chunks of 500 to stay within pg parameter limits
+    const CHUNK = 500
+    const COLS = 14
+    for (let i = 0; i < toInsert.length; i += CHUNK) {
+      const chunk = toInsert.slice(i, i + CHUNK)
+      const values = []
+      const placeholders = chunk.map((row, j) => {
+        const base = j * COLS
+        values.push(
+          row.doctor_name,
+          row.clinic_name || '',
+          row.brand || 'Aim Dental',
+          row.case_interest || '',
+          row.phone || '',
+          row.email || '',
+          row.lead_source || '',
+          row.estimated_value,
+          row.notes || '',
+          row.status || 'Lead',
+          row.intent_level || 'Medium',
+          row.ai_score,
+          assignedTo,
+          now
+        )
+        return `($${base+1},$${base+2},$${base+3},$${base+4},$${base+5},$${base+6},$${base+7},$${base+8},$${base+9},$${base+10},$${base+11},$${base+12},$${base+13},$${base+14},$${base+14},$${base+14})`
+      })
       await db.query(
         `INSERT INTO leads (doctor_name, clinic_name, brand, case_interest, phone, email,
          referral_source, estimated_value, notes, status, intent_level, ai_score,
          assigned_to, last_contacted_at, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14,$14)`,
-        [row.doctor_name, row.clinic_name || '', row.brand || 'Aim Dental', row.case_interest || '',
-         row.phone || '', row.email || '', row.lead_source || '', row.estimated_value,
-         row.notes || '', row.status || 'Lead', row.intent_level || 'Medium', row.ai_score,
-         assignedTo, now]
+         VALUES ${placeholders.join(',')}`,
+        values
       )
-      added++
+      added += chunk.length
     }
+
     await db.query(`INSERT INTO import_history (filename, added, skipped, imported_by) VALUES ($1,$2,$3,$4)`,
       [filename || 'unknown.csv', added, skipped, req.user.id]).catch(() => {})
     res.json({ added, skipped })
