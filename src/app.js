@@ -20,6 +20,7 @@ const { router: weeklyTodoRoutes } = require('./routes/weeklyTodos')
 const rockRoutes = require('./routes/rocks')
 const issueRoutes = require('./routes/issues')
 const weeklyFocusRoutes = require('./routes/weeklyFocus')
+const eosSuggestionsRoutes = require('./routes/eosSuggestions')
 
 const app = express()
 
@@ -50,6 +51,7 @@ app.use('/api/rocks',        rockRoutes)
 app.use('/api/todos',        weeklyTodoRoutes)
 app.use('/api/issues',       issueRoutes)
 app.use('/api/weekly-focus', weeklyFocusRoutes)
+app.use('/api/eos',          eosSuggestionsRoutes)
 
 app.use(errorHandler)
 
