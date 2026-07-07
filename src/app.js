@@ -10,6 +10,7 @@ const alertRoutes = require('./routes/alerts')
 const automationRoutes = require('./routes/automations')
 const reportRoutes = require('./routes/reports')
 const intakeRoutes = require('./routes/intake')
+const webLeadRoutes = require('./routes/webLeads')
 const userRoutes = require('./routes/users')
 const clinicRoutes = require('./routes/clinics')
 const activityRoutes = require('./routes/activities')
@@ -24,6 +25,20 @@ const eosSuggestionsRoutes = require('./routes/eosSuggestions')
 const feedbackRoutes = require('./routes/feedback')
 
 const app = express()
+
+// Render sits behind a reverse proxy; without this, req.ip returns the
+// proxy's address for every request, which would break the web-leads
+// rate limiter (every client would look like the same IP).
+app.set('trust proxy', 1)
+
+// Mounted before the global CORS policy below, and fully self-contained
+// (own cors() + express.json() inside webLeads.js). cors() answers OPTIONS
+// preflight requests by ending the response directly rather than calling
+// next(), so if this were mounted after the global cors() below, that
+// restrictive policy (CRM-frontend-only) would answer every preflight for
+// this path first and this route's own permissive cors() would never run —
+// silently breaking it for any browser origin other than the CRM frontend.
+app.use('/api/web-leads', webLeadRoutes) // public — marketing website Contact/Scanner forms
 
 // FRONTEND_URL supports a comma-separated list so both the stable Vercel
 // domain and a custom domain can be allowed at once (e.g. while DNS for a
