@@ -11,6 +11,7 @@ const automationRoutes = require('./routes/automations')
 const reportRoutes = require('./routes/reports')
 const intakeRoutes = require('./routes/intake')
 const webLeadRoutes = require('./routes/webLeads')
+const implantIntakeRoutes = require('./routes/implantIntake')
 const userRoutes = require('./routes/users')
 const clinicRoutes = require('./routes/clinics')
 const activityRoutes = require('./routes/activities')
@@ -39,6 +40,7 @@ app.set('trust proxy', 1)
 // this path first and this route's own permissive cors() would never run —
 // silently breaking it for any browser origin other than the CRM frontend.
 app.use('/api/web-leads', webLeadRoutes) // public — marketing website Contact/Scanner forms
+app.use('/api/implant-intake', implantIntakeRoutes) // public — Implant Case Intake Protocol submissions
 
 // FRONTEND_URL supports a comma-separated list so both the stable Vercel
 // domain and a custom domain can be allowed at once (e.g. while DNS for a
