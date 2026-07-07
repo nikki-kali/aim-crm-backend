@@ -112,12 +112,21 @@ router.post(
         ]
       )
 
+      // Contact and Scanner Program submissions go to different inboxes —
+      // configurable independently since they've already diverged once
+      // (Contact routed to media@ "for now" while Scanner Program stayed on
+      // the original WEB_LEADS_EMAIL/digital@ default).
+      const recipient =
+        formType === 'scanner-program'
+          ? process.env.WEB_LEADS_EMAIL || 'digital@aimdentallab.com'
+          : process.env.CONTACT_FORM_EMAIL || 'media@aimdentallab.com'
+
       // Email notification is best-effort — a lead that's saved but doesn't
       // trigger an email is recoverable (it's in the CRM); failing the whole
       // request over a flaky email send would lose the submission entirely.
       try {
         await sendEmail({
-          to: process.env.WEB_LEADS_EMAIL || 'digital@aimdentallab.com',
+          to: recipient,
           subject:
             formType === 'scanner-program'
               ? `Scanner Program request — ${name.trim()}`
