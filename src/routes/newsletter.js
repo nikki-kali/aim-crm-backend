@@ -2,6 +2,7 @@ const express = require('express')
 const cors = require('cors')
 const db = require('../config/db')
 const { sendEmail } = require('../services/email')
+const { upsertSubscriberRow } = require('../services/sheets')
 const rateLimiter = require('../middleware/rateLimiter')
 
 const router = express.Router()
@@ -43,6 +44,42 @@ router.post(
 
       const alreadySubscribed = rows.length === 0
 
+      // Brevo sync is best-effort and runs regardless of alreadySubscribed —
+      // Brevo's own upsert (updateEnabled: true) is a harmless no-op if the
+      // contact is already there, and this self-heals anyone who was only
+      // ever captured in the table before this sync existed. Brevo is the
+      // system of record for actual subscribe/unsubscribe state (compliant
+      // unsubscribe links once newsletters are sent through its campaign
+      // tool) — this table stays as a redundant record, not the source of truth.
+      if (process.env.BREVO_API_KEY && process.env.BREVO_LIST_ID) {
+        try {
+          await fetch('https://api.brevo.com/v3/contacts', {
+            method: 'POST',
+            headers: {
+              'api-key': process.env.BREVO_API_KEY,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              email: normalizedEmail,
+              listIds: [Number(process.env.BREVO_LIST_ID)],
+              updateEnabled: true,
+              attributes: { SOURCE: source || 'website' },
+            }),
+          })
+        } catch (brevoErr) {
+          console.error('newsletter: Brevo sync failed', brevoErr)
+        }
+      }
+
+      // Sheet sync is also best-effort — same reasoning as the Brevo sync
+      // above, and skips silently (see upsertSubscriberRow) if the sheet
+      // isn't configured yet.
+      try {
+        await upsertSubscriberRow({ email: normalizedEmail, status: 'Subscribed', source })
+      } catch (sheetErr) {
+        console.error('newsletter: sheet sync failed', sheetErr)
+      }
+
       // Notification email is best-effort — a subscriber that's saved but
       // doesn't trigger a notification is still fully captured in the table.
       if (!alreadySubscribed) {
@@ -63,5 +100,34 @@ router.post(
     }
   }
 )
+
+// POST /api/newsletter/webhook — called by Brevo (Contacts -> Automation ->
+// Webhooks, "Contact unsubscribed" event) once newsletters are actually sent
+// through Brevo's campaign tool. Protected by a shared-secret query param
+// since Brevo doesn't sign these payloads — set the webhook URL in Brevo's
+// dashboard to include ?token=<BREVO_WEBHOOK_SECRET>.
+//
+// Brevo's exact payload field names (email/event) are per their marketing
+// webhook docs as of this writing — worth double-checking against a real
+// test payload (logged below) the first time this is configured, since
+// Brevo doesn't version this shape.
+router.post('/webhook', async (req, res) => {
+  if (!process.env.BREVO_WEBHOOK_SECRET || req.query.token !== process.env.BREVO_WEBHOOK_SECRET) {
+    return res.status(401).json({ error: 'unauthorized' })
+  }
+
+  console.log('newsletter webhook payload:', JSON.stringify(req.body))
+
+  const { email, event } = req.body || {}
+  if (email && event === 'unsubscribe') {
+    try {
+      await upsertSubscriberRow({ email: String(email).toLowerCase(), status: 'Unsubscribed' })
+    } catch (sheetErr) {
+      console.error('newsletter webhook: sheet update failed', sheetErr)
+    }
+  }
+
+  res.json({ success: true })
+})
 
 module.exports = router
