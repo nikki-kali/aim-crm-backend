@@ -1,10 +1,39 @@
 const { Resend } = require('resend')
+const nodemailer = require('nodemailer')
 
 let resend
 
 function getResend() {
   if (!resend) resend = new Resend(process.env.RESEND_API_KEY)
   return resend
+}
+
+let smtpTransport
+
+function getSmtpTransport() {
+  if (!smtpTransport) {
+    smtpTransport = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT) || 465,
+      secure: true,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    })
+  }
+  return smtpTransport
+}
+
+// Gmail SMTP doesn't require domain verification the way Resend does, so it
+// works as a fallback while aimdentallab.com's Resend domain verification is
+// stuck pending. Kept as a fallback rather than the primary path so Resend
+// (better deliverability/branding once verified) is preferred when it works.
+async function sendViaSmtp({ to, subject, html }) {
+  const transport = getSmtpTransport()
+  await transport.sendMail({
+    from: `Aim Dental CRM <${process.env.SMTP_USER}>`,
+    to: to || process.env.ALERT_EMAIL,
+    subject,
+    html,
+  })
 }
 
 async function sendEmail({ to, subject, html }) {
@@ -16,7 +45,13 @@ async function sendEmail({ to, subject, html }) {
     subject,
     html,
   })
-  if (error) throw new Error(error.message)
+  if (!error) return
+
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    throw new Error(error.message)
+  }
+  console.warn('sendEmail: Resend failed, falling back to SMTP —', error.message)
+  await sendViaSmtp({ to, subject, html })
 }
 
 function coldLeadEmail(leads) {
