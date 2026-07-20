@@ -127,6 +127,7 @@ router.post(
       try {
         await sendEmail({
           to: recipient,
+          cc: ['ben@aimdentallab.com', 'execassistant@aimdentallab.com'],
           subject:
             formType === 'scanner-program'
               ? `Scanner Program request — ${name.trim()}`

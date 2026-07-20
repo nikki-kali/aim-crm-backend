@@ -14,7 +14,7 @@ function getResend() {
 // (info@) already exist and are proven working (same account the newsletter
 // signup sync in routes/newsletter.js already uses), so it works as a
 // fallback while Resend's domain verification is stuck pending.
-async function sendViaBrevo({ to, subject, html }) {
+async function sendViaBrevo({ to, subject, html, cc }) {
   const res = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
     headers: {
@@ -25,6 +25,7 @@ async function sendViaBrevo({ to, subject, html }) {
     body: JSON.stringify({
       sender: { name: 'Aim Dental CRM', email: 'info@aimdentallab.com' },
       to: [{ email: to || process.env.ALERT_EMAIL }],
+      ...(cc?.length ? { cc: cc.map((email) => ({ email })) } : {}),
       subject,
       htmlContent: html,
     }),
@@ -35,12 +36,13 @@ async function sendViaBrevo({ to, subject, html }) {
   }
 }
 
-async function sendEmail({ to, subject, html }) {
+async function sendEmail({ to, subject, html, cc }) {
   const client = getResend()
   const from = process.env.RESEND_FROM || 'Aim Dental CRM <onboarding@resend.dev>'
   const { error } = await client.emails.send({
     from,
     to: to || process.env.ALERT_EMAIL,
+    ...(cc?.length ? { cc } : {}),
     subject,
     html,
   })
@@ -50,7 +52,7 @@ async function sendEmail({ to, subject, html }) {
     throw new Error(error.message)
   }
   console.warn('sendEmail: Resend failed, falling back to Brevo —', error.message)
-  await sendViaBrevo({ to, subject, html })
+  await sendViaBrevo({ to, subject, html, cc })
 }
 
 function coldLeadEmail(leads) {
