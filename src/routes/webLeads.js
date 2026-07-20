@@ -121,13 +121,26 @@ router.post(
           ? process.env.WEB_LEADS_EMAIL || 'digital@aimdentallab.com'
           : process.env.CONTACT_FORM_EMAIL || 'media@aimdentallab.com'
 
+      // The pickup scheduler and the plain Contact form both post here as
+      // formType 'contact' (no distinct topic), so the pickup scheduler's
+      // fixed caseType 'Schedule Pickup' is the only signal that tells them
+      // apart — used here to pick which staff get CC'd. Scanner Program
+      // keeps no CC (never asked for one).
+      const isPickup = caseType === 'Schedule Pickup'
+      const cc =
+        formType === 'scanner-program'
+          ? undefined
+          : isPickup
+            ? ['ben@aimdentallab.com', 'execassistant@aimdentallab.com']
+            : ['customer@aimdentallab.com', 'digital@aimdentallab.com']
+
       // Email notification is best-effort — a lead that's saved but doesn't
       // trigger an email is recoverable (it's in the CRM); failing the whole
       // request over a flaky email send would lose the submission entirely.
       try {
         await sendEmail({
           to: recipient,
-          cc: ['ben@aimdentallab.com', 'execassistant@aimdentallab.com'],
+          cc,
           subject:
             formType === 'scanner-program'
               ? `Scanner Program request — ${name.trim()}`
