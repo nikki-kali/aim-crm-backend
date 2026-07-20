@@ -17,6 +17,12 @@ function getSmtpTransport() {
       port: Number(process.env.SMTP_PORT) || 465,
       secure: true,
       auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      // Fail fast — this is a best-effort fallback (see webLeads.js's catch
+      // around sendEmail); the lead-save response must never hang because
+      // Gmail's SMTP handshake stalled.
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 8000,
     })
   }
   return smtpTransport
