@@ -1,5 +1,4 @@
 const { Resend } = require('resend')
-const nodemailer = require('nodemailer')
 
 let resend
 
@@ -8,38 +7,32 @@ function getResend() {
   return resend
 }
 
-let smtpTransport
-
-function getSmtpTransport() {
-  if (!smtpTransport) {
-    smtpTransport = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT) || 465,
-      secure: true,
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-      // Fail fast — this is a best-effort fallback (see webLeads.js's catch
-      // around sendEmail); the lead-save response must never hang because
-      // Gmail's SMTP handshake stalled.
-      connectionTimeout: 8000,
-      greetingTimeout: 8000,
-      socketTimeout: 8000,
-    })
-  }
-  return smtpTransport
-}
-
-// Gmail SMTP doesn't require domain verification the way Resend does, so it
-// works as a fallback while aimdentallab.com's Resend domain verification is
-// stuck pending. Kept as a fallback rather than the primary path so Resend
-// (better deliverability/branding once verified) is preferred when it works.
-async function sendViaSmtp({ to, subject, html }) {
-  const transport = getSmtpTransport()
-  await transport.sendMail({
-    from: `Aim Dental CRM <${process.env.SMTP_USER}>`,
-    to: to || process.env.ALERT_EMAIL,
-    subject,
-    html,
+// Brevo's transactional send API is HTTPS (api.brevo.com), unlike SMTP —
+// tried a Gmail SMTP fallback first, but Render's outbound network times out
+// on port 465 (ETIMEDOUT/CONN, confirmed in logs), so plain SMTP is a dead
+// end on this host. Brevo's API key + a verified aimdentallab.com sender
+// (info@) already exist and are proven working (same account the newsletter
+// signup sync in routes/newsletter.js already uses), so it works as a
+// fallback while Resend's domain verification is stuck pending.
+async function sendViaBrevo({ to, subject, html }) {
+  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key': process.env.BREVO_API_KEY,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      sender: { name: 'Aim Dental CRM', email: 'info@aimdentallab.com' },
+      to: [{ email: to || process.env.ALERT_EMAIL }],
+      subject,
+      htmlContent: html,
+    }),
   })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`Brevo send failed (${res.status}): ${body}`)
+  }
 }
 
 async function sendEmail({ to, subject, html }) {
@@ -53,11 +46,11 @@ async function sendEmail({ to, subject, html }) {
   })
   if (!error) return
 
-  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+  if (!process.env.BREVO_API_KEY) {
     throw new Error(error.message)
   }
-  console.warn('sendEmail: Resend failed, falling back to SMTP —', error.message)
-  await sendViaSmtp({ to, subject, html })
+  console.warn('sendEmail: Resend failed, falling back to Brevo —', error.message)
+  await sendViaBrevo({ to, subject, html })
 }
 
 function coldLeadEmail(leads) {
