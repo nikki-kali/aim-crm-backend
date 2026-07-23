@@ -3,6 +3,7 @@ const db = require('../config/db')
 const auth = require('../middleware/auth')
 const requireAdmin = require('../middleware/requireAdmin')
 const { scoreFromLead } = require('../services/scoring')
+const { advancePickupStage } = require('../services/pickupStatus')
 
 const router = express.Router()
 
@@ -275,6 +276,31 @@ router.post('/:id/convert', auth, async (req, res, next) => {
     ).catch(() => {})
 
     res.json({ success: true, client })
+  } catch (err) { next(err) }
+})
+
+// POST /api/leads/:id/dispatch — pickup requests only: marks a courier as
+// dispatched and emails the requester (stage 2 of 3; stage 1 is sent from
+// webLeads.js on submission). Shares advancePickupStage() with the public
+// one-click email links in routes/intake.js, since the dashboard isn't in
+// regular staff use yet — either path can trigger this stage.
+router.post('/:id/dispatch', auth, async (req, res, next) => {
+  try {
+    const requireAssignedTo = req.user.role === 'staff' ? req.user.id : null
+    const result = await advancePickupStage(req.params.id, 'dispatched', { requireAssignedTo, actorId: req.user.id })
+    if (result.notFound) return res.status(404).json({ error: 'Pickup lead not found' })
+    res.json(result.lead)
+  } catch (err) { next(err) }
+})
+
+// POST /api/leads/:id/receive — pickup requests only: marks the case as
+// received at the lab and emails the requester (stage 3 of 3).
+router.post('/:id/receive', auth, async (req, res, next) => {
+  try {
+    const requireAssignedTo = req.user.role === 'staff' ? req.user.id : null
+    const result = await advancePickupStage(req.params.id, 'received', { requireAssignedTo, actorId: req.user.id })
+    if (result.notFound) return res.status(404).json({ error: 'Pickup lead not found' })
+    res.json(result.lead)
   } catch (err) { next(err) }
 })
 
