@@ -20,7 +20,7 @@ router.post('/capture', async (req, res, next) => {
 
     const leadData = {
       doctor_name: doctor_name.trim(),
-      lead_source: source || 'website',
+      lead_source: source || 'Website Form Submission',
       estimated_value: 0,
       intent_level: 'Medium',
       case_interest: case_interest || '',
@@ -34,7 +34,7 @@ router.post('/capture', async (req, res, next) => {
        VALUES ($1,$2,'Aim Dental',$3,$4,$5,$5,$6,$7,'Lead','Medium',$8,'api',NOW(),NOW(),NOW())
        RETURNING id`,
       [doctor_name.trim(), clinic_name || '', phone || '', email || '',
-       source || 'website', case_interest || '', notes || '', aiScore]
+       source || 'Website Form Submission', case_interest || '', notes || '', aiScore]
     )
 
     res.json({ success: true, id: rows[0].id })
