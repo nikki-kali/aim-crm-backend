@@ -143,20 +143,23 @@ router.post(
         ]
       )
 
-      // Contact and Scanner Program submissions go to different inboxes —
-      // configurable independently since they've already diverged once
-      // (Contact routed to media@ "for now" while Scanner Program stayed on
-      // the original WEB_LEADS_EMAIL/digital@ default).
+      // Contact, Scanner Program, and Pickup submissions go to different
+      // inboxes — configurable independently since they've already diverged
+      // (Contact routed to media@ "for now", Scanner Program stayed on the
+      // original WEB_LEADS_EMAIL/digital@ default, Pickup routes to
+      // digital@ with the widest CC list of the three).
       const recipient =
         formType === 'scanner-program'
           ? process.env.WEB_LEADS_EMAIL || 'digital@aimdentallab.com'
-          : process.env.CONTACT_FORM_EMAIL || 'media@aimdentallab.com'
+          : isPickup
+            ? process.env.PICKUP_FORM_EMAIL || 'digital@aimdentallab.com'
+            : process.env.CONTACT_FORM_EMAIL || 'media@aimdentallab.com'
 
       const cc =
         formType === 'scanner-program'
           ? undefined
           : isPickup
-            ? ['ben@aimdentallab.com', 'execassistant@aimdentallab.com']
+            ? ['customer@aimdentallab.com', 'media@aimdentallab.com', 'execassistant@aimdentallab.com', 'ben@aimdentallab.com']
             : ['customer@aimdentallab.com', 'digital@aimdentallab.com']
 
       // Email notification is best-effort — a lead that's saved but doesn't
