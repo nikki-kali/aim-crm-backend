@@ -117,7 +117,7 @@ router.post(
 
       const leadData = {
         doctor_name: name.trim(),
-        lead_source: 'website',
+        lead_source: 'Website Form Submission',
         estimated_value: 0,
         intent_level: 'Medium',
         case_interest: caseInterest,
@@ -128,7 +128,7 @@ router.post(
         `INSERT INTO leads
           (doctor_name, clinic_name, brand, phone, email, lead_source, referral_source,
            case_interest, notes, status, intent_level, ai_score, created_via, created_at, updated_at, last_contacted_at, pickup_status)
-         VALUES ($1,$2,'Aim Dental',$3,$4,'website',$5,$6,$7,'Lead','Medium',$8,'web-leads-api',NOW(),NOW(),NOW(),$9)
+         VALUES ($1,$2,'Aim Dental',$3,$4,'Website Form Submission',$5,$6,$7,'Lead','Medium',$8,'web-leads-api',NOW(),NOW(),NOW(),$9)
          RETURNING id`,
         [
           name.trim(),
@@ -159,7 +159,7 @@ router.post(
         formType === 'scanner-program'
           ? undefined
           : isPickup
-            ? ['customer@aimdentallab.com', 'media@aimdentallab.com', 'execassistant@aimdentallab.com', 'ben@aimdentallab.com']
+            ? ['customer@aimdentallab.com', 'media@aimdentallab.com', 'execassistant@aimdentallab.com', 'ben@aimdentallab.com', 'shipping@khdentallab.com']
             : ['customer@aimdentallab.com', 'digital@aimdentallab.com']
 
       // Email notification is best-effort — a lead that's saved but doesn't
