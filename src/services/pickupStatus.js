@@ -1,12 +1,15 @@
 const db = require('../config/db')
-const { sendEmail, pickupDispatchedEmail, pickupReceivedEmail } = require('./email')
+const { sendEmail, pickupDispatchedEmail, pickupReceivedEmail, pickupBrand } = require('./email')
 const { generateCaseNumber } = require('../utils/caseNumber')
 
 const STAGE_ORDER = { requested: 0, dispatched: 1, received: 2 }
 const STAGE_COLUMN = { dispatched: 'pickup_dispatched_at', received: 'pickup_received_at' }
+// subjectFor is a function (not a static string) since the same stage email
+// goes out for both AIM and Kings Highway leads sharing this CRM — see
+// services/email.js's pickupBrand()/PICKUP_BRANDS for the brand lookup.
 const STAGE_EMAIL = {
-  dispatched: { subject: 'AIM Dental Laboratory — your pickup is on the way', build: pickupDispatchedEmail },
-  received: { subject: 'AIM Dental Laboratory — case received', build: pickupReceivedEmail },
+  dispatched: { subjectFor: (brand) => `${pickupBrand(brand).name} — your pickup is on the way`, build: pickupDispatchedEmail },
+  received: { subjectFor: (brand) => `${pickupBrand(brand).name} — case received`, build: pickupReceivedEmail },
 }
 
 // A pickup lead has no case type, product, or due date yet — staff only
@@ -57,8 +60,8 @@ async function advancePickupStage(id, stage, { requireAssignedTo = null, actorId
   if (!updated) return { notFound: true }
 
   if (updated.email) {
-    const { subject, build } = STAGE_EMAIL[stage]
-    sendEmail({ to: updated.email, subject, html: build(updated) })
+    const { subjectFor, build } = STAGE_EMAIL[stage]
+    sendEmail({ to: updated.email, subject: subjectFor(updated.brand), html: build(updated) })
       .catch((err) => console.error(`pickup ${stage}: requester email failed`, err))
   }
 

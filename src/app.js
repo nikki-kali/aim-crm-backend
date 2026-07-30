@@ -1,3 +1,4 @@
+const path = require('path')
 const express = require('express')
 const cors = require('cors')
 const errorHandler = require('./middleware/errorHandler')
@@ -27,6 +28,12 @@ const eosSuggestionsRoutes = require('./routes/eosSuggestions')
 const feedbackRoutes = require('./routes/feedback')
 
 const app = express()
+
+// Serves the Kings Highway logo at BACKEND_URL/brand/kh-dental-logo.png —
+// email clients need a public image URL for the KH-branded pickup emails
+// (see services/email.js's PICKUP_BRANDS), so it's hosted here rather than
+// hotlinked from khdentallab.com's WordPress media library.
+app.use('/brand', express.static(path.join(__dirname, '../public/brand')))
 
 // Render sits behind a reverse proxy; without this, req.ip returns the
 // proxy's address for every request, which would break the web-leads

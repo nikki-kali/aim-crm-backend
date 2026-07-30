@@ -2,12 +2,17 @@ const express = require('express')
 const cors = require('cors')
 const db = require('../config/db')
 const { scoreFromLead } = require('../services/scoring')
-const { sendEmail, pickupRequestedEmail } = require('../services/email')
+const { sendEmail, pickupRequestedEmail, pickupBrand } = require('../services/email')
 const rateLimiter = require('../middleware/rateLimiter')
 const { pickupActionToken } = require('./intake')
 
 const router = express.Router()
 const BACKEND_URL = process.env.RENDER_EXTERNAL_URL || 'https://aim-crm-backend.onrender.com'
+
+// Valid leads.brand values sharing this CRM — anything else falls back to
+// Aim Dental, so AIM's own site (which doesn't send a `brand` field at all)
+// keeps working exactly as before.
+const VALID_BRANDS = ['Aim Dental', 'Kings Highway']
 
 // This route is called from the marketing website's browser JS, which lives
 // on a different origin than FRONTEND_URL (the CRM app) — app.js's global
@@ -18,7 +23,8 @@ const BACKEND_URL = process.env.RENDER_EXTERNAL_URL || 'https://aim-crm-backend.
 router.use(cors())
 router.use(express.json({ limit: '256kb' }))
 
-function webLeadEmail({ formType, name, practice, email, phone, caseType, message, monthlyVolume, leadId, isPickup }) {
+function webLeadEmail({ formType, name, practice, email, phone, caseType, message, monthlyVolume, leadId, isPickup, brand }) {
+  const b = pickupBrand(brand)
   const rows = [
     ['Form', formType === 'scanner-program' ? 'Scanner Placement Program' : 'Contact / Start a Case'],
     ['Name', name],
@@ -48,11 +54,11 @@ function webLeadEmail({ formType, name, practice, email, phone, caseType, messag
     ? `
       <div style="margin-top:24px;padding-top:20px;border-top:1px solid #f3f4f6">
         <a href="${BACKEND_URL}/api/leads/${leadId}/pickup-action/dispatched?token=${pickupActionToken(leadId, 'dispatched')}"
-           style="display:inline-block;background:#06babe;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px;margin-right:10px">
+           style="display:inline-block;background:${b.color};color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px;margin-right:10px">
           Mark Dispatched
         </a>
         <a href="${BACKEND_URL}/api/leads/${leadId}/pickup-action/received?token=${pickupActionToken(leadId, 'received')}"
-           style="display:inline-block;background:#fff;color:#06babe;border:1.5px solid #06babe;padding:9px 18px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">
+           style="display:inline-block;background:#fff;color:${b.color};border:1.5px solid ${b.color};padding:9px 18px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">
           Mark Received
         </a>
       </div>`
@@ -62,15 +68,15 @@ function webLeadEmail({ formType, name, practice, email, phone, caseType, messag
     <!DOCTYPE html>
     <html><body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
     <div style="max-width:600px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.1)">
-      <div style="background:#06babe;padding:20px 32px">
-        <span style="color:#fff;font-weight:700;font-size:16px">New website lead</span>
+      <div style="background:${b.color};padding:20px 32px">
+        <span style="color:#fff;font-weight:700;font-size:16px">${isPickup ? 'Case Pickup Request' : 'New website lead'}</span>
       </div>
       <div style="padding:32px">
         <table style="width:100%;border-collapse:collapse;font-size:14px">${rowsHtml}</table>
         ${actionLinksHtml}
       </div>
       <div style="background:#f9fafb;padding:16px 32px;font-size:12px;color:#9ca3af">
-        AIM Dental Laboratory website — aimdentallab.com
+        ${b.footer}
       </div>
     </div>
     </body></html>
@@ -87,7 +93,7 @@ router.post(
   async (req, res, next) => {
     try {
       const {
-        name, practice, email, phone, caseType, message, monthlyVolume, company, topic,
+        name, practice, email, phone, caseType, message, monthlyVolume, company, topic, brand,
         pickupAddress, pickupDate, pickupWindow, caseCount, instructions,
       } = req.body
 
@@ -101,6 +107,10 @@ router.post(
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || '')) {
         return res.status(400).json({ error: 'a valid email is required' })
       }
+
+      // AIM's own site never sends this field, so it defaults to Aim Dental —
+      // only the Kings Highway scheduler sends brand: 'Kings Highway' explicitly.
+      const leadBrand = VALID_BRANDS.includes(brand) ? brand : 'Aim Dental'
 
       const formType = topic === 'Scanner Placement Program' ? 'scanner-program' : 'contact'
       const caseInterest = formType === 'scanner-program' ? 'Scanner Program' : caseType || 'General Inquiry'
@@ -128,11 +138,12 @@ router.post(
         `INSERT INTO leads
           (doctor_name, clinic_name, brand, phone, email, lead_source, referral_source,
            case_interest, notes, status, intent_level, ai_score, created_via, created_at, updated_at, last_contacted_at, pickup_status)
-         VALUES ($1,$2,'Aim Dental',$3,$4,'Website Form Submission',$5,$6,$7,'Lead','Medium',$8,'web-leads-api',NOW(),NOW(),NOW(),$9)
+         VALUES ($1,$2,$3,$4,$5,'Website Form Submission',$6,$7,$8,'Lead','Medium',$9,'web-leads-api',NOW(),NOW(),NOW(),$10)
          RETURNING id`,
         [
           name.trim(),
           practice || '',
+          leadBrand,
           phone || '',
           email,
           formType,
@@ -147,20 +158,26 @@ router.post(
       // inboxes — configurable independently since they've already diverged
       // (Contact routed to media@ "for now", Scanner Program stayed on the
       // original WEB_LEADS_EMAIL/digital@ default, Pickup routes to
-      // digital@ with the widest CC list of the three).
+      // digital@ with the widest CC list of the three). Kings Highway
+      // pickups route to their own inbox/CC list, distinct from AIM's.
+      const isKHPickup = isPickup && leadBrand === 'Kings Highway'
       const recipient =
         formType === 'scanner-program'
           ? process.env.WEB_LEADS_EMAIL || 'digital@aimdentallab.com'
-          : isPickup
-            ? process.env.PICKUP_FORM_EMAIL || 'digital@aimdentallab.com'
-            : process.env.CONTACT_FORM_EMAIL || 'media@aimdentallab.com'
+          : isKHPickup
+            ? process.env.KH_PICKUP_FORM_EMAIL || 'media@aimdentallab.com'
+            : isPickup
+              ? process.env.PICKUP_FORM_EMAIL || 'digital@aimdentallab.com'
+              : process.env.CONTACT_FORM_EMAIL || 'media@aimdentallab.com'
 
       const cc =
         formType === 'scanner-program'
           ? undefined
-          : isPickup
-            ? ['customer@aimdentallab.com', 'media@aimdentallab.com', 'execassistant@aimdentallab.com', 'ben@aimdentallab.com', 'shipping@khdentallab.com']
-            : ['customer@aimdentallab.com', 'digital@aimdentallab.com']
+          : isKHPickup
+            ? ['ben@khdentallab.com', 'execassistant@aimdentallab.com', 'digital@khdentallab.com', 'customer@khdentallab.com', 'shipping@khdentallab.com']
+            : isPickup
+              ? ['customer@aimdentallab.com', 'media@aimdentallab.com', 'execassistant@aimdentallab.com', 'ben@aimdentallab.com', 'shipping@khdentallab.com']
+              : ['customer@aimdentallab.com', 'digital@aimdentallab.com']
 
       // Email notification is best-effort — a lead that's saved but doesn't
       // trigger an email is recoverable (it's in the CRM); failing the whole
@@ -172,10 +189,12 @@ router.post(
           subject:
             formType === 'scanner-program'
               ? `Scanner Program request — ${name.trim()}`
-              : `New website contact — ${name.trim()}`,
+              : isKHPickup
+                ? 'New Case Pickup Request - Kings Highway Dental Laboratory'
+                : `New website contact — ${name.trim()}`,
           html: webLeadEmail({
             formType, name: name.trim(), practice, email, phone, caseType, message, monthlyVolume,
-            leadId: rows[0].id, isPickup,
+            leadId: rows[0].id, isPickup, brand: leadBrand,
           }),
         })
       } catch (emailErr) {
@@ -193,7 +212,7 @@ router.post(
         try {
           await sendEmail({
             to: email,
-            subject: 'AIM Dental Laboratory — pickup request received',
+            subject: `${pickupBrand(leadBrand).name} — pickup request received`,
             html: pickupRequestedEmail({
               doctorName: name.trim(),
               pickupAddress,
@@ -201,6 +220,7 @@ router.post(
               pickupWindow,
               caseCount,
               instructions,
+              brand: leadBrand,
             }),
           })
         } catch (emailErr) {

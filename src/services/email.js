@@ -120,25 +120,59 @@ function winStreakEmail(streak) {
   `, 'View Pipeline')
 }
 
+const BACKEND_URL = process.env.RENDER_EXTERNAL_URL || 'https://aim-crm-backend.onrender.com'
+
+// Per-brand identity for the customer-facing pickup emails below — AIM and
+// Kings Highway are two separate dental labs sharing this one CRM (see
+// leads.brand/cases.brand), each with their own name, color, phone, and
+// logo. Keyed by the exact `brand` column value used elsewhere (leads.js,
+// caseNumber.js). Falls back to Aim Dental for anything unrecognized so
+// existing AIM-only call sites that don't pass a brand keep working as-is.
+const PICKUP_BRANDS = {
+  'Aim Dental': {
+    name: 'AIM Dental Laboratory',
+    color: '#06babe',
+    phone: '(718) 854-3900',
+    logoUrl: null,
+    footer: 'AIM Dental Laboratory — 802 Myrtle Avenue, Brooklyn, NY 11206 — (718) 854-3900',
+  },
+  'Kings Highway': {
+    name: 'Kings Highway Dental Laboratory',
+    color: '#31799b',
+    phone: '(718) 331-2241',
+    logoUrl: `${BACKEND_URL}/brand/kh-dental-logo.png`,
+    footer: 'Kings Highway Dental Laboratory — khdentallab.com',
+  },
+}
+
+function pickupBrand(brand) {
+  return PICKUP_BRANDS[brand] || PICKUP_BRANDS['Aim Dental']
+}
+
 // Customer-facing wrapper for pickup-status emails — distinct from
 // emailWrapper() below, which is staff-facing (links back to the internal
 // CRM dashboard, "automated alert" framing). This one goes to the dental
-// practice that requested the pickup, so it's branded as AIM Dental
-// Laboratory itself with no CRM-facing links.
-function pickupCustomerWrapper(title, bodyHtml) {
+// practice that requested the pickup, so it's branded as whichever lab
+// (AIM or Kings Highway) the pickup lead actually belongs to, with no
+// CRM-facing links.
+function pickupCustomerWrapper(title, bodyHtml, brand) {
+  const b = pickupBrand(brand)
+  const headerContent = b.logoUrl
+    ? `<img src="${b.logoUrl}" height="28" alt="${b.name}" style="display:block;height:28px;width:auto" />`
+    : `<span style="color:#fff;font-weight:700;font-size:16px">${b.name}</span>`
   return `
     <!DOCTYPE html>
     <html><body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
     <div style="max-width:600px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.1)">
-      <div style="background:#06babe;padding:20px 32px">
-        <span style="color:#fff;font-weight:700;font-size:16px">AIM Dental Laboratory</span>
+      <div style="background:${b.logoUrl ? '#fff' : b.color};padding:20px 32px;${b.logoUrl ? `border-bottom:3px solid ${b.color}` : ''}">
+        ${headerContent}
       </div>
       <div style="padding:32px">
         <h2 style="color:#111;margin:0 0 12px;font-size:20px">${title}</h2>
         ${bodyHtml}
       </div>
       <div style="background:#f9fafb;padding:16px 32px;font-size:12px;color:#9ca3af">
-        AIM Dental Laboratory — 802 Myrtle Avenue, Brooklyn, NY 11206 — (718) 854-3900
+        ${b.footer}
       </div>
     </div>
     </body></html>
@@ -148,8 +182,11 @@ function pickupCustomerWrapper(title, bodyHtml) {
 // Stage 1 — sent immediately on submission (see webLeads.js). Has the full
 // set of fields straight from the pickup scheduler's request body, since
 // those aren't all persisted as their own lead columns (folded into `notes`
-// instead) — this is the one place they're available structured.
-function pickupRequestedEmail({ doctorName, pickupAddress, pickupDate, pickupWindow, caseCount, instructions }) {
+// instead) — this is the one place they're available structured. `brand`
+// isn't on the lead row yet at this call site (webLeads.js calls this
+// before/alongside the insert), so it's passed through explicitly.
+function pickupRequestedEmail({ doctorName, pickupAddress, pickupDate, pickupWindow, caseCount, instructions, brand }) {
+  const b = pickupBrand(brand)
   const rows = [
     ['Pickup address', pickupAddress],
     ['Preferred date', pickupDate],
@@ -168,44 +205,48 @@ function pickupRequestedEmail({ doctorName, pickupAddress, pickupDate, pickupWin
 
   return pickupCustomerWrapper("We've received your pickup request", `
     <p style="color:#374151;font-size:14px;line-height:1.6;margin:0 0 16px">
-      Hi ${doctorName || 'there'}, thanks for scheduling a case pickup with AIM Dental Laboratory.
+      Hi ${doctorName || 'there'}, thanks for scheduling a case pickup with ${b.name}.
       We've got your request and our team will have it confirmed shortly — you'll get another
       email once a courier is dispatched to collect your case.
     </p>
     <table style="width:100%;border-collapse:collapse;font-size:14px">${rowsHtml}</table>
     <p style="color:#374151;font-size:14px;line-height:1.6;margin-top:20px">
-      Questions or need to make a change? Call us at <strong>(718) 854-3900</strong>.
+      Questions or need to make a change? Call us at <strong>${b.phone}</strong>.
     </p>
-  `)
+  `, brand)
 }
 
 // Stage 2 — sent when staff mark the pickup as dispatched (leads.js
 // /:id/dispatch). Only has the saved lead row to work with, not the
-// original structured form fields, so it stays deliberately simple.
+// original structured form fields, so it stays deliberately simple. Unlike
+// pickupRequestedEmail, `lead.brand` is a real column by this point, so it
+// reads brand off the row instead of taking a separate param.
 function pickupDispatchedEmail(lead) {
+  const b = pickupBrand(lead.brand)
   return pickupCustomerWrapper('Your courier is on the way', `
     <p style="color:#374151;font-size:14px;line-height:1.6;margin:0 0 16px">
       Hi ${lead.doctor_name || 'there'}, a courier has been dispatched to collect your case.
       You'll get a final confirmation email once it arrives back at our lab.
     </p>
     <p style="color:#374151;font-size:14px;line-height:1.6">
-      Anything come up? Call us at <strong>(718) 854-3900</strong>.
+      Anything come up? Call us at <strong>${b.phone}</strong>.
     </p>
-  `)
+  `, lead.brand)
 }
 
 // Stage 3 — sent when staff mark the pickup as received (leads.js
 // /:id/receive).
 function pickupReceivedEmail(lead) {
+  const b = pickupBrand(lead.brand)
   return pickupCustomerWrapper("We've received your case", `
     <p style="color:#374151;font-size:14px;line-height:1.6;margin:0 0 16px">
-      Hi ${lead.doctor_name || 'there'}, your case has arrived at AIM Dental Laboratory and is
+      Hi ${lead.doctor_name || 'there'}, your case has arrived at ${b.name} and is
       now in our production queue. We'll be in touch if we need anything further.
     </p>
     <p style="color:#374151;font-size:14px;line-height:1.6">
-      Questions on turnaround? Call us at <strong>(718) 854-3900</strong>.
+      Questions on turnaround? Call us at <strong>${b.phone}</strong>.
     </p>
-  `)
+  `, lead.brand)
 }
 
 function emailWrapper(content, ctaLabel) {
@@ -237,4 +278,5 @@ module.exports = {
   pickupRequestedEmail,
   pickupDispatchedEmail,
   pickupReceivedEmail,
+  pickupBrand,
 }
