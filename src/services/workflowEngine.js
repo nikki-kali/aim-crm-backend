@@ -1,5 +1,12 @@
 const db = require('../config/db')
 const { sendEmail } = require('./email')
+const { scoreFromLead } = require('./scoring')
+const { convertLeadToClient } = require('./leadConversion')
+
+// Fields a workflow is allowed to set via the generic "Update Field" node —
+// whitelisted since the field name comes from admin-authored workflow JSON
+// and gets interpolated into a column name, not a parameterized value.
+const UPDATABLE_LEAD_FIELDS = ['phone', 'email', 'clinic_name', 'notes', 'estimated_value', 'referral_source', 'intent_level']
 
 // Guards a single tick against a cyclic node graph looping forever.
 const MAX_STEPS_PER_TICK = 25
@@ -174,6 +181,70 @@ async function executeAction(node, entity, enrollment) {
       await db.query(`UPDATE leads SET assigned_to=$1 WHERE id=$2`, [data.assigned_to, entity.id])
       return 'Rep assigned'
     }
+    case 'round_robin_assign': {
+      if (!isLead) return 'Skipped — assignment only applies to leads'
+      const { rows: reps } = await db.query(`SELECT id, name FROM users WHERE role='staff' ORDER BY name`)
+      if (!reps.length) return 'Skipped — no staff reps to assign'
+      const { rows: counts } = await db.query(
+        `SELECT assigned_to, COUNT(*) AS n FROM leads WHERE status NOT IN ('Won','Lost') AND is_archived=false AND assigned_to IS NOT NULL GROUP BY assigned_to`
+      )
+      const loadByRep = Object.fromEntries(counts.map((c) => [c.assigned_to, Number(c.n)]))
+      const pick = reps.reduce((best, r) => ((loadByRep[r.id] || 0) < (loadByRep[best.id] || 0) ? r : best), reps[0])
+      await db.query(`UPDATE leads SET assigned_to=$1 WHERE id=$2`, [pick.id, entity.id])
+      return `Assigned to ${pick.name} (round robin)`
+    }
+    case 'update_field': {
+      if (!isLead) return 'Skipped — field updates only apply to leads'
+      if (!UPDATABLE_LEAD_FIELDS.includes(data.field)) return `Skipped — "${data.field}" isn't an updatable field`
+      await db.query(`UPDATE leads SET ${data.field}=$1, updated_at=NOW() WHERE id=$2`, [data.value ?? '', entity.id])
+      return `${data.field} set to "${data.value ?? ''}"`
+    }
+    case 'remove_tag': {
+      if (!isLead) return 'Skipped — tags only apply to leads'
+      await db.query(`UPDATE leads SET tags = array_remove(tags, $1) WHERE id=$2`, [data.tag, entity.id])
+      return `Removed tag "${data.tag}"`
+    }
+    case 'archive_lead': {
+      if (!isLead) return 'Skipped — archiving only applies to leads'
+      await db.query(`UPDATE leads SET is_archived=true, updated_at=NOW() WHERE id=$1`, [entity.id])
+      return 'Lead archived'
+    }
+    case 'recalculate_score': {
+      if (!isLead) return 'Skipped — AI score only applies to leads'
+      const score = scoreFromLead(entity)
+      await db.query(`UPDATE leads SET ai_score=$1 WHERE id=$2`, [score, entity.id])
+      return `AI score recalculated: ${score}`
+    }
+    case 'convert_to_client': {
+      if (!isLead) return 'Skipped — conversion only applies to leads'
+      const result = await convertLeadToClient(entity.id, {})
+      if (result.alreadyConverted) return 'Already converted to a client'
+      return `Converted to client "${result.client.doctor_name}"`
+    }
+    case 'create_note': {
+      await db.query(
+        `INSERT INTO activities (entity_type, entity_id, type, description, created_by) VALUES ($1,$2,'note',$3,NULL)`,
+        [enrollment.entity_type, entity.id, data.text || 'Automated note']
+      )
+      return 'Note added'
+    }
+    case 'webhook': {
+      if (!data.url) return 'Skipped — no webhook URL set'
+      try {
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 10000)
+        const res = await fetch(data.url, {
+          method: data.method || 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entity_type: enrollment.entity_type, entity_id: entity.id, entity }),
+          signal: controller.signal,
+        })
+        clearTimeout(timeout)
+        return `Webhook called (${res.status})`
+      } catch (err) {
+        return `Webhook failed: ${err.message}`
+      }
+    }
     default:
       return 'No-op'
   }
@@ -210,14 +281,26 @@ async function advanceOne(enrollment, workflow) {
     }
 
     if (currentNode.type === 'wait' && !resumingFromWait) {
-      const amount = Number(currentNode.data?.amount) || 1
-      const unit = currentNode.data?.unit === 'hours' ? 3600000 : 86400000
-      const waitUntil = new Date(Date.now() + amount * unit).toISOString()
+      let waitUntil
+      let waitLabel
+      if (currentNode.data?.mode === 'until_field') {
+        const fieldEntity = await getEntity(enrollment.entity_type, enrollment.entity_id)
+        const fieldValue = fieldEntity?.[currentNode.data?.field]
+        // A missing/unparseable date can't be waited on — fall through
+        // immediately rather than waiting forever on a bad field value.
+        waitUntil = fieldValue && !isNaN(Date.parse(fieldValue)) ? new Date(fieldValue).toISOString() : new Date().toISOString()
+        waitLabel = fieldValue ? `Waiting until ${currentNode.data.field} (${waitUntil.slice(0, 10)})` : `Skipped wait — "${currentNode.data?.field}" has no value`
+      } else {
+        const amount = Number(currentNode.data?.amount) || 1
+        const unit = currentNode.data?.unit === 'hours' ? 3600000 : 86400000
+        waitUntil = new Date(Date.now() + amount * unit).toISOString()
+        waitLabel = `Waiting ${amount} ${currentNode.data?.unit || 'days'}`
+      }
       await db.query(
         `UPDATE workflow_enrollments SET status='waiting', current_node_id=$1, wait_until=$2, updated_at=NOW() WHERE id=$3`,
         [currentNode.id, waitUntil, enrollment.id]
       )
-      await logRun(enrollment.id, currentNode.id, 'wait', `Waiting ${amount} ${currentNode.data?.unit || 'days'}`)
+      await logRun(enrollment.id, currentNode.id, 'wait', waitLabel)
       return
     }
     resumingFromWait = false

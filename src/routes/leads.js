@@ -4,6 +4,7 @@ const auth = require('../middleware/auth')
 const requireAdmin = require('../middleware/requireAdmin')
 const { scoreFromLead } = require('../services/scoring')
 const { advancePickupStage } = require('../services/pickupStatus')
+const { convertLeadToClient } = require('../services/leadConversion')
 
 const router = express.Router()
 
@@ -271,35 +272,10 @@ router.post('/:id/unarchive', auth, async (req, res, next) => {
 // POST /api/leads/:id/convert — lead-to-client auto-conversion
 router.post('/:id/convert', auth, async (req, res, next) => {
   try {
-    const { rows: leadRows } = await db.query('SELECT * FROM leads WHERE id=$1', [req.params.id])
-    const lead = leadRows[0]
-    if (!lead) return res.status(404).json({ error: 'Lead not found' })
-    if (lead.converted_to_client_id) return res.status(409).json({ error: 'Lead already converted' })
-
-    // Create client from lead data, inheriting the same assigned_to
-    const { rows: clientRows } = await db.query(
-      `INSERT INTO clients (doctor_name, clinic_name, brand, phone, email, referral_source,
-       lead_source, notes, original_lead_id, assigned_to, total_revenue, case_count, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10,0,NOW(),NOW()) RETURNING *`,
-      [lead.doctor_name, lead.clinic_name || '', lead.brand || 'Aim Dental',
-       lead.phone || '', lead.email || '', lead.referral_source || lead.lead_source || '',
-       lead.notes || '', lead.id, lead.assigned_to, Number(lead.estimated_value) || 0]
-    )
-    const client = clientRows[0]
-
-    await db.query(
-      `UPDATE leads SET converted_to_client_id=$1, status='Won', updated_at=NOW() WHERE id=$2`,
-      [client.id, lead.id]
-    )
-
-    await db.query(
-      `INSERT INTO activities (entity_type, entity_id, type, description, created_by) VALUES
-       ('lead',$1,'converted','Lead converted to client',$3),
-       ('client',$2,'converted','Client created from lead conversion',$3)`,
-      [lead.id, client.id, req.user.id]
-    ).catch(() => {})
-
-    res.json({ success: true, client })
+    const result = await convertLeadToClient(req.params.id, { actorId: req.user.id })
+    if (result.notFound) return res.status(404).json({ error: 'Lead not found' })
+    if (result.alreadyConverted) return res.status(409).json({ error: 'Lead already converted' })
+    res.json({ success: true, client: result.client })
   } catch (err) { next(err) }
 })
 
