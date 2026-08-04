@@ -26,6 +26,7 @@ const issueRoutes = require('./routes/issues')
 const weeklyFocusRoutes = require('./routes/weeklyFocus')
 const eosSuggestionsRoutes = require('./routes/eosSuggestions')
 const feedbackRoutes = require('./routes/feedback')
+const contentApprovalsRoutes = require('./routes/contentApprovals')
 
 const app = express()
 
@@ -84,6 +85,7 @@ app.use('/api/issues',       issueRoutes)
 app.use('/api/weekly-focus', weeklyFocusRoutes)
 app.use('/api/eos',          eosSuggestionsRoutes)
 app.use('/api/feedback',     feedbackRoutes)
+app.use('/api/content-approvals', contentApprovalsRoutes)
 
 app.use(errorHandler)
 
