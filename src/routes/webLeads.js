@@ -137,8 +137,9 @@ router.post(
       const { rows } = await db.query(
         `INSERT INTO leads
           (doctor_name, clinic_name, brand, phone, email, lead_source, referral_source,
-           case_interest, notes, status, intent_level, ai_score, created_via, created_at, updated_at, last_contacted_at, pickup_status)
-         VALUES ($1,$2,$3,$4,$5,'Website Form Submission',$6,$7,$8,'Lead','Medium',$9,'web-leads-api',NOW(),NOW(),NOW(),$10)
+           case_interest, notes, status, intent_level, ai_score, created_via, created_at, updated_at, last_contacted_at, pickup_status,
+           pickup_date, pickup_window, pickup_address, case_count)
+         VALUES ($1,$2,$3,$4,$5,'Website Form Submission',$6,$7,$8,'Lead','Medium',$9,'web-leads-api',NOW(),NOW(),NOW(),$10,$11,$12,$13,$14)
          RETURNING id`,
         [
           name.trim(),
@@ -151,6 +152,10 @@ router.post(
           notes,
           aiScore,
           isPickup ? 'requested' : null,
+          isPickup ? (pickupDate || null) : null,
+          isPickup ? (pickupWindow || '') : null,
+          isPickup ? (pickupAddress || '') : null,
+          isPickup ? (caseCount || null) : null,
         ]
       )
 

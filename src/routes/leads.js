@@ -104,6 +104,30 @@ router.get('/', auth, async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+// GET /api/leads/pickups — powers Case Pickup Schedules. Unlike the general
+// list above, this isn't staff/admin scoped: pickup requests are lab-wide
+// logistics (one truck, one schedule), so every authenticated user sees
+// every pickup regardless of who it's assigned to.
+router.get('/pickups', auth, async (req, res, next) => {
+  try {
+    const { rows } = await db.query(
+      // pickup_date is cast to text via to_char rather than left as a `date`
+      // column — node-pg's default DATE parser builds a local-timezone Date
+      // object, which can shift a plain calendar date to the day before once
+      // serialized back to JSON (a classic UTC-vs-local off-by-one). Sending
+      // 'YYYY-MM-DD' text sidesteps that entirely.
+      `SELECT id, doctor_name, clinic_name, brand, phone, email, pickup_status,
+              to_char(pickup_date, 'YYYY-MM-DD') AS pickup_date,
+              pickup_window, pickup_address, case_count,
+              pickup_dispatched_at, pickup_received_at, created_at
+       FROM leads
+       WHERE case_interest = 'Schedule Pickup'
+       ORDER BY pickup_date NULLS LAST, created_at`
+    )
+    res.json(rows)
+  } catch (err) { next(err) }
+})
+
 // POST /api/leads
 router.post('/', auth, async (req, res, next) => {
   try {
