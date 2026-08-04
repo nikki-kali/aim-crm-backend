@@ -1,5 +1,6 @@
 const cron = require('node-cron')
 const { runAutomationLogic } = require('../services/automations')
+const { runEngineTick } = require('../services/workflowEngine')
 const db = require('../config/db')
 const { sendEmail } = require('../services/email')
 
@@ -87,6 +88,15 @@ function startScheduler() {
   // 1st of every month at 8:00 AM — monthly reports
   cron.schedule('0 8 1 * *', async () => {
     await sendScheduledReports('monthly')
+  })
+
+  // Every 5 minutes — workflow builder: detect new trigger matches and
+  // advance any enrollment whose wait step has elapsed. Polling rather than
+  // hooking every route's write path, same philosophy as the daily/weekly
+  // jobs above, just on a much tighter interval since workflows are meant
+  // to feel closer to real-time than the once-a-day automation checks.
+  cron.schedule('*/5 * * * *', async () => {
+    await runEngineTick().catch((err) => console.error('[cron] workflow engine tick failed:', err))
   })
 
   console.log('[scheduler] Cron jobs registered')

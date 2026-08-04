@@ -25,6 +25,7 @@ const goalsRoutes = require('./routes/goals')
 const feedbackRoutes = require('./routes/feedback')
 const trainingRoutes = require('./routes/training')
 const contentApprovalsRoutes = require('./routes/contentApprovals')
+const workflowRoutes = require('./routes/workflows')
 
 const app = express()
 
@@ -82,6 +83,7 @@ app.use('/api/goals',        goalsRoutes)
 app.use('/api/feedback',     feedbackRoutes)
 app.use('/api/training',     trainingRoutes)
 app.use('/api/content-approvals', contentApprovalsRoutes)
+app.use('/api/workflows',    workflowRoutes)
 
 app.use(errorHandler)
 
