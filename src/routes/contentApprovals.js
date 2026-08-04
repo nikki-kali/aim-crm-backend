@@ -32,10 +32,10 @@ async function callTeamPulse(path, options = {}) {
 
 router.post('/submit', auth, async (req, res, next) => {
   try {
-    const { brand, externalRef, title, description, mediaDataUrl } = req.body
+    const { brand, externalRef, title, description, mediaUrl } = req.body
     const result = await callTeamPulse('/api/integrations/marketing-os/tasks', {
       method: 'POST',
-      body: JSON.stringify({ brand, externalRef, title, description, mediaDataUrl }),
+      body: JSON.stringify({ brand, externalRef, title, description, mediaUrl }),
     })
     res.json(result)
   } catch (err) {
