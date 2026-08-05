@@ -223,6 +223,23 @@ router.delete('/:id', auth, requireAdmin, async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+// DELETE /api/leads/:id/pickup — open to any authenticated user, not just
+// admin: pickup requests are lab-wide logistics nobody "owns" (see GET
+// /pickups above), so anyone should be able to reject a bogus one (spam or
+// mistaken submission) off the schedule. Scoped to leads that are actually
+// pickup requests so this can't be used as a side door to delete regular
+// leads without admin rights.
+router.delete('/:id/pickup', auth, async (req, res, next) => {
+  try {
+    const { rows } = await db.query(
+      `DELETE FROM leads WHERE id=$1 AND case_interest='Schedule Pickup' RETURNING id`,
+      [req.params.id]
+    )
+    if (!rows[0]) return res.status(404).json({ error: 'Pickup not found' })
+    res.json({ success: true })
+  } catch (err) { next(err) }
+})
+
 // POST /api/leads/:id/contacted
 router.post('/:id/contacted', auth, async (req, res, next) => {
   try {
