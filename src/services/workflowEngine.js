@@ -145,13 +145,23 @@ async function executeAction(node, entity, enrollment) {
       return `Email sent to ${to}`
     }
     case 'notify_rep': {
+      // Targets the entity's assigned rep individually if they're a sales_rep
+      // (see services/automations.js for the same convention); otherwise
+      // falls back to the company-wide digest view (user_id NULL, admin-only)
+      // since cases have no owner and staff don't get lead notifications.
+      let userId = null
+      if (isLead && entity.assigned_to) {
+        const { rows: repCheck } = await db.query(`SELECT id FROM users WHERE id=$1 AND role='sales_rep'`, [entity.assigned_to])
+        if (repCheck.length) userId = entity.assigned_to
+      }
       await db.query(
-        `INSERT INTO alerts (type, title, message, metadata) VALUES ('workflow',$1,$2,$3)`,
+        `INSERT INTO alerts (type, title, message, metadata, user_id) VALUES ('workflow',$1,$2,$3,$4)`,
         [data.title || 'Workflow notification',
          data.message || `Workflow step for ${entity.doctor_name || entity.case_number || entity.id}`,
-         JSON.stringify({ entityType: enrollment.entity_type, entityId: enrollment.entity_id })]
+         JSON.stringify({ entityType: enrollment.entity_type, entityId: enrollment.entity_id }),
+         userId]
       )
-      return 'Rep notified'
+      return userId ? 'Rep notified' : 'Notification created (visible to admins)'
     }
     case 'add_tag': {
       if (!isLead) return 'Skipped — tags only apply to leads'
@@ -183,8 +193,8 @@ async function executeAction(node, entity, enrollment) {
     }
     case 'round_robin_assign': {
       if (!isLead) return 'Skipped — assignment only applies to leads'
-      const { rows: reps } = await db.query(`SELECT id, name FROM users WHERE role='staff' ORDER BY name`)
-      if (!reps.length) return 'Skipped — no staff reps to assign'
+      const { rows: reps } = await db.query(`SELECT id, name FROM users WHERE role IN ('staff','sales_rep') ORDER BY name`)
+      if (!reps.length) return 'Skipped — no reps to assign'
       const { rows: counts } = await db.query(
         `SELECT assigned_to, COUNT(*) AS n FROM leads WHERE status NOT IN ('Won','Lost') AND is_archived=false AND assigned_to IS NOT NULL GROUP BY assigned_to`
       )

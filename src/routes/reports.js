@@ -609,7 +609,7 @@ router.get('/my-summary/csv', auth, async (req, res, next) => {
 router.get('/team-comparison', auth, requireAdmin, async (req, res, next) => {
   try {
     const { rows: reps } = await db.query(
-      "SELECT id, name, email FROM users WHERE role='staff' ORDER BY name"
+      "SELECT id, name, email FROM users WHERE role IN ('staff','sales_rep') ORDER BY name"
     )
     const now = new Date()
 

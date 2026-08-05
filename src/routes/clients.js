@@ -2,6 +2,7 @@ const express = require('express')
 const db = require('../config/db')
 const auth = require('../middleware/auth')
 const requireAdmin = require('../middleware/requireAdmin')
+const { isScopedRole } = require('../utils/roles')
 
 const router = express.Router()
 
@@ -9,7 +10,7 @@ router.get('/', auth, async (req, res, next) => {
   try {
     let query = `SELECT c.*, u.name AS assigned_to_name FROM clients c LEFT JOIN users u ON u.id = c.assigned_to`
     const params = []
-    if (req.user.role === 'staff') {
+    if (isScopedRole(req.user.role)) {
       query += ` WHERE c.assigned_to = $1`
       params.push(req.user.id)
     } else if (req.query.rep) {
@@ -26,8 +27,8 @@ router.get('/', auth, async (req, res, next) => {
 router.get('/:id', auth, async (req, res, next) => {
   try {
     const { id } = req.params
-    const ownerClause = req.user.role === 'staff' ? 'AND assigned_to=$2' : ''
-    const clientParams = req.user.role === 'staff' ? [id, req.user.id] : [id]
+    const ownerClause = isScopedRole(req.user.role) ? 'AND assigned_to=$2' : ''
+    const clientParams = isScopedRole(req.user.role) ? [id, req.user.id] : [id]
     const [clientRes, activitiesRes, tasksRes, casesRes] = await Promise.all([
       db.query(`SELECT * FROM clients WHERE id=$1 ${ownerClause}`, clientParams),
       db.query(
@@ -64,7 +65,7 @@ router.get('/:id', auth, async (req, res, next) => {
 router.post('/', auth, async (req, res, next) => {
   try {
     const d = req.body
-    const assignedTo = req.user.role === 'staff' ? req.user.id : (d.assigned_to || req.user.id)
+    const assignedTo = isScopedRole(req.user.role) ? req.user.id : (d.assigned_to || req.user.id)
     const { rows } = await db.query(
       `INSERT INTO clients (doctor_name, clinic_name, brand, phone, email, referral_source,
        total_revenue, case_count, notes, assigned_to, created_at, updated_at)
@@ -80,10 +81,10 @@ router.post('/', auth, async (req, res, next) => {
 router.put('/:id', auth, async (req, res, next) => {
   try {
     const d = req.body
-    const ownerClause = req.user.role === 'staff' ? `AND assigned_to=$10` : ''
+    const ownerClause = isScopedRole(req.user.role) ? `AND assigned_to=$10` : ''
     const params = [d.doctor_name, d.clinic_name || '', d.brand || 'Aim Dental', d.phone || '', d.email || '',
        d.referral_source || '', Number(d.total_revenue) || 0, Number(d.case_count) || 0, d.notes || '', req.params.id]
-    if (req.user.role === 'staff') params.push(req.user.id)
+    if (isScopedRole(req.user.role)) params.push(req.user.id)
     const { rows } = await db.query(
       `UPDATE clients SET doctor_name=$1, clinic_name=$2, brand=$3, phone=$4, email=$5,
        referral_source=$6, total_revenue=$7, case_count=$8, notes=$9, updated_at=NOW()

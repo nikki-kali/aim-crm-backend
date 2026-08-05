@@ -5,6 +5,7 @@ const requireAdmin = require('../middleware/requireAdmin')
 const { scoreFromLead } = require('../services/scoring')
 const { advancePickupStage } = require('../services/pickupStatus')
 const { convertLeadToClient } = require('../services/leadConversion')
+const { isScopedRole } = require('../utils/roles')
 
 const router = express.Router()
 
@@ -14,7 +15,7 @@ router.post('/import', auth, async (req, res, next) => {
     const { rows, filename, assigned_to } = req.body
     if (!Array.isArray(rows) || rows.length === 0) return res.status(400).json({ error: 'No rows provided' })
 
-    const assignedTo = req.user.role === 'staff' ? req.user.id : (assigned_to || req.user.id)
+    const assignedTo = isScopedRole(req.user.role) ? req.user.id : (assigned_to || req.user.id)
 
     const { rows: existing } = await db.query(`SELECT email FROM leads WHERE email IS NOT NULL AND email != ''`)
     const existingEmails = new Set(existing.map(r => r.email.toLowerCase().trim()))
@@ -79,7 +80,7 @@ router.get('/', auth, async (req, res, next) => {
     const params = [archived === 'true']
 
     // ?view=mine|all|unassigned; default: staff→mine, admin→all
-    const view = req.query.view || (req.user.role === 'staff' ? 'mine' : 'all')
+    const view = req.query.view || (isScopedRole(req.user.role) ? 'mine' : 'all')
     if (view === 'mine') {
       params.push(req.user.id)
       query += ` AND l.assigned_to = $${params.length}`
@@ -137,7 +138,7 @@ router.post('/', auth, async (req, res, next) => {
     const estimatedValue = Number(data.estimated_value) || 0
     const aiScore = scoreFromLead({ ...data, estimated_value: estimatedValue })
     const now = new Date().toISOString()
-    const assignedTo = req.user.role === 'staff' ? req.user.id : (data.assigned_to || req.user.id)
+    const assignedTo = isScopedRole(req.user.role) ? req.user.id : (data.assigned_to || req.user.id)
     const { rows } = await db.query(
       `INSERT INTO leads (doctor_name, clinic_name, brand, case_interest, phone, email,
        lead_source, referral_source, estimated_value, status, intent_level, notes,
@@ -178,7 +179,7 @@ router.put('/:id', auth, async (req, res, next) => {
     params.push(req.params.id)
     let where = `WHERE id=$${params.length}`
 
-    if (req.user.role === 'staff') {
+    if (isScopedRole(req.user.role)) {
       params.push(req.user.id)
       where += ` AND assigned_to=$${params.length}`
     }
@@ -225,8 +226,8 @@ router.delete('/:id', auth, requireAdmin, async (req, res, next) => {
 // POST /api/leads/:id/contacted
 router.post('/:id/contacted', auth, async (req, res, next) => {
   try {
-    const ownerClause = req.user.role === 'staff' ? 'AND assigned_to=$2' : ''
-    const params = req.user.role === 'staff' ? [req.params.id, req.user.id] : [req.params.id]
+    const ownerClause = isScopedRole(req.user.role) ? 'AND assigned_to=$2' : ''
+    const params = isScopedRole(req.user.role) ? [req.params.id, req.user.id] : [req.params.id]
     const { rows } = await db.query(
       `UPDATE leads SET last_contacted_at=NOW(), updated_at=NOW() WHERE id=$1 ${ownerClause} RETURNING *`,
       params
@@ -239,8 +240,8 @@ router.post('/:id/contacted', auth, async (req, res, next) => {
 // POST /api/leads/:id/archive
 router.post('/:id/archive', auth, async (req, res, next) => {
   try {
-    const ownerClause = req.user.role === 'staff' ? 'AND assigned_to=$2' : ''
-    const params = req.user.role === 'staff' ? [req.params.id, req.user.id] : [req.params.id]
+    const ownerClause = isScopedRole(req.user.role) ? 'AND assigned_to=$2' : ''
+    const params = isScopedRole(req.user.role) ? [req.params.id, req.user.id] : [req.params.id]
     const { rows } = await db.query(
       `UPDATE leads SET is_archived=true, updated_at=NOW() WHERE id=$1 ${ownerClause} RETURNING *`,
       params
@@ -258,8 +259,8 @@ router.post('/:id/archive', auth, async (req, res, next) => {
 // POST /api/leads/:id/unarchive
 router.post('/:id/unarchive', auth, async (req, res, next) => {
   try {
-    const ownerClause = req.user.role === 'staff' ? 'AND assigned_to=$2' : ''
-    const params = req.user.role === 'staff' ? [req.params.id, req.user.id] : [req.params.id]
+    const ownerClause = isScopedRole(req.user.role) ? 'AND assigned_to=$2' : ''
+    const params = isScopedRole(req.user.role) ? [req.params.id, req.user.id] : [req.params.id]
     const { rows } = await db.query(
       `UPDATE leads SET is_archived=false, updated_at=NOW() WHERE id=$1 ${ownerClause} RETURNING *`,
       params
@@ -286,7 +287,7 @@ router.post('/:id/convert', auth, async (req, res, next) => {
 // regular staff use yet — either path can trigger this stage.
 router.post('/:id/dispatch', auth, async (req, res, next) => {
   try {
-    const requireAssignedTo = req.user.role === 'staff' ? req.user.id : null
+    const requireAssignedTo = isScopedRole(req.user.role) ? req.user.id : null
     const result = await advancePickupStage(req.params.id, 'dispatched', { requireAssignedTo, actorId: req.user.id })
     if (result.notFound) return res.status(404).json({ error: 'Pickup lead not found' })
     res.json(result.lead)
@@ -297,7 +298,7 @@ router.post('/:id/dispatch', auth, async (req, res, next) => {
 // received at the lab and emails the requester (stage 3 of 3).
 router.post('/:id/receive', auth, async (req, res, next) => {
   try {
-    const requireAssignedTo = req.user.role === 'staff' ? req.user.id : null
+    const requireAssignedTo = isScopedRole(req.user.role) ? req.user.id : null
     const result = await advancePickupStage(req.params.id, 'received', { requireAssignedTo, actorId: req.user.id })
     if (result.notFound) return res.status(404).json({ error: 'Pickup lead not found' })
     res.json(result.lead)

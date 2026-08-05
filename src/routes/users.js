@@ -6,11 +6,11 @@ const requireAdmin = require('../middleware/requireAdmin')
 
 const router = express.Router()
 
-// GET /api/users/reps — staff users only, available to all authenticated users (for assign dropdowns)
+// GET /api/users/reps — staff + sales_rep users, available to all authenticated users (for assign dropdowns)
 router.get('/reps', auth, async (req, res, next) => {
   try {
     const { rows } = await db.query(
-      "SELECT id, name, email, avatar FROM users WHERE role='staff' ORDER BY name"
+      "SELECT id, name, email, avatar FROM users WHERE role IN ('staff','sales_rep') ORDER BY name"
     )
     res.json(rows)
   } catch (err) { next(err) }
