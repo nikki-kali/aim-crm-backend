@@ -99,12 +99,19 @@ router.get('/:platform/authorize', auth, requireAdmin, async (req, res, next) =>
 // this app's own frontend JS, that lands on this URL.
 router.get('/:platform/callback', async (req, res) => {
   const { platform } = req.params
-  const { code, state, error: providerError } = req.query
-  const frontendUrl = (process.env.FRONTEND_URL || '').split(',')[0].trim()
+  const { code, state, error: providerError, error_description: providerErrorDescription } = req.query
+  // MARKETING_OS_URL, not FRONTEND_URL — that var is a shared multi-app
+  // CORS allowlist (this backend also serves AIM-CRM's own frontend), and
+  // its first entry isn't reliably Marketing OS. A real bug caught here:
+  // the callback was redirecting to whichever app happened to be first in
+  // that list (AIM-CRM's frontend, which has no /content/settings route
+  // at all) instead of back to Marketing OS.
+  const frontendUrl = (process.env.MARKETING_OS_URL || 'https://marketing.aimdentallab.com').trim()
   const redirectBack = (query) => res.redirect(`${frontendUrl}/content/settings?${new URLSearchParams(query)}`)
 
   if (providerError) {
-    return redirectBack({ social_error: String(providerError), platform })
+    console.error(`[social-connections] ${platform} callback got a provider error:`, providerError, providerErrorDescription || '')
+    return redirectBack({ social_error: String(providerErrorDescription || providerError), platform })
   }
 
   let statePayload
