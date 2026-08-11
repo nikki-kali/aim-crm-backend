@@ -69,12 +69,17 @@ async function fetchAccount(accessToken) {
 }
 
 // Only the versioned REST API (Posts, Images) needs these headers — the
-// plain /v2/userinfo call above doesn't. LinkedIn only keeps roughly the
-// last 12 months of versions active (YYYYMM) — this needs bumping
-// periodically, not a one-time value. Hit "Requested version ... is not
-// active" once already from an initial guess that had already gone
-// stale; keep this current rather than picking an arbitrary past month.
-const API_VERSION = '202608'
+// plain /v2/userinfo call above doesn't. LinkedIn publishes a new
+// YYYYMM version roughly monthly and keeps about a year of them active,
+// but new versions lag the actual calendar month (they publish ~2 weeks
+// ahead of the month they represent, not on the 1st) — the current
+// calendar month is NOT a safe guess. Confirmed via LinkedIn's own docs
+// at the time this was set: 202606 was the latest published Marketing
+// API version. If this starts erroring "not active" again, check
+// LinkedIn's versioning docs for the current value rather than
+// incrementing blindly — two guesses (202401, then the literal current
+// month) both failed before checking properly.
+const API_VERSION = '202606'
 function restHeaders(accessToken, extra = {}) {
   return {
     Authorization: `Bearer ${accessToken}`,
