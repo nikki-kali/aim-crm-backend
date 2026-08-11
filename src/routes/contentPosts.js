@@ -4,6 +4,11 @@ const multer = require('multer')
 const db = require('../config/db')
 const auth = require('../middleware/auth')
 const { createStorageClient } = require('../config/supabaseStorage')
+const { decrypt, encrypt } = require('../utils/tokenCipher')
+const socialX = require('../services/socialProviders/x')
+const socialLinkedin = require('../services/socialProviders/linkedin')
+
+const PUBLISHERS = { x: socialX, linkedin: socialLinkedin }
 
 const router = express.Router()
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } })
@@ -48,6 +53,7 @@ function mapPost(row) {
     analytics: row.analytics,
     publishedAt: toDateStr(row.published_at),
     activityLog: row.activity_log,
+    publishResults: row.publish_results,
   }
 }
 
@@ -236,6 +242,120 @@ router.get('/content-posts/:id/media-url', auth, async (req, res, next) => {
     const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(rows[0].media_storage_path, 60 * 60 * 24 * 7)
     if (error) return res.status(500).json({ error: error.message })
     res.json({ mediaUrl: data.signedUrl })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// POST /api/content-posts/:id/publish — real publishing to whichever of
+// this post's selected platforms have a real social_connections row for
+// this post's brand (see routes/socialConnections.js). A platform with no
+// real connection is `skipped`, not an error — the post as a whole
+// becomes `published` if at least one target actually published,
+// `failed` otherwise (reusing the existing failed/"Retry scheduling"
+// status rather than inventing a new one for this case). No extra access
+// gate beyond `auth` — publishing is already gated by the approval flow
+// a post goes through before it can even reach `scheduled`.
+router.post('/content-posts/:id/publish', auth, async (req, res, next) => {
+  try {
+    const { rows } = await db.query('select * from content_posts where id = $1', [req.params.id])
+    if (rows.length === 0) return res.status(404).json({ error: 'Post not found' })
+    const post = rows[0]
+
+    // Downloaded once and reused across whichever platforms need it,
+    // rather than re-fetching per platform.
+    let media = null
+    if (post.media_storage_path) {
+      const supabase = createStorageClient()
+      const { data, error } = await supabase.storage.from(BUCKET).download(post.media_storage_path)
+      if (!error && data) {
+        media = {
+          buffer: Buffer.from(await data.arrayBuffer()),
+          mimeType: data.type || 'application/octet-stream',
+          isVideo: post.content.mediaType === 'video',
+        }
+      }
+    }
+
+    const platformIds = post.platforms || []
+    const { rows: connections } = platformIds.length
+      ? await db.query('select * from social_connections where lab = $1 and platform = any($2::text[])', [post.lab, platformIds])
+      : { rows: [] }
+    const connectionByPlatform = Object.fromEntries(connections.map((c) => [c.platform, c]))
+
+    const results = {}
+    const activities = []
+
+    for (const platformId of platformIds) {
+      const provider = PUBLISHERS[platformId]
+      const connection = connectionByPlatform[platformId]
+
+      if (!provider || !connection) {
+        results[platformId] = { status: 'skipped', error: 'Not connected' }
+      } else {
+        try {
+          let accessToken = decrypt(connection.access_token_enc)
+          if (connection.token_expires_at && new Date(connection.token_expires_at) <= new Date()) {
+            if (provider.refreshAccessToken && connection.refresh_token_enc) {
+              const refreshed = await provider.refreshAccessToken(decrypt(connection.refresh_token_enc))
+              accessToken = refreshed.accessToken
+              await db.query(
+                'update social_connections set access_token_enc = $1, refresh_token_enc = $2, token_expires_at = $3 where id = $4',
+                [
+                  encrypt(refreshed.accessToken),
+                  refreshed.refreshToken ? encrypt(refreshed.refreshToken) : connection.refresh_token_enc,
+                  refreshed.expiresAt,
+                  connection.id,
+                ]
+              )
+            } else {
+              throw new Error('Connection expired — reconnect in Settings')
+            }
+          }
+
+          const text = [post.per_platform_text?.[platformId] ?? post.content.text, (post.content.hashtags || []).join(' ')]
+            .filter(Boolean)
+            .join('\n\n')
+
+          const result = await provider.publishPost({
+            accessToken,
+            accountId: connection.account_id,
+            accountName: connection.account_name,
+            text,
+            media,
+          })
+          results[platformId] = { status: 'published', ...result, publishedAt: new Date().toISOString() }
+        } catch (err) {
+          results[platformId] = { status: 'failed', error: err.message }
+        }
+      }
+
+      const r = results[platformId]
+      activities.push({
+        id: `a-publish-${platformId}-${Date.now()}`,
+        type: r.status === 'published' ? 'published' : 'unscheduled',
+        text:
+          r.status === 'published'
+            ? `Published to ${platformId}${media && r.mediaIncluded === false ? ' (text only — media not included)' : ''}`
+            : r.status === 'skipped'
+              ? `Skipped ${platformId} — not connected`
+              : `${platformId} publish failed: ${r.error}`,
+        meta: 'System · just now',
+      })
+    }
+
+    const anyPublished = Object.values(results).some((r) => r.status === 'published')
+    const nextStatus = anyPublished ? 'published' : 'failed'
+    const nextActivityLog = [...post.activity_log, ...activities]
+
+    const { rows: updated } = await db.query(
+      `update content_posts set status = $1, publish_results = $2::jsonb, activity_log = $3::jsonb,
+        published_at = coalesce(published_at, case when $1 = 'published' then now()::date else null end)
+       where id = $4 returning *`,
+      [nextStatus, JSON.stringify(results), JSON.stringify(nextActivityLog), req.params.id]
+    )
+
+    res.json({ post: mapPost(updated[0]) })
   } catch (err) {
     next(err)
   }

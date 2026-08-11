@@ -68,4 +68,77 @@ async function fetchAccount(accessToken) {
   return { accountId: body.sub, accountName: body.name || 'LinkedIn member' }
 }
 
-module.exports = { buildAuthorizeUrl, exchangeCode, fetchAccount }
+// Only the versioned REST API (Posts, Images) needs these headers — the
+// plain /v2/userinfo call above doesn't.
+const API_VERSION = '202401'
+function restHeaders(accessToken, extra = {}) {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    'LinkedIn-Version': API_VERSION,
+    'X-Restli-Protocol-Version': '2.0.0',
+    ...extra,
+  }
+}
+
+// Images API's 3-step flow: initialize -> PUT the raw bytes -> get back an
+// image urn to reference on the post. No LinkedIn video upload here (see
+// this file's own header comment) — a video-bearing post just skips this
+// and publishes text-only, which the route layer surfaces honestly via
+// mediaIncluded: false rather than silently dropping the video.
+async function uploadImage(accessToken, accountId, media) {
+  const initRes = await fetch('https://api.linkedin.com/rest/images?action=initializeUpload', {
+    method: 'POST',
+    headers: restHeaders(accessToken, { 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ initializeUploadRequest: { owner: `urn:li:person:${accountId}` } }),
+  })
+  const init = await initRes.json().catch(() => ({}))
+  if (!initRes.ok) throw new Error(init.message || `LinkedIn image upload init failed (${initRes.status})`)
+
+  const uploadRes = await fetch(init.value.uploadUrl, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': media.mimeType },
+    body: media.buffer,
+  })
+  if (!uploadRes.ok) throw new Error(`LinkedIn image upload failed (${uploadRes.status})`)
+
+  return init.value.image // an urn:li:image:... string
+}
+
+// author/accountId is the bare member id from fetchAccount's `sub` — the
+// urn:li:person: prefix is added here, not stored, since it's just a
+// formatting concern for API calls.
+async function publishPost({ accessToken, accountId, text, media }) {
+  let imageUrn = null
+  let mediaIncluded = false
+  if (media && !media.isVideo) {
+    imageUrn = await uploadImage(accessToken, accountId, media)
+    mediaIncluded = true
+  }
+
+  const body = {
+    author: `urn:li:person:${accountId}`,
+    commentary: text,
+    visibility: 'PUBLIC',
+    distribution: { feedDistribution: 'MAIN_FEED', targetEntities: [], thirdPartyDistributionChannels: [] },
+    lifecycleState: 'PUBLISHED',
+    isReshareDisabledByAuthor: false,
+  }
+  if (imageUrn) body.content = { media: { id: imageUrn } }
+
+  const res = await fetch('https://api.linkedin.com/rest/posts', {
+    method: 'POST',
+    headers: restHeaders(accessToken, { 'Content-Type': 'application/json' }),
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.message || `LinkedIn post failed (${res.status})`)
+  }
+  // The Posts API returns the created post's urn via a response header,
+  // not the (empty) body.
+  const postUrn = res.headers.get('x-restli-id') || res.headers.get('x-linkedin-id')
+  const externalUrl = postUrn ? `https://www.linkedin.com/feed/update/${postUrn}/` : null
+  return { externalId: postUrn, externalUrl, mediaIncluded }
+}
+
+module.exports = { buildAuthorizeUrl, exchangeCode, fetchAccount, publishPost }
