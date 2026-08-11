@@ -69,8 +69,12 @@ async function fetchAccount(accessToken) {
 }
 
 // Only the versioned REST API (Posts, Images) needs these headers — the
-// plain /v2/userinfo call above doesn't.
-const API_VERSION = '202401'
+// plain /v2/userinfo call above doesn't. LinkedIn only keeps roughly the
+// last 12 months of versions active (YYYYMM) — this needs bumping
+// periodically, not a one-time value. Hit "Requested version ... is not
+// active" once already from an initial guess that had already gone
+// stale; keep this current rather than picking an arbitrary past month.
+const API_VERSION = '202608'
 function restHeaders(accessToken, extra = {}) {
   return {
     Authorization: `Bearer ${accessToken}`,
