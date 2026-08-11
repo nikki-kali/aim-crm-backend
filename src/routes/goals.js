@@ -7,6 +7,7 @@ const { sendEmail } = require('../services/email')
 const router = express.Router()
 
 const METRIC_LABELS = {
+  leads_created: 'Leads Added',
   leads_won: 'Leads Won',
   leads_contacted: 'Leads Contacted',
   proposals_sent: 'Proposals Sent',
@@ -17,7 +18,13 @@ async function computeProgress(goal) {
   const { rep_id, metric, target, period_start, period_end } = goal
   let current = 0
 
-  if (metric === 'leads_won') {
+  if (metric === 'leads_created') {
+    const { rows: [r] } = await db.query(
+      `SELECT COUNT(*) AS val FROM leads WHERE assigned_to=$1 AND created_at::date BETWEEN $2 AND $3`,
+      [rep_id, period_start, period_end]
+    )
+    current = Number(r.val)
+  } else if (metric === 'leads_won') {
     const { rows: [r] } = await db.query(
       `SELECT COUNT(*) AS val FROM leads WHERE assigned_to=$1 AND status='Won' AND updated_at::date BETWEEN $2 AND $3`,
       [rep_id, period_start, period_end]
