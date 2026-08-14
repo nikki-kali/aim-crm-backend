@@ -17,6 +17,10 @@ router.get('/', auth, async (req, res, next) => {
       query += ` WHERE c.assigned_to = $1`
       params.push(req.query.rep)
     }
+    if (req.query.search) {
+      params.push(`%${req.query.search}%`)
+      query += `${params.length === 1 ? ' WHERE' : ' AND'} (c.doctor_name ILIKE $${params.length} OR c.clinic_name ILIKE $${params.length})`
+    }
     query += ' ORDER BY c.total_revenue DESC'
     const { rows } = await db.query(query, params)
     res.json(rows)

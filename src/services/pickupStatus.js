@@ -1,6 +1,7 @@
 const db = require('../config/db')
 const { sendEmail, pickupDispatchedEmail, pickupReceivedEmail, pickupBrand } = require('./email')
 const { generateCaseNumber } = require('../utils/caseNumber')
+const { convertLeadToClient } = require('./leadConversion')
 
 const STAGE_ORDER = { requested: 0, dispatched: 1, received: 2 }
 const STAGE_COLUMN = { dispatched: 'pickup_dispatched_at', received: 'pickup_received_at' }
@@ -37,6 +38,11 @@ async function createCaseFromPickupLead(lead) {
     [caseNumber, lead.doctor_name, lead.brand || 'Aim Dental', dueDate,
      lead.email || '', lead.phone || '', notes, lead.id, JSON.stringify(stageHistory)]
   )
+
+  // This lead now has a case at the lab — auto-convert to a client so they
+  // show up in the Clients list. Best-effort: shouldn't block case creation.
+  convertLeadToClient(lead.id, {}).catch(err =>
+    console.error('pickup received: lead-to-client conversion failed', err))
 }
 
 // Shared by both trigger paths for stages 2/3 — the authenticated CRM

@@ -4,6 +4,7 @@ const auth = require('../middleware/auth')
 const requireAdmin = require('../middleware/requireAdmin')
 const { generateCaseNumber } = require('../utils/caseNumber')
 const { sendEmail } = require('../services/email')
+const { convertLeadToClient } = require('../services/leadConversion')
 
 const router = express.Router()
 
@@ -187,9 +188,9 @@ router.post('/', auth, async (req, res, next) => {
        sterilized_by, sterilized_at, entered_by, entered_at,
        plaster_checked_by, plaster_checked_at, delivered_by, delivered_at, packed_by, packed_at,
        outsourcing_return_date, outsourcing_tracking_number, shipped_to_outsourcing_at,
-       created_at, updated_at)
+       original_lead_id, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,
-       $17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,
+       $17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,
        NOW(),NOW()) RETURNING *`,
       [caseNumber, d.client_name.trim(), d.brand || 'Aim Dental', d.case_type || 'Crown & Bridge',
        d.patient || '', d.assigned_technician || '', d.tracking_number || '',
@@ -202,8 +203,18 @@ router.post('/', auth, async (req, res, next) => {
        d.plaster_checked_by || '', d.plaster_checked_at || null,
        d.delivered_by || '', d.delivered_at || null, d.packed_by || '', d.packed_at || null,
        d.outsourcing_return_date || null, d.outsourcing_tracking_number || '',
-       d.shipped_to_outsourcing_at || null]
+       d.shipped_to_outsourcing_at || null, d.lead_id || null]
     )
+
+    // A case linked to a lead (picked from the New Case client search, or
+    // auto-created from a received pickup) means that lead now has a case
+    // at the lab — auto-convert them to a client so they show up in the
+    // Clients list. Best-effort: a failure here shouldn't block case creation.
+    if (d.lead_id) {
+      convertLeadToClient(d.lead_id, { actorId: req.user.id }).catch(err =>
+        console.error('case create: lead-to-client conversion failed', err))
+    }
+
     res.status(201).json(rows[0])
   } catch (err) { next(err) }
 })
