@@ -13,6 +13,13 @@ const PUBLISHERS = { x: socialX, linkedin: socialLinkedin }
 const router = express.Router()
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } })
 const BUCKET = 'content-media'
+// How long a signed URL is valid for, and how much of that window has to
+// remain before /media-url will reuse a cached one rather than mint a new
+// one. Minting on every call meant the token differed each time, which
+// defeated browser HTTP caching and re-downloaded the full file on every
+// post view — the leading driver of the Supabase org's egress overage.
+const SIGNED_URL_TTL_SECONDS = 60 * 60 * 24 * 7
+const SIGNED_URL_REUSE_BUFFER_SECONDS = 60 * 60 * 24
 
 // Real persistence for Marketing OS's Content Studio (see CLAUDE.md's
 // Content Studio section) — this backend previously had no concept of
@@ -192,14 +199,16 @@ router.post('/content-posts/:id/media', auth, upload.single('file'), async (req,
     if (uploadError) return res.status(500).json({ error: uploadError.message })
 
     const isVideo = (req.file.mimetype || '').startsWith('video/')
-    const { data: signed, error: signError } = await supabase.storage.from(BUCKET).createSignedUrl(storagePath, 60 * 60 * 24 * 7)
+    const { data: signed, error: signError } = await supabase.storage.from(BUCKET).createSignedUrl(storagePath, SIGNED_URL_TTL_SECONDS)
     if (signError) return res.status(500).json({ error: signError.message })
+    const expiresAt = new Date(Date.now() + SIGNED_URL_TTL_SECONDS * 1000)
 
     const { rows } = await db.query(
       `update content_posts set media_storage_path = $1, media_deleted_at = null,
-        content = content || jsonb_build_object('mediaType', $2::text, 'mediaFileName', $3::text)
-       where id = $4 returning *`,
-      [storagePath, isVideo ? 'video' : 'image', req.file.originalname, req.params.id]
+        media_signed_url = $2, media_signed_url_expires_at = $3,
+        content = content || jsonb_build_object('mediaType', $4::text, 'mediaFileName', $5::text)
+       where id = $6 returning *`,
+      [storagePath, signed.signedUrl, expiresAt, isVideo ? 'video' : 'image', req.file.originalname, req.params.id]
     )
     res.json({ post: mapPost(rows[0]), mediaUrl: signed.signedUrl })
   } catch (err) {
@@ -219,6 +228,7 @@ router.delete('/content-posts/:id/media', auth, async (req, res, next) => {
     }
     const { rows } = await db.query(
       `update content_posts set media_storage_path = null, media_deleted_at = null,
+        media_signed_url = null, media_signed_url_expires_at = null,
         content = content || '{"mediaType":"none","mediaLabel":"","mediaFileName":""}'::jsonb
        where id = $1 returning *`,
       [req.params.id]
@@ -229,18 +239,34 @@ router.delete('/content-posts/:id/media', auth, async (req, res, next) => {
   }
 })
 
-// GET /api/content-posts/:id/media-url — a fresh signed URL (private
-// bucket — the frontend can never hit Storage directly) for whenever a
-// previously-returned one expires.
+// GET /api/content-posts/:id/media-url — reuses the cached signed URL
+// while it still has real headroom left (see SIGNED_URL_REUSE_BUFFER_SECONDS
+// above) instead of minting a new one on every call. A fresh signature
+// on every call meant the URL differed each time, so the browser could
+// never HTTP-cache the file and re-downloaded it in full on every post
+// view — this is the actual fix for that.
 router.get('/content-posts/:id/media-url', auth, async (req, res, next) => {
   try {
-    const { rows } = await db.query('select media_storage_path from content_posts where id = $1', [req.params.id])
+    const { rows } = await db.query(
+      'select media_storage_path, media_signed_url, media_signed_url_expires_at from content_posts where id = $1',
+      [req.params.id]
+    )
     if (rows.length === 0) return res.status(404).json({ error: 'Post not found' })
-    if (!rows[0].media_storage_path) return res.json({ mediaUrl: null })
+    const row = rows[0]
+    if (!row.media_storage_path) return res.json({ mediaUrl: null })
+
+    const stillFresh = row.media_signed_url && row.media_signed_url_expires_at &&
+      new Date(row.media_signed_url_expires_at).getTime() - Date.now() > SIGNED_URL_REUSE_BUFFER_SECONDS * 1000
+    if (stillFresh) return res.json({ mediaUrl: row.media_signed_url })
 
     const supabase = createStorageClient()
-    const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(rows[0].media_storage_path, 60 * 60 * 24 * 7)
+    const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(row.media_storage_path, SIGNED_URL_TTL_SECONDS)
     if (error) return res.status(500).json({ error: error.message })
+    const expiresAt = new Date(Date.now() + SIGNED_URL_TTL_SECONDS * 1000)
+    await db.query(
+      'update content_posts set media_signed_url = $1, media_signed_url_expires_at = $2 where id = $3',
+      [data.signedUrl, expiresAt, req.params.id]
+    )
     res.json({ mediaUrl: data.signedUrl })
   } catch (err) {
     next(err)

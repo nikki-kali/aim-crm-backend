@@ -36,7 +36,8 @@ async function cleanupOldMedia() {
         const { error } = await supabase.storage.from(BUCKET).remove([row.media_storage_path])
         if (error) throw error
         await db.query(
-          `update content_posts set media_storage_path = null, media_deleted_at = now() where id = $1`,
+          `update content_posts set media_storage_path = null, media_deleted_at = now(),
+            media_signed_url = null, media_signed_url_expires_at = null where id = $1`,
           [row.id]
         )
         deleted++
