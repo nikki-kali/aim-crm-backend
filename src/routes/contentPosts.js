@@ -10,6 +10,25 @@ const socialLinkedin = require('../services/socialProviders/linkedin')
 
 const PUBLISHERS = { x: socialX, linkedin: socialLinkedin }
 
+// LinkedIn Connect still works (services/socialProviders/linkedin.js — a
+// real member-profile OAuth handshake), but actually publishing through
+// it is deliberately disabled here: that provider posts as the
+// connecting member's personal profile, not Aim's Company Page, since
+// real Company Page posting needs LinkedIn's Community Management API,
+// which can't be requested yet (another product review — "Matched
+// Audiences API" — is still pending on the same LinkedIn app, and
+// LinkedIn won't accept a new product request while one is in progress;
+// confirmed via the app's own Products tab, Community Management API's
+// "Request access" button is greyed out). A real post already went out
+// under a real person's personal profile by mistake before this was
+// caught. Remove this block once Community Management API is approved
+// and services/socialProviders/linkedin.js is switched back to the
+// organization-scoped version (intact in git history, see that file's
+// own header comment).
+const DISABLED_PUBLISH_REASONS = {
+  linkedin: 'LinkedIn auto-publish is disabled — Company Page posting needs LinkedIn API approval (Community Management API) that is not yet available; publishing would otherwise go out under the connecting member\'s personal profile, not Aim\'s Page.',
+}
+
 const router = express.Router()
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } })
 const BUCKET = 'content-media'
@@ -316,7 +335,9 @@ router.post('/content-posts/:id/publish', auth, async (req, res, next) => {
       const provider = PUBLISHERS[platformId]
       const connection = connectionByPlatform[platformId]
 
-      if (!provider || !connection) {
+      if (DISABLED_PUBLISH_REASONS[platformId]) {
+        results[platformId] = { status: 'skipped', error: DISABLED_PUBLISH_REASONS[platformId] }
+      } else if (!provider || !connection) {
         results[platformId] = { status: 'skipped', error: 'Not connected' }
       } else {
         try {
@@ -364,7 +385,7 @@ router.post('/content-posts/:id/publish', auth, async (req, res, next) => {
           r.status === 'published'
             ? `Published to ${platformId}${media && r.mediaIncluded === false ? ' (text only — media not included)' : ''}`
             : r.status === 'skipped'
-              ? `Skipped ${platformId} — not connected`
+              ? `Skipped ${platformId} — ${r.error || 'not connected'}`
               : `${platformId} publish failed: ${r.error}`,
         meta: 'System · just now',
       })
