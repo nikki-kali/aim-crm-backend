@@ -14,6 +14,7 @@ app.use('/api', require('./routes/contentPosts'))
 // "don't touch it right now" constraint, not because it belongs here
 // architecturally.
 app.use('/api/social-connections', require('./routes/socialConnections'))
+app.use('/api', require('./routes/contentLinkInBio'))
 
 const PORT = process.env.PORT || 4000
 
