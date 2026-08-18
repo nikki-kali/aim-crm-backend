@@ -15,6 +15,7 @@ app.use('/api', require('./routes/contentPosts'))
 // architecturally.
 app.use('/api/social-connections', require('./routes/socialConnections'))
 app.use('/api', require('./routes/contentLinkInBio'))
+app.use('/api', require('./routes/brevo'))
 
 const PORT = process.env.PORT || 4000
 
