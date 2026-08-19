@@ -42,8 +42,12 @@ router.post(
       }
 
       const { rows } = await db.query(
-        `SELECT case_number, status, due_date, est_completion_date, doctor_email, doctor_phone, stage_history
-         FROM cases WHERE UPPER(case_number) = UPPER($1)`,
+        `SELECT c.case_number, c.status, c.due_date, c.est_completion_date, c.doctor_email, c.doctor_phone, c.stage_history,
+                l.pickup_status, l.created_at AS pickup_requested_at, l.pickup_dispatched_at,
+                l.pickup_received_at, l.pickup_date, l.pickup_window
+         FROM cases c
+         LEFT JOIN leads l ON l.id = c.original_lead_id
+         WHERE UPPER(c.case_number) = UPPER($1)`,
         [caseNumber.trim()]
       )
       const caseRow = rows[0]
@@ -59,10 +63,15 @@ router.post(
       }
 
       // Only case-status fields go back to the browser — never doctor_email/
-      // doctor_phone (the values used to verify the requester above), and
-      // never anything from the clients/leads tables (practice contact info,
+      // doctor_phone (the values used to verify the requester above) or
+      // anything else from the leads table (practice contact info,
       // financials, etc.). stage_history is trimmed to stage + timestamp;
-      // changed_by is an internal staff id and stays server-side.
+      // changed_by is an internal staff id and stays server-side. The pickup
+      // block is the one deliberate exception: pickup_status/timestamps/
+      // scheduled date+window carry no contact info, and this join only
+      // exists at all when the case came from a Schedule Pickup lead
+      // (original_lead_id set) — same join AIM-CRM's own internal Case
+      // Detail timeline uses, just re-shaped for the public response.
       res.json({
         caseNumber: caseRow.case_number,
         status: caseRow.status,
@@ -70,6 +79,16 @@ router.post(
         estCompletionDate: caseRow.est_completion_date,
         stages: STAGES,
         history: (caseRow.stage_history || []).map(({ stage, changed_at }) => ({ stage, changedAt: changed_at })),
+        pickup: caseRow.pickup_status
+          ? {
+              status: caseRow.pickup_status,
+              requestedAt: caseRow.pickup_requested_at,
+              dispatchedAt: caseRow.pickup_dispatched_at,
+              receivedAt: caseRow.pickup_received_at,
+              scheduledDate: caseRow.pickup_date,
+              scheduledWindow: caseRow.pickup_window,
+            }
+          : null,
       })
     } catch (err) {
       next(err)
