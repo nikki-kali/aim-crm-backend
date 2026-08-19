@@ -5,14 +5,9 @@ const requireAdmin = require('../middleware/requireAdmin')
 const { generateCaseNumber } = require('../utils/caseNumber')
 const { sendEmail } = require('../services/email')
 const { convertLeadToClient } = require('../services/leadConversion')
+const { STAGES } = require('../constants/caseStages')
 
 const router = express.Router()
-
-const STAGES = [
-  'Case Received', 'Awaiting Scan', 'Case Accepted',
-  'In Production', 'Quality Control', 'Ready for Dispatch',
-  'Dispatched', 'Completed',
-]
 
 function renderTemplate(template, vars) {
   let out = template
