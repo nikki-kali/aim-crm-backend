@@ -146,10 +146,27 @@ router.post('/ship-to-outsourcing', auth, async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
-// GET /api/cases
+// GET /api/cases — left-joins the originating pickup lead's own pickup_*
+// columns (requested/dispatched/received timestamps) when a case came
+// from a Schedule Pickup lead (original_lead_id set) — powers the Case
+// Detail modal's combined pickup + production timeline. Null for any
+// case created directly (not from a pickup), which the frontend uses to
+// hide that section entirely rather than show empty pickup fields.
+// l.created_at (the "Requested" stage — pickupStatus.js has no
+// pickup_requested_at column, that stage is just the lead's own
+// creation time) is aliased to pickup_requested_at since cases already
+// has its own created_at — an unaliased duplicate column name would
+// silently collide in the resulting JSON row.
 router.get('/', auth, async (req, res, next) => {
   try {
-    const { rows } = await db.query('SELECT * FROM cases ORDER BY due_date ASC NULLS LAST')
+    const { rows } = await db.query(
+      `SELECT c.*, l.pickup_status, l.created_at AS pickup_requested_at,
+              l.pickup_dispatched_at, l.pickup_received_at,
+              l.pickup_date, l.pickup_window
+       FROM cases c
+       LEFT JOIN leads l ON l.id = c.original_lead_id
+       ORDER BY c.due_date ASC NULLS LAST`
+    )
     res.json(rows)
   } catch (err) { next(err) }
 })
