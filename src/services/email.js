@@ -14,7 +14,7 @@ function getResend() {
 // (info@) already exist and are proven working (same account the newsletter
 // signup sync in routes/newsletter.js already uses), so it works as a
 // fallback while Resend's domain verification is stuck pending.
-async function sendViaBrevo({ to, subject, html, cc }) {
+async function sendViaBrevo({ to, subject, html, cc, attachments }) {
   const res = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
     headers: {
@@ -28,6 +28,12 @@ async function sendViaBrevo({ to, subject, html, cc }) {
       ...(cc?.length ? { cc: cc.map((email) => ({ email })) } : {}),
       subject,
       htmlContent: html,
+      // Brevo wants base64 text, unlike Resend which takes a raw Buffer —
+      // converted here rather than at the call site so callers only ever
+      // deal in Buffers.
+      ...(attachments?.length
+        ? { attachment: attachments.map((a) => ({ name: a.filename, content: a.content.toString('base64') })) }
+        : {}),
     }),
   })
   if (!res.ok) {
@@ -36,7 +42,11 @@ async function sendViaBrevo({ to, subject, html, cc }) {
   }
 }
 
-async function sendEmail({ to, subject, html, cc }) {
+// attachments: [{ filename, content: Buffer, contentType? }] — content type
+// is inferred from filename if omitted. Used by routes/scanSubmission.js to
+// forward a doctor's uploaded scan files straight through in the staff
+// notification email; every other call site omits this.
+async function sendEmail({ to, subject, html, cc, attachments }) {
   const client = getResend()
   const from = process.env.RESEND_FROM || 'Aim Dental CRM <onboarding@resend.dev>'
   const { error } = await client.emails.send({
@@ -45,6 +55,7 @@ async function sendEmail({ to, subject, html, cc }) {
     ...(cc?.length ? { cc } : {}),
     subject,
     html,
+    ...(attachments?.length ? { attachments } : {}),
   })
   if (!error) return
 
@@ -52,7 +63,7 @@ async function sendEmail({ to, subject, html, cc }) {
     throw new Error(error.message)
   }
   console.warn('sendEmail: Resend failed, falling back to Brevo —', error.message)
-  await sendViaBrevo({ to, subject, html, cc })
+  await sendViaBrevo({ to, subject, html, cc, attachments })
 }
 
 function coldLeadEmail(leads) {
