@@ -146,9 +146,17 @@ router.post(
       // doesn't trigger an email is still recoverable from the CRM; failing
       // the whole request over a flaky send would lose the submission
       // (and the doctor's uploaded files) entirely.
+      // CC list mirrors the pickup scheduler's internal notification
+      // (webLeads.js) minus customer@/shipping@khdentallab.com, which don't
+      // apply to a digital scan submission.
+      const cc = process.env.SCAN_SUBMISSION_CC
+        ? process.env.SCAN_SUBMISSION_CC.split(',').map((s) => s.trim()).filter(Boolean)
+        : ['media@aimdentallab.com', 'execassistant@aimdentallab.com', 'ben@aimdentallab.com']
+
       try {
         await sendEmail({
           to: process.env.SCAN_SUBMISSION_EMAIL || 'digital@aimdentallab.com',
+          cc,
           subject: `New scanned case — ${name.trim()}`,
           html: scanSubmissionEmail({
             name: name.trim(), practice, email, phone, details,
