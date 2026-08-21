@@ -6,6 +6,7 @@ const db = require('../config/db')
 const { scoreFromLead } = require('../services/scoring')
 const { sendEmail } = require('../services/email')
 const rateLimiter = require('../middleware/rateLimiter')
+const { isKnownEmail, verifyToken } = require('../services/emailVerification')
 
 const router = express.Router()
 
@@ -101,7 +102,7 @@ router.post(
   },
   async (req, res, next) => {
     try {
-      const { name, practice, email, phone, details, company } = req.body
+      const { name, practice, email, phone, details, company, verificationToken } = req.body
 
       // Honeypot: real visitors never see or fill this field. Pretend
       // success so bots don't learn their submission was rejected.
@@ -112,6 +113,13 @@ router.post(
       if (!name?.trim()) return res.status(400).json({ error: 'name is required' })
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || '')) {
         return res.status(400).json({ error: 'a valid email is required' })
+      }
+
+      // First-time-email gate, same enforcement as webLeads.js's pickup
+      // path — every submission through this endpoint is a scan case, so
+      // there's no formType branch to scope this to.
+      if (!(await isKnownEmail(email)) && !verifyToken(email, verificationToken)) {
+        return res.status(403).json({ error: 'Please verify your email before submitting your case.', requiresVerification: true })
       }
 
       const files = req.files || []

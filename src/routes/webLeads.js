@@ -5,6 +5,7 @@ const { scoreFromLead } = require('../services/scoring')
 const { sendEmail, pickupRequestedEmail, pickupBrand } = require('../services/email')
 const rateLimiter = require('../middleware/rateLimiter')
 const { pickupActionToken } = require('./intake')
+const { isKnownEmail, verifyToken } = require('../services/emailVerification')
 
 const router = express.Router()
 const BACKEND_URL = process.env.RENDER_EXTERNAL_URL || 'https://aim-crm-backend.onrender.com'
@@ -94,7 +95,7 @@ router.post(
     try {
       const {
         name, practice, email, phone, caseType, message, monthlyVolume, company, topic, brand,
-        pickupAddress, pickupDate, pickupWindow, caseCount, instructions,
+        pickupAddress, pickupDate, pickupWindow, caseCount, instructions, verificationToken,
       } = req.body
 
       // Honeypot: real visitors never see or fill this field. Pretend success
@@ -120,6 +121,17 @@ router.post(
       // apart — used for CC routing below and for the pickup_status/stage-1
       // confirmation email.
       const isPickup = caseType === 'Schedule Pickup'
+
+      // First-time-email gate — pickup only (not the plain Contact form or
+      // Scanner Program). The frontend already ran the same check via
+      // /api/verify-email/request and either skipped straight to submit (a
+      // known email) or made the doctor enter an emailed code first; this
+      // is the server-side enforcement so the gate can't be bypassed by
+      // posting directly to this endpoint. Re-checking isKnownEmail here
+      // rather than trusting a client-supplied flag for the same reason.
+      if (isPickup && !(await isKnownEmail(email)) && !verifyToken(email, verificationToken)) {
+        return res.status(403).json({ error: 'Please verify your email before scheduling a pickup.', requiresVerification: true })
+      }
       const notesParts = []
       if (monthlyVolume) notesParts.push(`Est. monthly volume: ${monthlyVolume}`)
       if (message) notesParts.push(message)
