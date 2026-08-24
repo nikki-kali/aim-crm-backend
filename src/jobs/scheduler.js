@@ -1,8 +1,9 @@
 const cron = require('node-cron')
 const { runAutomationLogic } = require('../services/automations')
 const { runEngineTick } = require('../services/workflowEngine')
+const { sendAllWeeklyRepReports } = require('../services/weeklyRepReport')
 const db = require('../config/db')
-const { sendEmail } = require('../services/email')
+const { sendEmail, primaryFrontendUrl } = require('../services/email')
 
 async function sendScheduledReports(frequency) {
   try {
@@ -50,7 +51,7 @@ async function sendScheduledReports(frequency) {
       <p style="margin:0;font-size:13px;color:#92400e">⚠ <strong>${Number(coldRes.rows[0].count)} cold lead${Number(coldRes.rows[0].count)!==1?'s':''}</strong> need follow-up · <strong>${total} leads</strong> YTD · <strong>${won} won</strong></p>
     </div>
   </div>
-  <div style="padding:0 32px 24px"><a href="${process.env.FRONTEND_URL||'#'}/dashboard" style="display:inline-block;background:#06babe;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Open Dashboard →</a></div>
+  <div style="padding:0 32px 24px"><a href="${primaryFrontendUrl()}/dashboard" style="display:inline-block;background:#06babe;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Open Dashboard →</a></div>
   <div style="background:#f9fafb;padding:14px 32px;font-size:11px;color:#9ca3af;border-top:1px solid #f3f4f6">Aim Dental CRM · ${freqLabel} automated report</div>
 </div></body></html>`
 
@@ -77,12 +78,16 @@ function startScheduler() {
   })
 
   // Every Monday at 9:00 AM — lost recovery + win streak + weekly reports
+  // (company-wide, admin-configured recipients) + per-rep weekly reports
+  // (one email per staff/sales_rep user, cc'd to leadership)
   cron.schedule('0 9 * * 1', async () => {
     console.log('[cron] Running lost_recovery check')
     await runAutomationLogic('lost_recovery').catch(console.error)
     console.log('[cron] Running win_streak check')
     await runAutomationLogic('win_streak').catch(console.error)
     await sendScheduledReports('weekly')
+    console.log('[cron] Sending weekly rep reports')
+    await sendAllWeeklyRepReports().catch((err) => console.error('[cron] weekly rep reports failed:', err))
   })
 
   // 1st of every month at 8:00 AM — monthly reports

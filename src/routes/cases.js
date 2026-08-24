@@ -146,6 +146,101 @@ router.post('/ship-to-outsourcing', auth, async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+// POST /api/cases/import-evident — bulk-import a "Booked Cases" export from
+// Evident (the lab's separate production system) so real case sales value
+// (Billed vs. WIP) lands in the CRM, feeding the rep dashboard's Sales
+// Value KPI and the weekly report email (see reports.js's my-summary sales
+// query, which sums cases.value grouped by cases.status via clients.assigned_to
+// — cases have no assigned_to of their own). Evident's own export is
+// already filtered to one rep at a time (no rep column in the file), so
+// the admin doing the import picks which rep via `rep_id`.
+//
+// Upserts by evident_case_number (Evident's "Ref") so re-importing the same
+// or an overlapping weekly export is idempotent rather than creating
+// duplicates. client_name is written back using the *matched* client's
+// exact doctor_name (not the raw CSV text) when one already exists, since
+// every other join in this codebase (clients.js, the CaseTimeline pickup
+// lookup, reports.js's sales query) relies on an exact string match between
+// cases.client_name and clients.doctor_name.
+router.post('/import-evident', auth, requireAdmin, async (req, res, next) => {
+  try {
+    const { rep_id, rows } = req.body
+    if (!rep_id) return res.status(400).json({ error: 'rep_id is required' })
+    if (!Array.isArray(rows) || rows.length === 0) return res.status(400).json({ error: 'No rows provided' })
+
+    const { rows: repRows } = await db.query(
+      `SELECT id FROM users WHERE id=$1 AND role IN ('staff','sales_rep')`, [rep_id]
+    )
+    if (!repRows[0]) return res.status(400).json({ error: 'rep_id must be an existing staff/sales_rep user' })
+
+    let createdCases = 0, updatedCases = 0, createdClients = 0, skipped = 0
+    const conflicts = []
+
+    for (const row of rows) {
+      const doctorName = (row.customer_name || '').trim()
+      const billed = Number(row.billed) || 0
+      const wip = Number(row.wip) || 0
+      const total = Number(row.total) || billed + wip
+      if (!doctorName || total <= 0) { skipped++; continue }
+
+      const { rows: clientMatch } = await db.query(
+        `SELECT id, doctor_name, assigned_to FROM clients WHERE LOWER(doctor_name) = LOWER($1) LIMIT 1`,
+        [doctorName]
+      )
+      let clientName = doctorName
+      if (clientMatch[0]) {
+        clientName = clientMatch[0].doctor_name
+        if (!clientMatch[0].assigned_to) {
+          await db.query(`UPDATE clients SET assigned_to=$1, updated_at=NOW() WHERE id=$2`, [rep_id, clientMatch[0].id])
+        } else if (clientMatch[0].assigned_to !== rep_id) {
+          conflicts.push({ doctor_name: clientName, reason: 'Already assigned to a different rep — case imported, client left as-is' })
+        }
+      } else {
+        await db.query(
+          `INSERT INTO clients (doctor_name, brand, total_revenue, case_count, assigned_to, created_at, updated_at)
+           VALUES ($1,'Aim Dental',0,0,$2,NOW(),NOW())`,
+          [doctorName, rep_id]
+        )
+        createdClients++
+      }
+
+      // Each Evident row is billed OR still-WIP, never a split within one
+      // row (matches the screenshot: only one of the two columns is ever
+      // populated per case) — 'Completed' is the CRM's only terminal stage,
+      // so it's the natural stand-in for "billed".
+      const status = billed > 0 ? 'Completed' : 'In Production'
+      const firstArrival = row.first_arrival ? new Date(row.first_arrival) : null
+      const createdAt = firstArrival && !isNaN(firstArrival) ? firstArrival.toISOString() : null
+      const evidentRef = row.ref ? String(row.ref).trim() : null
+
+      const existing = evidentRef
+        ? (await db.query(`SELECT id FROM cases WHERE evident_case_number=$1`, [evidentRef])).rows[0]
+        : null
+
+      if (existing) {
+        await db.query(
+          `UPDATE cases SET client_name=$1, patient=$2, product=$3, billed_value=$4, wip_value=$5,
+           value=$6, status=$7, created_at=COALESCE($8::timestamptz, created_at), updated_at=NOW()
+           WHERE id=$9`,
+          [clientName, row.patient || '', row.product_name || '', billed, wip, total, status, createdAt, existing.id]
+        )
+        updatedCases++
+      } else {
+        await db.query(
+          `INSERT INTO cases (case_number, client_name, brand, case_type, patient, value, billed_value,
+           wip_value, status, evident_case_number, product, stage_history, created_at, updated_at)
+           VALUES ($1,$2,'Aim Dental','Other',$3,$4,$5,$6,$7,$8,$9,'[]'::jsonb,COALESCE($10::timestamptz,NOW()),NOW())`,
+          [`EVD-${evidentRef || Date.now()}`, clientName, row.patient || '', total, billed, wip,
+           status, evidentRef, row.product_name || '', createdAt]
+        )
+        createdCases++
+      }
+    }
+
+    res.json({ createdCases, updatedCases, createdClients, skipped, conflicts })
+  } catch (err) { next(err) }
+})
+
 // GET /api/cases — left-joins the originating pickup lead's own pickup_*
 // columns (requested/dispatched/received timestamps) when a case came
 // from a Schedule Pickup lead (original_lead_id set) — powers the Case

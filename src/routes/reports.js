@@ -2,7 +2,10 @@ const express = require('express')
 const db = require('../config/db')
 const auth = require('../middleware/auth')
 const requireAdmin = require('../middleware/requireAdmin')
-const { sendEmail } = require('../services/email')
+const { sendEmail, primaryFrontendUrl } = require('../services/email')
+const {
+  computeRepSummary, buildRepReportHtml, sendRepWeeklyReport, REPORT_CC,
+} = require('../services/weeklyRepReport')
 
 const router = express.Router()
 
@@ -312,7 +315,7 @@ router.post('/send', auth, requireAdmin, async (req, res, next) => {
 
         <!-- CTA -->
         <div style="padding:0 32px 28px">
-          <a href="${process.env.FRONTEND_URL || '#'}/dashboard" style="display:inline-block;background:#06babe;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:600;font-size:14px">Open CRM Dashboard →</a>
+          <a href="${primaryFrontendUrl()}/dashboard" style="display:inline-block;background:#06babe;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:600;font-size:14px">Open CRM Dashboard →</a>
         </div>
 
         <!-- Footer -->
@@ -377,224 +380,66 @@ router.get('/operations', auth, requireAdmin, async (req, res, next) => {
 // GET /api/reports/my-summary — rep-scoped KPIs and recent leads
 router.get('/my-summary', auth, async (req, res, next) => {
   try {
-    const repId = req.user.id
-    const now = new Date()
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-    const yearStart = new Date(now.getFullYear(), 0, 1).toISOString()
-    const weekStartDate = (() => {
-      const d = new Date(now)
-      const day = d.getDay()
-      d.setDate(d.getDate() - (day === 0 ? 6 : day - 1))
-      d.setHours(0, 0, 0, 0)
-      return d
-    })()
-    const weekStartISO = weekStartDate.toISOString()
-
-    const [weekRes, monthRes, allTimeRes, salesRes, recentLeads] = await Promise.all([
-      db.query(
-        `SELECT
-          COUNT(*) AS leads_created,
-          COUNT(*) FILTER (WHERE status='Won') AS wins,
-          COUNT(*) FILTER (WHERE status IN ('Proposal','Won')) AS proposals,
-          COUNT(*) FILTER (WHERE status IN ('Contacted','Proposal','Won')) AS contacted
-         FROM leads WHERE assigned_to=$1 AND created_at >= $2`,
-        [repId, weekStartISO]
-      ),
-      db.query(
-        `SELECT
-          COUNT(*) AS leads_created,
-          COUNT(*) FILTER (WHERE status='Won') AS wins,
-          COUNT(*) FILTER (WHERE status IN ('Proposal','Won')) AS proposals,
-          COUNT(*) FILTER (WHERE status IN ('Contacted','Proposal','Won')) AS contacted,
-          COALESCE(SUM(estimated_value) FILTER (WHERE status='Won'), 0) AS revenue
-         FROM leads WHERE assigned_to=$1 AND created_at >= $2`,
-        [repId, monthStart]
-      ),
-      db.query(
-        `SELECT
-          COUNT(*) FILTER (WHERE status NOT IN ('Won','Lost') AND is_archived=false) AS active_leads,
-          COUNT(*) AS total_leads,
-          COUNT(*) FILTER (WHERE status='Won') AS total_wins,
-          COUNT(*) FILTER (WHERE status='Lost') AS total_lost,
-          COALESCE(SUM(estimated_value) FILTER (WHERE status='Won'), 0) AS total_revenue
-         FROM leads WHERE assigned_to=$1`,
-        [repId]
-      ),
-      // Cases have no assigned_to of their own — attributed to the rep via
-      // the client they're for (client_name = clients.doctor_name), same
-      // join clients.js uses for a client's case list. Billed vs WIP is
-      // derived from status: 'Completed' is the only terminal stage.
-      db.query(
-        `SELECT
-          COUNT(c.*) AS case_count,
-          COALESCE(SUM(c.value) FILTER (WHERE c.status = 'Completed'), 0) AS billed,
-          COALESCE(SUM(c.value) FILTER (WHERE c.status != 'Completed'), 0) AS wip,
-          COALESCE(SUM(c.value), 0) AS total
-         FROM cases c
-         JOIN clients cl ON cl.doctor_name = c.client_name
-         WHERE cl.assigned_to = $1 AND c.created_at >= $2`,
-        [repId, yearStart]
-      ),
-      db.query(
-        `SELECT doctor_name, clinic_name, status, estimated_value, created_at
-         FROM leads WHERE assigned_to=$1 AND is_archived=false
-         ORDER BY created_at DESC LIMIT 10`,
-        [repId]
-      ),
-    ])
-
-    const week = weekRes.rows[0]
-    const month = monthRes.rows[0]
-    const allTime = allTimeRes.rows[0]
-    const sales = salesRes.rows[0]
-    const mTotal = Number(month.leads_created)
-    const mWon = Number(month.wins)
-    const aTotal = Number(allTime.total_leads)
-    const aWon = Number(allTime.total_wins)
-
+    const summary = await computeRepSummary(req.user.id)
+    const { rows: recentLeads } = await db.query(
+      `SELECT doctor_name, clinic_name, status, estimated_value, created_at
+       FROM leads WHERE assigned_to=$1 AND is_archived=false
+       ORDER BY created_at DESC LIMIT 10`,
+      [req.user.id]
+    )
     res.json({
-      week: {
-        leads_created: Number(week.leads_created),
-        wins: Number(week.wins),
-        proposals: Number(week.proposals),
-        contacted: Number(week.contacted),
-      },
-      month: {
-        leads_created: mTotal,
-        wins: mWon,
-        proposals: Number(month.proposals),
-        contacted: Number(month.contacted),
-        revenue: Number(month.revenue),
-        conversion_rate: mTotal > 0 ? Math.round(mWon / mTotal * 100) : 0,
-      },
-      allTime: {
-        active_leads: Number(allTime.active_leads),
-        total_leads: aTotal,
-        total_wins: aWon,
-        total_lost: Number(allTime.total_lost),
-        total_revenue: Number(allTime.total_revenue),
-        conversion_rate: aTotal > 0 ? Math.round(aWon / aTotal * 100) : 0,
-      },
-      sales: {
-        case_count: Number(sales.case_count),
-        billed: Number(sales.billed),
-        wip: Number(sales.wip),
-        total: Number(sales.total),
-      },
-      recent_leads: recentLeads.rows,
+      ...summary,
+      recent_leads: recentLeads,
       rep: { id: req.user.id, name: req.user.name, email: req.user.email },
     })
   } catch (err) { next(err) }
 })
 
-// POST /api/reports/my-summary/email — email the rep's own report to themselves
+// POST /api/reports/my-summary/email — email the rep's own weekly report to
+// themselves, no cc. (The Monday automated send to every rep, cc'd to
+// leadership, lives in jobs/scheduler.js via sendAllWeeklyRepReports.)
 router.post('/my-summary/email', auth, async (req, res, next) => {
   try {
-    const repId = req.user.id
-    const repName = req.user.name || req.user.email
-    const repEmail = req.user.email
-    const now = new Date()
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-    const weekStartDate = (() => {
-      const d = new Date(now)
-      const day = d.getDay()
-      d.setDate(d.getDate() - (day === 0 ? 6 : day - 1))
-      d.setHours(0, 0, 0, 0)
-      return d
-    })()
-    const weekStartISO = weekStartDate.toISOString()
+    await sendRepWeeklyReport(
+      { id: req.user.id, name: req.user.name, email: req.user.email },
+      { cc: [] }
+    )
+    res.json({ success: true, message: `Report sent to ${req.user.email}` })
+  } catch (err) { next(err) }
+})
 
-    const [weekRes, monthRes, allTimeRes] = await Promise.all([
-      db.query(
-        `SELECT COUNT(*) AS leads_created, COUNT(*) FILTER (WHERE status='Won') AS wins,
-          COUNT(*) FILTER (WHERE status IN ('Proposal','Won')) AS proposals,
-          COUNT(*) FILTER (WHERE status IN ('Contacted','Proposal','Won')) AS contacted
-         FROM leads WHERE assigned_to=$1 AND created_at >= $2`,
-        [repId, weekStartISO]
-      ),
-      db.query(
-        `SELECT COUNT(*) AS leads_created, COUNT(*) FILTER (WHERE status='Won') AS wins,
-          COUNT(*) FILTER (WHERE status IN ('Proposal','Won')) AS proposals,
-          COALESCE(SUM(estimated_value) FILTER (WHERE status='Won'), 0) AS revenue
-         FROM leads WHERE assigned_to=$1 AND created_at >= $2`,
-        [repId, monthStart]
-      ),
-      db.query(
-        `SELECT COUNT(*) FILTER (WHERE status NOT IN ('Won','Lost') AND is_archived=false) AS active_leads,
-          COUNT(*) AS total_leads, COUNT(*) FILTER (WHERE status='Won') AS total_wins,
-          COALESCE(SUM(estimated_value) FILTER (WHERE status='Won'), 0) AS total_revenue
-         FROM leads WHERE assigned_to=$1`,
-        [repId]
-      ),
-    ])
+// GET /api/reports/weekly-rep-report/preview?rep_id=... — admin-only HTML
+// preview of exactly what a rep's weekly report email looks like, without
+// sending anything. Defaults to the requesting admin's own data if rep_id
+// is omitted.
+router.get('/weekly-rep-report/preview', auth, requireAdmin, async (req, res, next) => {
+  try {
+    const repId = req.query.rep_id || req.user.id
+    const { rows } = await db.query(`SELECT id, name, email FROM users WHERE id=$1`, [repId])
+    if (!rows[0]) return res.status(404).json({ error: 'Rep not found' })
+    const summary = await computeRepSummary(repId)
+    const { html } = buildRepReportHtml(rows[0].name || rows[0].email, summary)
+    res.set('Content-Type', 'text/html').send(html)
+  } catch (err) { next(err) }
+})
 
-    const w = weekRes.rows[0]
-    const m = monthRes.rows[0]
-    const a = allTimeRes.rows[0]
-    const mTotal = Number(m.leads_created)
-    const mWon = Number(m.wins)
-    const aTotal = Number(a.total_leads)
-    const aWon = Number(a.total_wins)
+// POST /api/reports/weekly-rep-report/send — admin-only manual trigger.
+// Body: { rep_id, to?, include_cc? }. Omit `to` to send to the rep's own
+// address; pass it to redirect the send elsewhere (a mock test to the
+// admin's own inbox, say) without changing whose numbers are reported.
+// `include_cc` defaults true (the real leadership cc list) — set false for
+// a quiet dry run.
+router.post('/weekly-rep-report/send', auth, requireAdmin, async (req, res, next) => {
+  try {
+    const { rep_id, to, include_cc = true } = req.body
+    if (!rep_id) return res.status(400).json({ error: 'rep_id is required' })
+    const { rows } = await db.query(
+      `SELECT id, name, email FROM users WHERE id=$1 AND role IN ('staff','sales_rep')`, [rep_id]
+    )
+    if (!rows[0]) return res.status(400).json({ error: 'rep_id must be an existing staff/sales_rep user' })
 
-    const monthLabel = now.toLocaleString('en-US', { month: 'long', year: 'numeric' })
-    const dateLabel = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
-
-    const kpiCell = (label, val, color = '#111') => `
-      <div style="flex:1;background:#f9fafb;border-radius:10px;padding:14px;text-align:center;margin:0 4px">
-        <p style="margin:0;font-size:20px;font-weight:700;color:${color}">${val}</p>
-        <p style="margin:4px 0 0;font-size:11px;color:#9ca3af">${label}</p>
-      </div>`
-
-    const html = `<!DOCTYPE html>
-<html><body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
-<div style="max-width:640px;margin:40px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08)">
-
-  <div style="background:linear-gradient(135deg,#06babe,#207290);padding:28px 32px">
-    <p style="color:rgba(255,255,255,0.8);font-size:13px;margin:0 0 4px">Aim Dental Laboratory</p>
-    <h1 style="color:#fff;margin:0;font-size:22px;font-weight:700">My Performance Report</h1>
-    <p style="color:rgba(255,255,255,0.75);margin:6px 0 0;font-size:14px">${repName} &nbsp;·&nbsp; ${dateLabel}</p>
-  </div>
-
-  <div style="padding:28px 32px">
-
-    <h2 style="color:#111;font-size:16px;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #06babe">This Week</h2>
-    <div style="display:flex;gap:0;margin-bottom:28px">
-      ${kpiCell('Leads Created', Number(w.leads_created))}
-      ${kpiCell('Contacted', Number(w.contacted))}
-      ${kpiCell('Proposals', Number(w.proposals))}
-      ${kpiCell('Wins', Number(w.wins), '#16a34a')}
-    </div>
-
-    <h2 style="color:#111;font-size:16px;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #06babe">This Month — ${monthLabel}</h2>
-    <div style="display:flex;gap:0;margin-bottom:28px">
-      ${kpiCell('Leads Created', mTotal)}
-      ${kpiCell('Wins', mWon, '#16a34a')}
-      ${kpiCell('Revenue', '$' + Number(m.revenue).toLocaleString(), '#06babe')}
-      ${kpiCell('Conversion', mTotal > 0 ? Math.round(mWon / mTotal * 100) + '%' : '—', mTotal > 0 && mWon / mTotal >= 0.5 ? '#16a34a' : '#f59e0b')}
-    </div>
-
-    <h2 style="color:#111;font-size:16px;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #06babe">All-Time</h2>
-    <div style="display:flex;gap:0;margin-bottom:28px">
-      ${kpiCell('Active Leads', Number(a.active_leads))}
-      ${kpiCell('Total Leads', aTotal)}
-      ${kpiCell('Total Wins', aWon, '#16a34a')}
-      ${kpiCell('Revenue', '$' + Number(a.total_revenue).toLocaleString(), '#06babe')}
-    </div>
-
-  </div>
-
-  <div style="padding:0 32px 28px">
-    <a href="${process.env.FRONTEND_URL || '#'}/reports" style="display:inline-block;background:#06babe;color:#fff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:600;font-size:14px">Open My Reports →</a>
-  </div>
-
-  <div style="background:#f9fafb;padding:16px 32px;font-size:12px;color:#9ca3af;border-top:1px solid #f3f4f6">
-    Aim Dental Laboratory CRM &nbsp;·&nbsp; Personal report for ${repName}
-  </div>
-</div>
-</body></html>`
-
-    await sendEmail({ to: repEmail, subject: `My Performance Report — ${monthLabel}`, html })
-    res.json({ success: true, message: `Report sent to ${repEmail}` })
+    await sendRepWeeklyReport(rows[0], { to, cc: include_cc ? REPORT_CC : [] })
+    res.json({ success: true, message: `Report sent to ${to || rows[0].email}${include_cc ? ` (cc: ${REPORT_CC.join(', ')})` : ''}` })
   } catch (err) { next(err) }
 })
 
