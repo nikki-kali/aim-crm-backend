@@ -78,17 +78,30 @@ function startScheduler() {
   })
 
   // Every Monday at 9:00 AM — lost recovery + win streak + weekly reports
-  // (company-wide, admin-configured recipients) + per-rep weekly reports
-  // (one email per staff/sales_rep user, cc'd to leadership)
+  // (company-wide, admin-configured recipients)
   cron.schedule('0 9 * * 1', async () => {
     console.log('[cron] Running lost_recovery check')
     await runAutomationLogic('lost_recovery').catch(console.error)
     console.log('[cron] Running win_streak check')
     await runAutomationLogic('win_streak').catch(console.error)
     await sendScheduledReports('weekly')
+  })
+
+  // Every Friday at 5:00 PM Eastern — per-rep weekly performance reports
+  // (one email per staff/sales_rep user, cc'd to leadership). Gated behind
+  // WEEKLY_REPORT_ENABLED — the report design is still under review with
+  // Elizabeth/Ben as of 2026-08-25, so this stays a no-op until that env
+  // var is explicitly set to 'true' on Render, even though the code has
+  // been deployed. Don't remove this gate without checking that review is
+  // actually done.
+  cron.schedule('0 17 * * 5', async () => {
+    if (process.env.WEEKLY_REPORT_ENABLED !== 'true') {
+      console.log('[cron] Weekly rep reports skipped — WEEKLY_REPORT_ENABLED is not set to true')
+      return
+    }
     console.log('[cron] Sending weekly rep reports')
     await sendAllWeeklyRepReports().catch((err) => console.error('[cron] weekly rep reports failed:', err))
-  })
+  }, { timezone: 'America/New_York' })
 
   // 1st of every month at 8:00 AM — monthly reports
   cron.schedule('0 8 1 * *', async () => {
