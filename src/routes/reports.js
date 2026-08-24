@@ -424,22 +424,24 @@ router.get('/weekly-rep-report/preview', auth, requireAdmin, async (req, res, ne
 })
 
 // POST /api/reports/weekly-rep-report/send — admin-only manual trigger.
-// Body: { rep_id, to?, include_cc? }. Omit `to` to send to the rep's own
-// address; pass it to redirect the send elsewhere (a mock test to the
+// Body: { rep_id, to?, include_cc?, test? }. Omit `to` to send to the rep's
+// own address; pass it to redirect the send elsewhere (a test to the
 // admin's own inbox, say) without changing whose numbers are reported.
 // `include_cc` defaults true (the real leadership cc list) — set false for
-// a quiet dry run.
+// a quiet dry run. `test` (default false) marks the send with a "TEST —"
+// subject prefix and a banner inside the email itself, so it can never be
+// mistaken for a real report landing in someone's inbox.
 router.post('/weekly-rep-report/send', auth, requireAdmin, async (req, res, next) => {
   try {
-    const { rep_id, to, include_cc = true } = req.body
+    const { rep_id, to, include_cc = true, test = false } = req.body
     if (!rep_id) return res.status(400).json({ error: 'rep_id is required' })
     const { rows } = await db.query(
       `SELECT id, name, email FROM users WHERE id=$1 AND role IN ('staff','sales_rep')`, [rep_id]
     )
     if (!rows[0]) return res.status(400).json({ error: 'rep_id must be an existing staff/sales_rep user' })
 
-    await sendRepWeeklyReport(rows[0], { to, cc: include_cc ? REPORT_CC : [] })
-    res.json({ success: true, message: `Report sent to ${to || rows[0].email}${include_cc ? ` (cc: ${REPORT_CC.join(', ')})` : ''}` })
+    await sendRepWeeklyReport(rows[0], { to, cc: include_cc ? REPORT_CC : [], test })
+    res.json({ success: true, message: `${test ? 'Test report' : 'Report'} sent to ${to || rows[0].email}${include_cc ? ` (cc: ${REPORT_CC.join(', ')})` : ''}` })
   } catch (err) { next(err) }
 })
 

@@ -170,24 +170,27 @@ async function computeRepSummary(repId) {
   }
 }
 
-function buildRepReportHtml(repName, summary) {
+function buildRepReportHtml(repName, summary, { test = false } = {}) {
   const now = new Date()
   const monthLabel = now.toLocaleString('en-US', { month: 'long', year: 'numeric' })
   const dateLabel = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
-  return { html: repReportEmail({ repName, dateLabel, monthLabel, ...summary }), monthLabel }
+  return { html: repReportEmail({ repName, dateLabel, monthLabel, ...summary, test }), monthLabel }
 }
 
 // Sends one rep's weekly report. `to`/`cc` overrides exist for the
 // admin-triggered test send (routes/reports.js) — omit both to send to the
 // rep's own address, cc'd to leadership, exactly as the Monday automated
-// job below does.
-async function sendRepWeeklyReport(rep, { to, cc = REPORT_CC } = {}) {
+// job below does. `test: true` prepends a "TEST" subject marker and a
+// banner inside the email itself, so a real report can never be mistaken
+// for one sent during testing (or vice versa) — a recipient should never
+// have to guess which one they're looking at.
+async function sendRepWeeklyReport(rep, { to, cc = REPORT_CC, test = false } = {}) {
   const summary = await computeRepSummary(rep.id)
-  const { html, monthLabel } = buildRepReportHtml(rep.name || rep.email, summary)
+  const { html, monthLabel } = buildRepReportHtml(rep.name || rep.email, summary, { test })
   await sendEmail({
     to: to || rep.email,
     ...(cc?.length ? { cc } : {}),
-    subject: `Weekly Performance Report — ${rep.name || rep.email} — ${monthLabel}`,
+    subject: `${test ? 'TEST — ' : ''}Weekly Performance Report — ${rep.name || rep.email} — ${monthLabel}`,
     html,
   })
   return summary

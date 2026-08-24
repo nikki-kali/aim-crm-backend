@@ -301,7 +301,7 @@ const BRAND = {
   success: '#059669',
 }
 
-function repReportEmail({ repName, dateLabel, monthLabel, week, month, allTime, sales, tier, coldLeads, previousWeek, recentWinName }) {
+function repReportEmail({ repName, dateLabel, monthLabel, week, month, allTime, sales, tier, coldLeads, previousWeek, recentWinName, test }) {
   const { ink, slate, teal, deep, gold } = BRAND
   const hairline = '#dcebe9'
   const t = TIER_META[tier] || TIER_META.amber
@@ -391,6 +391,16 @@ function repReportEmail({ repName, dateLabel, monthLabel, week, month, allTime, 
 </head>
 <body style="margin:0;padding:0;background-color:${BRAND.deep};background-image:linear-gradient(160deg,${BRAND.skyBlue} 0%,${BRAND.deep} 100%);font-family:${FONT_BODY}">
 <div style="max-width:600px;margin:40px auto;background:#fff;border-radius:24px;overflow:hidden;box-shadow:0 6px 28px rgba(32,114,144,.16)">
+
+  ${test ? `
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+      <td bgcolor="#fbbf24" style="background-color:#fbbf24;padding:10px 20px;text-align:center">
+        <p style="margin:0;font-family:${FONT_DATA};font-size:11.5px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#78350f">⚠ Test send — not a real weekly report</p>
+      </td>
+    </tr>
+  </table>
+  ` : ''}
 
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
     <tr>
