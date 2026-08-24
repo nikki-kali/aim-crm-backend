@@ -380,6 +380,7 @@ router.get('/my-summary', auth, async (req, res, next) => {
     const repId = req.user.id
     const now = new Date()
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+    const yearStart = new Date(now.getFullYear(), 0, 1).toISOString()
     const weekStartDate = (() => {
       const d = new Date(now)
       const day = d.getDay()
@@ -389,7 +390,7 @@ router.get('/my-summary', auth, async (req, res, next) => {
     })()
     const weekStartISO = weekStartDate.toISOString()
 
-    const [weekRes, monthRes, allTimeRes, recentLeads] = await Promise.all([
+    const [weekRes, monthRes, allTimeRes, salesRes, recentLeads] = await Promise.all([
       db.query(
         `SELECT
           COUNT(*) AS leads_created,
@@ -419,6 +420,21 @@ router.get('/my-summary', auth, async (req, res, next) => {
          FROM leads WHERE assigned_to=$1`,
         [repId]
       ),
+      // Cases have no assigned_to of their own — attributed to the rep via
+      // the client they're for (client_name = clients.doctor_name), same
+      // join clients.js uses for a client's case list. Billed vs WIP is
+      // derived from status: 'Completed' is the only terminal stage.
+      db.query(
+        `SELECT
+          COUNT(c.*) AS case_count,
+          COALESCE(SUM(c.value) FILTER (WHERE c.status = 'Completed'), 0) AS billed,
+          COALESCE(SUM(c.value) FILTER (WHERE c.status != 'Completed'), 0) AS wip,
+          COALESCE(SUM(c.value), 0) AS total
+         FROM cases c
+         JOIN clients cl ON cl.doctor_name = c.client_name
+         WHERE cl.assigned_to = $1 AND c.created_at >= $2`,
+        [repId, yearStart]
+      ),
       db.query(
         `SELECT doctor_name, clinic_name, status, estimated_value, created_at
          FROM leads WHERE assigned_to=$1 AND is_archived=false
@@ -430,6 +446,7 @@ router.get('/my-summary', auth, async (req, res, next) => {
     const week = weekRes.rows[0]
     const month = monthRes.rows[0]
     const allTime = allTimeRes.rows[0]
+    const sales = salesRes.rows[0]
     const mTotal = Number(month.leads_created)
     const mWon = Number(month.wins)
     const aTotal = Number(allTime.total_leads)
@@ -457,6 +474,12 @@ router.get('/my-summary', auth, async (req, res, next) => {
         total_lost: Number(allTime.total_lost),
         total_revenue: Number(allTime.total_revenue),
         conversion_rate: aTotal > 0 ? Math.round(aWon / aTotal * 100) : 0,
+      },
+      sales: {
+        case_count: Number(sales.case_count),
+        billed: Number(sales.billed),
+        wip: Number(sales.wip),
+        total: Number(sales.total),
       },
       recent_leads: recentLeads.rows,
       rep: { id: req.user.id, name: req.user.name, email: req.user.email },
