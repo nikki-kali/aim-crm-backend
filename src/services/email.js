@@ -335,13 +335,15 @@ function repReportEmail({ repName, dateLabel, monthLabel, week, month, allTime, 
   // data face (DM Mono), the same treatment TATWidget.jsx gives its
   // turnaround-day figure. `color` is only passed for the one number per
   // row worth calling out, so color reads as signal, not decoration.
+  // No vertical divider lines between columns — whitespace does the
+  // separating instead, reads calmer than a row of hairlines.
   const statRow = (cells) => `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
       <tr>
-        ${cells.map((c, i) => `
-        <td width="${Math.floor(100 / cells.length)}%" style="text-align:center;padding:0 4px;${i < cells.length - 1 ? `border-right:1px solid ${hairline}` : ''}">
-          <p style="margin:0;font-family:${FONT_DATA};font-size:20px;font-weight:500;color:${c.color || ink};letter-spacing:-.01em">${c.val}</p>
-          <p style="margin:5px 0 0;font-family:${FONT_DATA};font-size:9.5px;color:${slate};text-transform:uppercase;letter-spacing:.08em">${c.label}</p>
+        ${cells.map((c) => `
+        <td width="${Math.floor(100 / cells.length)}%" style="text-align:center;padding:0 6px">
+          <p style="margin:0;font-family:${FONT_DATA};font-size:21px;font-weight:500;color:${c.color || ink};letter-spacing:-.01em">${c.val}</p>
+          <p style="margin:6px 0 0;font-family:${FONT_DATA};font-size:9.5px;color:${slate};text-transform:uppercase;letter-spacing:.08em">${c.label}</p>
         </td>`).join('')}
       </tr>
     </table>`
@@ -406,9 +408,9 @@ function repReportEmail({ repName, dateLabel, monthLabel, week, month, allTime, 
     <tr>
       <td bgcolor="${teal}" style="background-color:${teal};background-image:linear-gradient(135deg,${teal},${deep});padding:34px 36px 28px">
         ${row2(
-          `<p style="color:rgba(255,255,255,.75);font-family:${FONT_DATA};font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;margin:0 0 9px">Aim Dental Laboratory</p>
-           <h1 style="color:#fff;margin:0;font-family:${FONT_DISPLAY};font-size:30px;font-weight:700;letter-spacing:-.01em">Weekly Performance Report</h1>
-           <p style="color:rgba(255,255,255,.82);margin:9px 0 0;font-size:13.5px">${repName} &nbsp;·&nbsp; ${dateLabel}</p>`,
+          `<h1 style="color:#fff;margin:0;font-family:${FONT_DISPLAY};font-size:30px;font-weight:700;letter-spacing:-.01em">Weekly Performance Report</h1>
+           <p style="color:rgba(255,255,255,.92);margin:10px 0 0;font-family:${FONT_DISPLAY};font-size:17px;font-style:italic;font-weight:600">"${quote}"</p>
+           <p style="color:rgba(255,255,255,.72);margin:12px 0 0;font-size:13px">${repName} &nbsp;·&nbsp; ${dateLabel}</p>`,
           `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:999px"><tr>
              <td style="padding:7px 13px">
                <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background-color:${t.color};font-size:0;line-height:0">&nbsp;</span>
@@ -421,13 +423,11 @@ function repReportEmail({ repName, dateLabel, monthLabel, week, month, allTime, 
     </tr>
   </table>
 
-  <div style="margin:26px 36px 0;padding:15px 18px;background:${t.tint};border:1px solid ${t.border};border-left:3px solid ${t.color};border-radius:4px 12px 12px 4px">
+  <div style="margin:30px 36px 0;padding:16px 19px;background:${t.tint};border:1px solid ${t.border};border-left:3px solid ${t.color};border-radius:4px 12px 12px 4px">
     <p style="margin:0;font-size:13.5px;line-height:1.55;color:${ink}">${statusLine(tier, coldLeads?.count || 0)}</p>
   </div>
 
-  <p style="margin:14px 36px 0;font-size:12px;line-height:1.5;color:${slate};font-style:italic">"${quote}"</p>
-
-  <div style="padding:26px 36px 0">
+  <div style="padding:30px 36px 0">
     ${sectionLabel('This Week')}
     ${statRow([
       { label: 'Leads', val: Number(week.leads_created) },
@@ -437,9 +437,9 @@ function repReportEmail({ repName, dateLabel, monthLabel, week, month, allTime, 
     ])}
   </div>
 
-  <div style="padding:26px 36px 0">${coldSection}</div>
+  <div style="padding:30px 36px 0">${coldSection}</div>
 
-  <div style="margin:26px 36px 0;padding:20px 22px;background:#fff;border:1px solid ${hairline};border-radius:18px">
+  <div style="margin:30px 36px 0;padding:22px 24px;background:#fff;border:1px solid ${hairline};border-radius:18px">
     <p style="margin:0 0 10px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${t.color}">Your 1% This Week</p>
     <p style="margin:0 0 13px;font-size:13px;line-height:1.55;color:${ink}">${pushHeadline(tier)}</p>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
@@ -455,12 +455,12 @@ function repReportEmail({ repName, dateLabel, monthLabel, week, month, allTime, 
     </table>
   </div>
 
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:28px 0 0">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:32px 0 0">
     <tr><td style="padding:0 36px">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${gold};background-image:linear-gradient(135deg,${teal},${gold});border-radius:19px">
         <tr><td style="padding:2px">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${BRAND.tealMist};background-image:linear-gradient(160deg,${BRAND.tealMist},${BRAND.blueMist});border-radius:17px">
-            <tr><td style="padding:20px 22px">
+            <tr><td style="padding:22px 24px">
               <p style="margin:0 0 3px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${gold}">Sales Value &nbsp;·&nbsp; YTD Booked Cases</p>
               <p style="margin:0;font-family:${FONT_DATA};font-size:30px;font-weight:500;color:${teal};letter-spacing:-.01em">$${Number(sales.total).toLocaleString()}</p>
               <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:15px;padding-top:15px;border-top:1px solid rgba(32,114,144,.16)"><tr>
@@ -485,8 +485,8 @@ function repReportEmail({ repName, dateLabel, monthLabel, week, month, allTime, 
     ])}
   </div>
 
-  <div style="margin:28px 36px 0;padding-top:16px;border-top:1px solid ${hairline}">
-    <p style="margin:0 0 12px;font-family:${FONT_DATA};font-size:9.5px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:#a9c1c6">All-Time</p>
+  <div style="margin:32px 36px 0;padding-top:20px;border-top:1px solid ${hairline}">
+    <p style="margin:0 0 14px;font-family:${FONT_DATA};font-size:9.5px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:#a9c1c6">All-Time</p>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
       <td width="25%" style="text-align:left"><p style="margin:0;font-family:${FONT_DATA};font-size:14px;font-weight:500;color:${slate}">${Number(allTime.active_leads)}</p><p style="margin:3px 0 0;font-family:${FONT_DATA};font-size:8.5px;color:#a9c1c6;text-transform:uppercase;letter-spacing:.06em">Active</p></td>
       <td width="25%" style="text-align:left"><p style="margin:0;font-family:${FONT_DATA};font-size:14px;font-weight:500;color:${slate}">${Number(allTime.total_leads)}</p><p style="margin:3px 0 0;font-family:${FONT_DATA};font-size:8.5px;color:#a9c1c6;text-transform:uppercase;letter-spacing:.06em">Total Leads</p></td>
@@ -495,7 +495,7 @@ function repReportEmail({ repName, dateLabel, monthLabel, week, month, allTime, 
     </tr></table>
   </div>
 
-  <div style="margin:32px 36px 0;padding-top:24px;border-top:1px solid ${hairline}">
+  <div style="margin:36px 36px 0;padding-top:26px;border-top:1px solid ${hairline}">
     <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
       <td bgcolor="${teal}" style="background-color:${teal};background-image:linear-gradient(135deg,${teal},${deep});border-radius:12px">
         <a href="${primaryFrontendUrl()}/reports" style="display:inline-block;padding:12px 26px;color:#fff;text-decoration:none;font-weight:600;font-size:13.5px;font-family:${FONT_BODY}">Open My Reports →</a>
@@ -503,7 +503,7 @@ function repReportEmail({ repName, dateLabel, monthLabel, week, month, allTime, 
     </tr></table>
   </div>
 
-  <div style="margin-top:32px;background:${BRAND.tealMist};padding:16px 36px;font-size:11.5px;color:${slate};border-top:1px solid ${hairline}">
+  <div style="margin-top:36px;background:${BRAND.tealMist};padding:18px 36px;font-size:11.5px;color:${slate};border-top:1px solid ${hairline}">
     Aim Dental Laboratory CRM &nbsp;·&nbsp; Weekly report for ${repName}
   </div>
 </div>
