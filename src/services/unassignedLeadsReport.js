@@ -12,7 +12,7 @@ async function computeUnassignedLeadsReport() {
 
   const { rows } = await db.query(
     `SELECT id, doctor_name, clinic_name, brand, case_interest, phone, email,
-            lead_source, referral_source, estimated_value, location, ai_score, created_at
+            lead_source, referral_source, estimated_value, location, created_at
      FROM leads
      WHERE assigned_to IS NULL AND is_archived = false AND created_at >= $1
      ORDER BY created_at DESC`,

@@ -467,19 +467,6 @@ function unassignedLeadsReportEmail({ leads, weekLabel, test }) {
     ? `<span style="display:inline-block;font-family:${FONT_DATA};font-size:9px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;padding:3px 9px;border-radius:999px;border:1px solid ${goldHairline};color:${slate}">${source}</span>`
     : ''
 
-  // Score gets the same green/amber/red read as everywhere else the AI
-  // score shows up (Leads page, rep report) — a filled pill here rather
-  // than outlined like source, since this one number is meant to draw the
-  // eye toward which leads are worth assigning first.
-  const scoreBadge = (score) => {
-    if (score == null) return ''
-    const tone = score >= 80
-      ? { bg: '#f3fbf6', fg: BRAND.success }
-      : score >= 60
-        ? { bg: '#fefaf1', fg: gold }
-        : { bg: '#fdf4f4', fg: '#b91c1c' }
-    return `<span style="display:inline-block;font-family:${FONT_DATA};font-size:9px;font-weight:600;letter-spacing:.05em;padding:3px 9px;border-radius:999px;background:${tone.bg};color:${tone.fg}">SCORE &nbsp;${score}</span>`
-  }
 
   const contactLine = (l) => {
     const parts = []
@@ -507,7 +494,7 @@ function unassignedLeadsReportEmail({ leads, weekLabel, test }) {
                     <p style="margin:0 0 4px;font-family:${FONT_DISPLAY};font-size:17px;font-weight:700;color:${ink}">${l.doctor_name} &nbsp;${brandBadge(l.brand)}</p>
                     <p style="margin:0 0 10px;font-size:12px;font-style:italic;color:${slate}">${l.clinic_name || 'No clinic on file'}${l.case_interest ? ` &nbsp;·&nbsp; ${l.case_interest}` : ''}${l.location ? ` &nbsp;·&nbsp; ${l.location}` : ''}</p>
                     <p style="margin:0 0 12px;font-size:12.5px;color:${ink}">${contactLine(l)}</p>
-                    ${sourceBadge(source)} ${scoreBadge(l.ai_score)}
+                    ${sourceBadge(source)}
                   </td>
                   <td width="104" valign="top" style="text-align:right">
                     ${value > 0 ? `
