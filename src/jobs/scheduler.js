@@ -2,6 +2,7 @@ const cron = require('node-cron')
 const { runAutomationLogic } = require('../services/automations')
 const { runEngineTick } = require('../services/workflowEngine')
 const { sendAllWeeklyRepReports } = require('../services/weeklyRepReport')
+const { sendUnassignedLeadsReport } = require('../services/unassignedLeadsReport')
 const db = require('../config/db')
 const { sendEmail, primaryFrontendUrl } = require('../services/email')
 
@@ -101,6 +102,20 @@ function startScheduler() {
     }
     console.log('[cron] Sending weekly rep reports')
     await sendAllWeeklyRepReports().catch((err) => console.error('[cron] weekly rep reports failed:', err))
+  }, { timezone: 'America/New_York' })
+
+  // Every Monday at 8:00 AM Eastern — weekly unassigned-leads report to
+  // leadership (media@, cc execassistant@/ben@), covering leads created in
+  // the past 7 days that still have no owner. Gated behind
+  // UNASSIGNED_LEADS_REPORT_ENABLED — left unset until the user has
+  // reviewed a test send, same pattern as WEEKLY_REPORT_ENABLED above.
+  cron.schedule('0 8 * * 1', async () => {
+    if (process.env.UNASSIGNED_LEADS_REPORT_ENABLED !== 'true') {
+      console.log('[cron] Unassigned leads report skipped — UNASSIGNED_LEADS_REPORT_ENABLED is not set to true')
+      return
+    }
+    console.log('[cron] Sending unassigned leads report')
+    await sendUnassignedLeadsReport().catch((err) => console.error('[cron] unassigned leads report failed:', err))
   }, { timezone: 'America/New_York' })
 
   // 1st of every month at 8:00 AM — monthly reports

@@ -435,6 +435,109 @@ function repReportEmail({ repName, dateLabel, monthLabel, week, month, allTime, 
 </body></html>`
 }
 
+// Weekly Unassigned Leads Report — sent every Monday to leadership (not
+// reps), listing leads that came in over the past 7 days and are still
+// sitting with no owner. Reuses repReportEmail's brand chrome (gradient
+// header, blue page wash, table-based layout for Gmail/Outlook safety) so
+// it reads as the same family of CRM report, but the body is a plain data
+// table rather than a personalized narrative — this is an ops list, not a
+// performance summary, so no quote/motivational framing here.
+function unassignedLeadsReportEmail({ leads, weekLabel, test }) {
+  const { ink, slate, teal, deep, gold } = BRAND
+  const hairline = '#dcebe9'
+  const count = leads.length
+  const empty = count === 0
+
+  const brandBadge = (brand) => `<span style="display:inline-block;font-family:${FONT_DATA};font-size:9.5px;font-weight:500;letter-spacing:.04em;padding:2px 7px;border-radius:999px;background:${brand === 'Aim Dental' ? BRAND.tealMist : BRAND.blueMist};color:${brand === 'Aim Dental' ? deep : BRAND.deep}">${brand === 'Aim Dental' ? 'AIM' : 'KH'}</span>`
+
+  const contactLine = (l) => {
+    const parts = []
+    if (l.email) parts.push(`<a href="mailto:${l.email}" style="color:${teal};text-decoration:none">${l.email}</a>`)
+    if (l.phone) parts.push(l.phone)
+    return parts.length ? parts.join(' &nbsp;·&nbsp; ') : '<span style="color:#a9c1c6">No contact info on file</span>'
+  }
+
+  const rows = leads.map((l, i) => `
+    <tr>
+      <td style="padding:14px 0;${i > 0 ? `border-top:1px solid ${hairline}` : ''}" valign="top">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td valign="top">
+              <p style="margin:0 0 3px;font-size:14px;font-weight:600;color:${ink}">${l.doctor_name} &nbsp;${brandBadge(l.brand)}</p>
+              <p style="margin:0 0 6px;font-size:12px;color:${slate}">${l.clinic_name || '—'}${l.case_interest ? ` &nbsp;·&nbsp; ${l.case_interest}` : ''}</p>
+              <p style="margin:0;font-size:12px;color:${ink}">${contactLine(l)}</p>
+            </td>
+            <td width="120" valign="top" style="text-align:right">
+              <p style="margin:0 0 4px;font-family:${FONT_DATA};font-size:10px;color:${slate}">${new Date(l.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+              <p style="margin:0;font-family:${FONT_DATA};font-size:9.5px;color:#a9c1c6;text-transform:uppercase;letter-spacing:.06em">${l.lead_source || l.referral_source || '—'}</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>`).join('')
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body style="margin:0;padding:0;background-color:${BRAND.deep};background-image:linear-gradient(160deg,${BRAND.skyBlue} 0%,${BRAND.deep} 100%);font-family:${FONT_BODY}">
+<div style="max-width:600px;margin:40px auto;background:#fff;border-radius:24px;overflow:hidden;box-shadow:0 6px 28px rgba(32,114,144,.16)">
+
+  ${test ? `
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+      <td bgcolor="#fbbf24" style="background-color:#fbbf24;padding:10px 20px;text-align:center">
+        <p style="margin:0;font-family:${FONT_DATA};font-size:11.5px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#78350f">⚠ Test send — not a real weekly report</p>
+      </td>
+    </tr>
+  </table>
+  ` : ''}
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+      <td bgcolor="${teal}" style="background-color:${teal};background-image:linear-gradient(135deg,${teal},${deep});padding:34px 36px 28px">
+        <h1 style="color:#fff;margin:0;font-family:${FONT_DISPLAY};font-size:28px;font-weight:700;letter-spacing:-.01em">Weekly Unassigned Leads</h1>
+        <p style="color:rgba(255,255,255,.72);margin:10px 0 0;font-size:13px">Week of ${weekLabel}</p>
+      </td>
+    </tr>
+  </table>
+
+  <div style="margin:30px 36px 0;padding:16px 19px;background:${empty ? '#f3fbf6' : '#fefaf1'};border:1px solid ${empty ? '#bfe8cf' : '#f3ddab'};border-left:3px solid ${empty ? BRAND.success : gold};border-radius:4px 12px 12px 4px">
+    <p style="margin:0;font-size:13.5px;line-height:1.55;color:${ink}">
+      ${empty
+        ? 'No unassigned leads this week — every new lead that came in already has an owner. Nice work keeping the queue clear.'
+        : `<strong>${count}</strong> lead${count === 1 ? '' : 's'} came in this week and ${count === 1 ? 'is' : 'are'} still unassigned.`}
+    </p>
+  </div>
+
+  ${!empty ? `
+  <div style="padding:26px 36px 0">
+    <p style="margin:0 0 4px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${slate}">Unassigned Leads</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+      ${rows}
+    </table>
+  </div>
+  ` : ''}
+
+  <div style="margin:36px 36px 0;padding-top:26px;border-top:1px solid ${hairline}">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td bgcolor="${teal}" style="background-color:${teal};background-image:linear-gradient(135deg,${teal},${deep});border-radius:12px">
+        <a href="${primaryFrontendUrl()}/leads" style="display:inline-block;padding:12px 26px;color:#fff;text-decoration:none;font-weight:600;font-size:13.5px;font-family:${FONT_BODY}">Open Leads →</a>
+      </td>
+    </tr></table>
+  </div>
+
+  <div style="margin-top:36px;background:${BRAND.tealMist};padding:18px 36px;font-size:11.5px;color:${slate};border-top:1px solid ${hairline}">
+    Aim Dental Laboratory CRM &nbsp;·&nbsp; Weekly Unassigned Leads Report
+  </div>
+</div>
+</body></html>`
+}
+
 function winStreakEmail(streak) {
   return emailWrapper(`
     <h2 style="color:#111;margin:0 0 8px">🏆 Win Streak: ${streak} in a Row!</h2>
@@ -600,6 +703,7 @@ module.exports = {
   lostRecoveryEmail,
   winStreakEmail,
   repReportEmail,
+  unassignedLeadsReportEmail,
   pickupRequestedEmail,
   pickupDispatchedEmail,
   pickupReceivedEmail,

@@ -6,6 +6,10 @@ const { sendEmail, primaryFrontendUrl } = require('../services/email')
 const {
   computeRepSummary, buildRepReportHtml, sendRepWeeklyReport, REPORT_CC,
 } = require('../services/weeklyRepReport')
+const {
+  buildUnassignedLeadsReportHtml, sendUnassignedLeadsReport,
+  REPORT_TO: UL_REPORT_TO, REPORT_CC: UL_REPORT_CC,
+} = require('../services/unassignedLeadsReport')
 
 const router = express.Router()
 
@@ -442,6 +446,36 @@ router.post('/weekly-rep-report/send', auth, requireAdmin, async (req, res, next
 
     await sendRepWeeklyReport(rows[0], { to, cc: include_cc ? REPORT_CC : [], test })
     res.json({ success: true, message: `${test ? 'Test report' : 'Report'} sent to ${to || rows[0].email}${include_cc ? ` (cc: ${REPORT_CC.join(', ')})` : ''}` })
+  } catch (err) { next(err) }
+})
+
+// GET /api/reports/unassigned-leads-report/preview — admin-only HTML
+// preview of the Monday-morning unassigned-leads report, without sending.
+router.get('/unassigned-leads-report/preview', auth, requireAdmin, async (req, res, next) => {
+  try {
+    const { html } = await buildUnassignedLeadsReportHtml()
+    res.set('Content-Type', 'text/html').send(html)
+  } catch (err) { next(err) }
+})
+
+// POST /api/reports/unassigned-leads-report/send — admin-only manual
+// trigger. Body: { to?, include_cc?, test? } — same shape/defaults as
+// weekly-rep-report/send above. `to` defaults to UL_REPORT_TO
+// (media@aimdentallab.com); `include_cc` (default true) is the real
+// UL_REPORT_CC leadership list; `test` marks the send clearly so it can't
+// be mistaken for the real weekly report.
+router.post('/unassigned-leads-report/send', auth, requireAdmin, async (req, res, next) => {
+  try {
+    const { to, include_cc = true, test = false } = req.body
+    const result = await sendUnassignedLeadsReport({
+      to: to || undefined,
+      cc: include_cc ? UL_REPORT_CC : [],
+      test,
+    })
+    res.json({
+      success: true,
+      message: `${test ? 'Test report' : 'Report'} (${result.count} lead${result.count === 1 ? '' : 's'}) sent to ${to || UL_REPORT_TO}${include_cc ? ` (cc: ${UL_REPORT_CC.join(', ')})` : ''}`,
+    })
   } catch (err) { next(err) }
 })
 
