@@ -496,7 +496,7 @@ function unassignedLeadsReportEmail({ leads, weekLabel, test }) {
                     <p style="margin:0 0 12px;font-size:12.5px;color:${ink}">${contactLine(l)}</p>
                     ${sourceBadge(source)}
                   </td>
-                  <td width="104" valign="top" style="text-align:right">
+                  <td width="104" class="em-stack em-stack-pad" valign="top" style="text-align:right">
                     ${value > 0 ? `
                     <p style="margin:0;font-family:${FONT_DATA};font-size:17px;font-weight:500;color:${gold};letter-spacing:-.01em">$${value.toLocaleString()}</p>
                     <p style="margin:2px 0 10px;font-family:${FONT_DATA};font-size:8.5px;color:#c9b489;text-transform:uppercase;letter-spacing:.08em">Potential</p>
@@ -517,8 +517,26 @@ function unassignedLeadsReportEmail({ leads, weekLabel, test }) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  body, table, td, a { -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
+  img { border:0; outline:none; text-decoration:none; }
+  /* Below 600px (most phones in portrait): the fixed 36px side gutters and
+     two-up rows (hero count/value, each lead's info/date-value split) are
+     what actually break on a ~375px viewport, not the outer 600px card —
+     that already shrinks fluidly since it's max-width, not width. These
+     rules only touch gutters and force the two-up rows to stack. */
+  @media only screen and (max-width:600px) {
+    .em-px  { padding-left:20px !important; padding-right:20px !important; }
+    .em-mx  { margin-left:20px !important; margin-right:20px !important; }
+    .em-stack { display:block !important; width:100% !important; text-align:left !important; }
+    .em-stack-pad { padding-top:12px !important; }
+    .em-h1 { font-size:25px !important; }
+    .em-hero-num { font-size:31px !important; }
+  }
+</style>
 </head>
 <body style="margin:0;padding:0;background-color:${BRAND.deep};background-image:linear-gradient(160deg,${BRAND.skyBlue} 0%,${BRAND.deep} 100%);font-family:${FONT_BODY}">
 <div style="max-width:600px;margin:40px auto;background:#fff;border-radius:24px;overflow:hidden;box-shadow:0 6px 28px rgba(32,114,144,.16)">
@@ -535,18 +553,18 @@ function unassignedLeadsReportEmail({ leads, weekLabel, test }) {
 
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
     <tr>
-      <td bgcolor="${teal}" style="background-color:${teal};background-image:linear-gradient(135deg,${teal},${deep});padding:38px 36px 30px">
+      <td bgcolor="${teal}" class="em-px" style="background-color:${teal};background-image:linear-gradient(135deg,${teal},${deep});padding:38px 36px 30px">
         <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
           <td style="padding-right:8px">${diamond}</td>
           <td><p style="margin:0;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.78)">Weekly Lead Intake</p></td>
         </tr></table>
-        <h1 style="color:#fff;margin:12px 0 0;font-family:${FONT_DISPLAY};font-size:32px;font-weight:700;letter-spacing:-.01em">Unassigned Leads</h1>
+        <h1 class="em-h1" style="color:#fff;margin:12px 0 0;font-family:${FONT_DISPLAY};font-size:32px;font-weight:700;letter-spacing:-.01em">Unassigned Leads</h1>
         <p style="color:rgba(255,255,255,.72);margin:9px 0 0;font-size:13px;font-style:italic;font-family:${FONT_DISPLAY}">Week of ${weekLabel}</p>
       </td>
     </tr>
   </table>
 
-  <div style="margin:34px 36px 0">
+  <div class="em-mx" style="margin:34px 36px 0">
     ${empty ? `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #bfe8cf;border-radius:16px">
       <tr><td style="padding:20px 22px">
@@ -561,11 +579,11 @@ function unassignedLeadsReportEmail({ leads, weekLabel, test }) {
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
               <td valign="top">
                 <p style="margin:0 0 4px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:${gold}">Sitting Unclaimed</p>
-                <p style="margin:0;font-family:${FONT_DISPLAY};font-size:38px;font-weight:700;color:${teal};letter-spacing:-.01em">${count}</p>
+                <p class="em-hero-num" style="margin:0;font-family:${FONT_DISPLAY};font-size:38px;font-weight:700;color:${teal};letter-spacing:-.01em">${count}</p>
                 <p style="margin:2px 0 0;font-size:11.5px;color:${deep}">lead${count === 1 ? '' : 's'} with no owner</p>
               </td>
               ${totalValue > 0 ? `
-              <td valign="top" style="text-align:right">
+              <td class="em-stack em-stack-pad" valign="top" style="text-align:right">
                 <p style="margin:0 0 4px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:${gold}">Potential Value</p>
                 <p style="margin:0;font-family:${FONT_DATA};font-size:26px;font-weight:500;color:${ink};letter-spacing:-.01em">$${totalValue.toLocaleString()}</p>
               </td>
@@ -579,7 +597,7 @@ function unassignedLeadsReportEmail({ leads, weekLabel, test }) {
   </div>
 
   ${!empty ? `
-  <div style="margin:22px 36px 0;padding-top:22px;border-top:1px solid ${goldHairline}">
+  <div class="em-mx" style="margin:22px 36px 0;padding-top:22px;border-top:1px solid ${goldHairline}">
     <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
       <td style="padding-right:8px" valign="top">${diamond}</td>
       <td>
@@ -591,7 +609,7 @@ function unassignedLeadsReportEmail({ leads, weekLabel, test }) {
   ` : ''}
 
   ${!empty ? `
-  <div style="padding:28px 36px 0">
+  <div class="em-px" style="padding:28px 36px 0">
     <p style="margin:0 0 14px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${slate}">The List</p>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
       ${rows}
@@ -599,7 +617,7 @@ function unassignedLeadsReportEmail({ leads, weekLabel, test }) {
   </div>
   ` : ''}
 
-  <div style="margin:8px 36px 0;padding-top:26px;border-top:1px solid ${hairline}">
+  <div class="em-mx" style="margin:8px 36px 0;padding-top:26px;border-top:1px solid ${hairline}">
     <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
       <td bgcolor="${teal}" style="background-color:${teal};background-image:linear-gradient(135deg,${teal},${deep});border-radius:12px">
         <a href="${primaryFrontendUrl()}/leads" style="display:inline-block;padding:13px 28px;color:#fff;text-decoration:none;font-weight:600;font-size:13.5px;letter-spacing:.01em;font-family:${FONT_BODY}">Open Leads →</a>
@@ -607,7 +625,7 @@ function unassignedLeadsReportEmail({ leads, weekLabel, test }) {
     </tr></table>
   </div>
 
-  <div style="margin-top:36px;background:${BRAND.tealMist};padding:20px 36px;font-size:11.5px;font-style:italic;font-family:${FONT_DISPLAY};color:${slate};border-top:1px solid ${hairline}">
+  <div class="em-px" style="margin-top:36px;background:${BRAND.tealMist};padding:20px 36px;font-size:11.5px;font-style:italic;font-family:${FONT_DISPLAY};color:${slate};border-top:1px solid ${hairline}">
     Aim Dental Laboratory CRM &nbsp;·&nbsp; Weekly Unassigned Leads Report
   </div>
 </div>
