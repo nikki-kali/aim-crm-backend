@@ -447,8 +447,17 @@ function unassignedLeadsReportEmail({ leads, weekLabel, test }) {
   const hairline = '#dcebe9'
   const count = leads.length
   const empty = count === 0
+  const totalValue = leads.reduce((sum, l) => sum + (Number(l.estimated_value) || 0), 0)
 
   const brandBadge = (brand) => `<span style="display:inline-block;font-family:${FONT_DATA};font-size:9.5px;font-weight:500;letter-spacing:.04em;padding:2px 7px;border-radius:999px;background:${brand === 'Aim Dental' ? BRAND.tealMist : BRAND.blueMist};color:${brand === 'Aim Dental' ? deep : BRAND.deep}">${brand === 'Aim Dental' ? 'AIM' : 'KH'}</span>`
+
+  // Source gets its own visible pill (not buried in small print) — it's the
+  // one signal that tells whoever's assigning *how* to reach out (a
+  // LinkedIn lead wants a personal note, a website form wants a fast
+  // callback), so it needs to read at a glance, not on close inspection.
+  const sourceBadge = (source) => source
+    ? `<span style="display:inline-block;font-family:${FONT_DATA};font-size:9.5px;font-weight:500;letter-spacing:.03em;padding:3px 8px;border-radius:6px;background:#f1f5f4;color:${slate}">${source}</span>`
+    : ''
 
   const contactLine = (l) => {
     const parts = []
@@ -457,7 +466,10 @@ function unassignedLeadsReportEmail({ leads, weekLabel, test }) {
     return parts.length ? parts.join(' &nbsp;·&nbsp; ') : '<span style="color:#a9c1c6">No contact info on file</span>'
   }
 
-  const rows = leads.map((l, i) => `
+  const rows = leads.map((l, i) => {
+    const source = l.lead_source || l.referral_source || ''
+    const value = Number(l.estimated_value) || 0
+    return `
     <tr>
       <td style="padding:14px 0;${i > 0 ? `border-top:1px solid ${hairline}` : ''}" valign="top">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
@@ -465,16 +477,18 @@ function unassignedLeadsReportEmail({ leads, weekLabel, test }) {
             <td valign="top">
               <p style="margin:0 0 3px;font-size:14px;font-weight:600;color:${ink}">${l.doctor_name} &nbsp;${brandBadge(l.brand)}</p>
               <p style="margin:0 0 6px;font-size:12px;color:${slate}">${l.clinic_name || '—'}${l.case_interest ? ` &nbsp;·&nbsp; ${l.case_interest}` : ''}</p>
-              <p style="margin:0;font-size:12px;color:${ink}">${contactLine(l)}</p>
+              <p style="margin:0 0 6px;font-size:12px;color:${ink}">${contactLine(l)}</p>
+              ${sourceBadge(source)}
             </td>
-            <td width="120" valign="top" style="text-align:right">
-              <p style="margin:0 0 4px;font-family:${FONT_DATA};font-size:10px;color:${slate}">${new Date(l.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
-              <p style="margin:0;font-family:${FONT_DATA};font-size:9.5px;color:#a9c1c6;text-transform:uppercase;letter-spacing:.06em">${l.lead_source || l.referral_source || '—'}</p>
+            <td width="110" valign="top" style="text-align:right">
+              ${value > 0 ? `<p style="margin:0 0 5px;font-family:${FONT_DATA};font-size:14px;font-weight:500;color:${gold}">$${value.toLocaleString()}</p>` : ''}
+              <p style="margin:0;font-family:${FONT_DATA};font-size:10px;color:${slate}">${new Date(l.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
             </td>
           </tr>
         </table>
       </td>
-    </tr>`).join('')
+    </tr>`
+  }).join('')
 
   return `<!DOCTYPE html>
 <html>
@@ -510,9 +524,18 @@ function unassignedLeadsReportEmail({ leads, weekLabel, test }) {
     <p style="margin:0;font-size:13.5px;line-height:1.55;color:${ink}">
       ${empty
         ? 'No unassigned leads this week — every new lead that came in already has an owner. Nice work keeping the queue clear.'
-        : `<strong>${count}</strong> lead${count === 1 ? '' : 's'} came in this week and ${count === 1 ? 'is' : 'are'} still unassigned.`}
+        : `<strong>${count}</strong> lead${count === 1 ? '' : 's'} came in this week and ${count === 1 ? 'is' : 'are'} still unassigned${totalValue > 0 ? ` &nbsp;·&nbsp; <strong>$${totalValue.toLocaleString()}</strong> in potential value sitting unclaimed` : ''}.`}
     </p>
   </div>
+
+  ${!empty ? `
+  <div style="margin:20px 36px 0;padding:20px 22px;background-color:${gold};background-image:linear-gradient(135deg,${teal},${gold});border-radius:16px">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="background:#fff;border-radius:14px;padding:19px 21px">
+      <p style="margin:0 0 6px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${gold}">These Should Be Assigned</p>
+      <p style="margin:0;font-size:13px;line-height:1.6;color:${ink}">None of these have been contacted yet — that's not a downside, it's an opening. Whoever reaches out first sets the tone, and a cold prospect who's never heard from us is still an easy pitch to make. Assign these to the team this week and have them send a real first outreach, not just a form follow-up.</p>
+    </td></tr></table>
+  </div>
+  ` : ''}
 
   ${!empty ? `
   <div style="padding:26px 36px 0">
