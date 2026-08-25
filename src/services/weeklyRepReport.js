@@ -5,6 +5,84 @@ const { sendEmail, repReportEmail } = require('./email')
 // three inboxes for every rep, not configurable per rep.
 const REPORT_CC = ['media@aimdentallab.com', 'execassistant@aimdentallab.com', 'ben@aimdentallab.com']
 
+// Used only to pad personalizedSuggestions() out to 3 lines when a rep
+// doesn't have enough going on in their own numbers to trigger 3 specific
+// rules (e.g. a brand-new rep with almost no history yet) — never shown on
+// its own.
+const FALLBACK_SUGGESTIONS = {
+  green: [
+    'Set a stretch goal: one more lead than last week.',
+    'Write down what worked this week so it’s easy to repeat.',
+  ],
+  amber: [
+    'Pick one lead and move it forward today — that’s your 1% for the week.',
+    'Send one prospect a follow-up that references something specific, not a generic check-in.',
+  ],
+  red: [
+    'Block 30 minutes this week for follow-ups only, before any new prospecting.',
+    'If a lead has gone quiet twice, try a different channel than last time.',
+  ],
+}
+
+// Personalized, data-driven suggestions — each rule reads the rep's own
+// numbers (named cold leads, stuck proposals, WIP vs. billed, week-over-
+// week trend, a real recent win) rather than showing the same 3 lines to
+// every rep in a tier. Rules are checked in priority order (most specific
+// and actionable first) and the first 3 matches win; FALLBACK_SUGGESTIONS
+// only pads the list when fewer than 3 of a rep's own signals fire.
+// Lives here (not in email.js) because computeRepSummary computes it once
+// and both the email template and GET /api/reports/my-summary (which
+// powers the rep dashboard's own "action items" card) read the same array
+// off the summary object — one source of truth, not two.
+function personalizedSuggestions({ week, month, previousWeek, sales, coldLeads, recentWinName, tier }) {
+  const rules = []
+
+  if (coldLeads?.count > 0 && coldLeads.leads[0]) {
+    const l = coldLeads.leads[0]
+    rules.push(`Follow up with ${l.doctor_name} — it’s been ${l.days_cold} day${l.days_cold !== 1 ? 's' : ''} since last contact.`)
+  }
+  if (coldLeads?.count > 1) {
+    const rest = coldLeads.count - 1
+    rules.push(`${rest} more cold lead${rest !== 1 ? 's' : ''} waiting behind that one — clear the list before it grows.`)
+  }
+  // Zero pipeline (no new leads *and* no new cases) is more foundational
+  // than a stuck proposal or a WIP backlog — there's nothing downstream to
+  // work if nothing's coming in, so it's checked ahead of those.
+  if (Number(week.leads_created) === 0 && Number(week.cases_created || 0) === 0) {
+    rules.push('No new leads or cases came in this week — block time for outreach before the pipeline stalls.')
+  }
+  if (month.proposals > 0 && month.wins === 0) {
+    rules.push(`${month.proposals} proposal${month.proposals !== 1 ? 's' : ''} sent this month with no wins yet — a check-in could close one.`)
+  }
+  if (sales.wip > 0 && sales.wip > sales.billed) {
+    rules.push(`$${sales.wip.toLocaleString()} sitting in WIP — check in on production to help convert it to billed.`)
+  }
+  if (previousWeek?.leads_created > 0 && week.leads_created < previousWeek.leads_created) {
+    rules.push(`Lead creation dipped from last week (${previousWeek.leads_created} → ${week.leads_created}) — even one more this week reverses it.`)
+  }
+  if (recentWinName && (week.wins > 0 || month.wins > 0)) {
+    rules.push(`Ask ${recentWinName} for a referral while the relationship is still warm.`)
+  }
+  if (month.leads_created >= 2 && month.conversion_rate >= 50) {
+    rules.push(`Conversion is ${month.conversion_rate}% this month — well above average. Write down what’s working so you can repeat it.`)
+  }
+  if (month.leads_created >= 3 && month.conversion_rate < 20) {
+    rules.push(`Conversion is ${month.conversion_rate}% this month — revisit how new leads get qualified before investing more follow-up time.`)
+  }
+  if (previousWeek && week.wins > previousWeek.wins) {
+    rules.push(`Already ahead of last week’s ${previousWeek.wins} win${previousWeek.wins !== 1 ? 's' : ''} — one more keeps the streak building.`)
+  }
+
+  const picked = rules.slice(0, 3)
+  if (picked.length < 3) {
+    for (const f of FALLBACK_SUGGESTIONS[tier] || FALLBACK_SUGGESTIONS.amber) {
+      if (picked.length >= 3) break
+      picked.push(f)
+    }
+  }
+  return picked
+}
+
 // Shared by GET /api/reports/my-summary, POST /api/reports/my-summary/email,
 // and this file's sendRepWeeklyReport — one place computing a rep's
 // week/month/all-time/sales-value numbers so the on-demand, admin-test, and
@@ -130,7 +208,7 @@ async function computeRepSummary(repId) {
   else if (coldCount >= 3 || (wWins === 0 && mWon === 0)) tier = 'red'
   else tier = 'amber'
 
-  return {
+  const summary = {
     tier,
     coldLeads: { count: coldCount, leads: coldLeads },
     recentWinName: recentWinRes.rows[0]?.doctor_name || null,
@@ -168,6 +246,22 @@ async function computeRepSummary(repId) {
       total: Number(sales.total),
     },
   }
+
+  // Computed once here off the summary that's already been built — both
+  // the email template and GET /api/reports/my-summary (the rep
+  // dashboard's action-items card) read this same array, so the two can
+  // never show different suggestions for the same rep at the same moment.
+  summary.suggestions = personalizedSuggestions({
+    week: summary.week,
+    month: summary.month,
+    previousWeek: summary.previousWeek,
+    sales: summary.sales,
+    coldLeads: summary.coldLeads,
+    recentWinName: summary.recentWinName,
+    tier: summary.tier,
+  })
+
+  return summary
 }
 
 function buildRepReportHtml(repName, summary, { test = false } = {}) {
