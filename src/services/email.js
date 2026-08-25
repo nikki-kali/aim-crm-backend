@@ -445,44 +445,65 @@ function repReportEmail({ repName, dateLabel, monthLabel, week, month, allTime, 
 function unassignedLeadsReportEmail({ leads, weekLabel, test }) {
   const { ink, slate, teal, deep, gold } = BRAND
   const hairline = '#dcebe9'
+  const goldHairline = 'rgba(217,164,65,.28)'
   const count = leads.length
   const empty = count === 0
   const totalValue = leads.reduce((sum, l) => sum + (Number(l.estimated_value) || 0), 0)
 
-  const brandBadge = (brand) => `<span style="display:inline-block;font-family:${FONT_DATA};font-size:9.5px;font-weight:500;letter-spacing:.04em;padding:2px 7px;border-radius:999px;background:${brand === 'Aim Dental' ? BRAND.tealMist : BRAND.blueMist};color:${brand === 'Aim Dental' ? deep : BRAND.deep}">${brand === 'Aim Dental' ? 'AIM' : 'KH'}</span>`
+  // A thin gold diamond in place of a bullet/icon — the one recurring
+  // ornament used everywhere something needs to read as considered rather
+  // than templated (eyebrow labels, the section rule). No emoji, no stock
+  // icon glyphs — a single quiet mark repeated is what reads as designed.
+  const diamond = `<span style="display:inline-block;width:5px;height:5px;background:${gold};transform:rotate(45deg);font-size:0;line-height:0">&nbsp;</span>`
 
-  // Source gets its own visible pill (not buried in small print) — it's the
-  // one signal that tells whoever's assigning *how* to reach out (a
-  // LinkedIn lead wants a personal note, a website form wants a fast
-  // callback), so it needs to read at a glance, not on close inspection.
+  const brandBadge = (brand) => `<span style="display:inline-block;font-family:${FONT_DATA};font-size:9px;font-weight:500;letter-spacing:.06em;padding:2px 8px;border-radius:999px;border:1px solid ${brand === 'Aim Dental' ? 'rgba(32,114,144,.25)' : 'rgba(32,114,144,.25)'};color:${deep}">${brand === 'Aim Dental' ? 'AIM' : 'KH'}</span>`
+
+  // Source as a quiet outlined pill, not a flat gray fill — a solid-fill
+  // badge reads like a system tag; a hairline-bordered one with tracked
+  // caps reads like a considered label. Still the one signal that tells
+  // whoever's assigning *how* to reach out (LinkedIn wants a personal
+  // note, a website form wants a fast callback).
   const sourceBadge = (source) => source
-    ? `<span style="display:inline-block;font-family:${FONT_DATA};font-size:9.5px;font-weight:500;letter-spacing:.03em;padding:3px 8px;border-radius:6px;background:#f1f5f4;color:${slate}">${source}</span>`
+    ? `<span style="display:inline-block;font-family:${FONT_DATA};font-size:9px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;padding:3px 9px;border-radius:999px;border:1px solid ${goldHairline};color:${slate}">${source}</span>`
     : ''
 
   const contactLine = (l) => {
     const parts = []
     if (l.email) parts.push(`<a href="mailto:${l.email}" style="color:${teal};text-decoration:none">${l.email}</a>`)
     if (l.phone) parts.push(l.phone)
-    return parts.length ? parts.join(' &nbsp;·&nbsp; ') : '<span style="color:#a9c1c6">No contact info on file</span>'
+    return parts.length ? parts.join(' &nbsp;·&nbsp; ') : '<span style="color:#a9c1c6;font-style:italic">No contact info on file</span>'
   }
 
-  const rows = leads.map((l, i) => {
+  // Each lead reads as its own quiet card (hairline border, generous
+  // padding, rounded corners) rather than a plain divided table row —
+  // individually-framed items feel considered; a dense list of tr/td
+  // dividers reads like a spreadsheet export.
+  const rows = leads.map((l) => {
     const source = l.lead_source || l.referral_source || ''
     const value = Number(l.estimated_value) || 0
     return `
     <tr>
-      <td style="padding:14px 0;${i > 0 ? `border-top:1px solid ${hairline}` : ''}" valign="top">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+      <td style="padding:0 0 12px">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${hairline};border-radius:14px">
           <tr>
-            <td valign="top">
-              <p style="margin:0 0 3px;font-size:14px;font-weight:600;color:${ink}">${l.doctor_name} &nbsp;${brandBadge(l.brand)}</p>
-              <p style="margin:0 0 6px;font-size:12px;color:${slate}">${l.clinic_name || '—'}${l.case_interest ? ` &nbsp;·&nbsp; ${l.case_interest}` : ''}</p>
-              <p style="margin:0 0 6px;font-size:12px;color:${ink}">${contactLine(l)}</p>
-              ${sourceBadge(source)}
-            </td>
-            <td width="110" valign="top" style="text-align:right">
-              ${value > 0 ? `<p style="margin:0 0 5px;font-family:${FONT_DATA};font-size:14px;font-weight:500;color:${gold}">$${value.toLocaleString()}</p>` : ''}
-              <p style="margin:0;font-family:${FONT_DATA};font-size:10px;color:${slate}">${new Date(l.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+            <td style="padding:18px 20px" valign="top">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td valign="top">
+                    <p style="margin:0 0 4px;font-family:${FONT_DISPLAY};font-size:17px;font-weight:700;color:${ink}">${l.doctor_name} &nbsp;${brandBadge(l.brand)}</p>
+                    <p style="margin:0 0 10px;font-size:12px;font-style:italic;color:${slate}">${l.clinic_name || 'No clinic on file'}${l.case_interest ? ` &nbsp;·&nbsp; ${l.case_interest}` : ''}</p>
+                    <p style="margin:0 0 12px;font-size:12.5px;color:${ink}">${contactLine(l)}</p>
+                    ${sourceBadge(source)}
+                  </td>
+                  <td width="104" valign="top" style="text-align:right">
+                    ${value > 0 ? `
+                    <p style="margin:0;font-family:${FONT_DATA};font-size:17px;font-weight:500;color:${gold};letter-spacing:-.01em">$${value.toLocaleString()}</p>
+                    <p style="margin:2px 0 10px;font-family:${FONT_DATA};font-size:8.5px;color:#c9b489;text-transform:uppercase;letter-spacing:.08em">Potential</p>
+                    ` : ''}
+                    <p style="margin:0;font-family:${FONT_DATA};font-size:10px;color:${slate}">${new Date(l.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
         </table>
@@ -513,48 +534,79 @@ function unassignedLeadsReportEmail({ leads, weekLabel, test }) {
 
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
     <tr>
-      <td bgcolor="${teal}" style="background-color:${teal};background-image:linear-gradient(135deg,${teal},${deep});padding:34px 36px 28px">
-        <h1 style="color:#fff;margin:0;font-family:${FONT_DISPLAY};font-size:28px;font-weight:700;letter-spacing:-.01em">Weekly Unassigned Leads</h1>
-        <p style="color:rgba(255,255,255,.72);margin:10px 0 0;font-size:13px">Week of ${weekLabel}</p>
+      <td bgcolor="${teal}" style="background-color:${teal};background-image:linear-gradient(135deg,${teal},${deep});padding:38px 36px 30px">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td style="padding-right:8px">${diamond}</td>
+          <td><p style="margin:0;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.78)">Weekly Lead Intake</p></td>
+        </tr></table>
+        <h1 style="color:#fff;margin:12px 0 0;font-family:${FONT_DISPLAY};font-size:32px;font-weight:700;letter-spacing:-.01em">Unassigned Leads</h1>
+        <p style="color:rgba(255,255,255,.72);margin:9px 0 0;font-size:13px;font-style:italic;font-family:${FONT_DISPLAY}">Week of ${weekLabel}</p>
       </td>
     </tr>
   </table>
 
-  <div style="margin:30px 36px 0;padding:16px 19px;background:${empty ? '#f3fbf6' : '#fefaf1'};border:1px solid ${empty ? '#bfe8cf' : '#f3ddab'};border-left:3px solid ${empty ? BRAND.success : gold};border-radius:4px 12px 12px 4px">
-    <p style="margin:0;font-size:13.5px;line-height:1.55;color:${ink}">
-      ${empty
-        ? 'No unassigned leads this week — every new lead that came in already has an owner. Nice work keeping the queue clear.'
-        : `<strong>${count}</strong> lead${count === 1 ? '' : 's'} came in this week and ${count === 1 ? 'is' : 'are'} still unassigned${totalValue > 0 ? ` &nbsp;·&nbsp; <strong>$${totalValue.toLocaleString()}</strong> in potential value sitting unclaimed` : ''}.`}
-    </p>
+  <div style="margin:34px 36px 0">
+    ${empty ? `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #bfe8cf;border-radius:16px">
+      <tr><td style="padding:20px 22px">
+        <p style="margin:0;font-size:13.5px;line-height:1.6;color:${ink}">No unassigned leads this week — every new lead that came in already has an owner. Nice work keeping the queue clear.</p>
+      </td></tr>
+    </table>
+    ` : `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${gold};background-image:linear-gradient(135deg,${teal},${gold});border-radius:18px">
+      <tr><td style="padding:2px">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${BRAND.tealMist};background-image:linear-gradient(160deg,${BRAND.tealMist},${BRAND.blueMist});border-radius:16px">
+          <tr><td style="padding:24px 26px">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+              <td valign="top">
+                <p style="margin:0 0 4px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:${gold}">Sitting Unclaimed</p>
+                <p style="margin:0;font-family:${FONT_DISPLAY};font-size:38px;font-weight:700;color:${teal};letter-spacing:-.01em">${count}</p>
+                <p style="margin:2px 0 0;font-size:11.5px;color:${deep}">lead${count === 1 ? '' : 's'} with no owner</p>
+              </td>
+              ${totalValue > 0 ? `
+              <td valign="top" style="text-align:right">
+                <p style="margin:0 0 4px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:${gold}">Potential Value</p>
+                <p style="margin:0;font-family:${FONT_DATA};font-size:26px;font-weight:500;color:${ink};letter-spacing:-.01em">$${totalValue.toLocaleString()}</p>
+              </td>
+              ` : ''}
+            </tr></table>
+          </td></tr>
+        </table>
+      </td></tr>
+    </table>
+    `}
   </div>
 
   ${!empty ? `
-  <div style="margin:20px 36px 0;padding:20px 22px;background-color:${gold};background-image:linear-gradient(135deg,${teal},${gold});border-radius:16px">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="background:#fff;border-radius:14px;padding:19px 21px">
-      <p style="margin:0 0 6px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${gold}">These Should Be Assigned</p>
-      <p style="margin:0;font-size:13px;line-height:1.6;color:${ink}">None of these have been contacted yet — that's not a downside, it's an opening. Whoever reaches out first sets the tone, and a cold prospect who's never heard from us is still an easy pitch to make. Assign these to the team this week and have them send a real first outreach, not just a form follow-up.</p>
-    </td></tr></table>
+  <div style="margin:22px 36px 0;padding-top:22px;border-top:1px solid ${goldHairline}">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td style="padding-right:8px" valign="top">${diamond}</td>
+      <td>
+        <p style="margin:0 0 6px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${gold}">These Should Be Assigned</p>
+        <p style="margin:0;font-size:13px;line-height:1.65;color:${ink}">None of these have been contacted yet — that's not a downside, it's an opening. Whoever reaches out first sets the tone, and a prospect who's never heard from the lab is still the easiest pitch there is. Assign these to the team this week and have them send a real first outreach, not just a form follow-up.</p>
+      </td>
+    </tr></table>
   </div>
   ` : ''}
 
   ${!empty ? `
-  <div style="padding:26px 36px 0">
-    <p style="margin:0 0 4px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${slate}">Unassigned Leads</p>
+  <div style="padding:28px 36px 0">
+    <p style="margin:0 0 14px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${slate}">The List</p>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
       ${rows}
     </table>
   </div>
   ` : ''}
 
-  <div style="margin:36px 36px 0;padding-top:26px;border-top:1px solid ${hairline}">
+  <div style="margin:8px 36px 0;padding-top:26px;border-top:1px solid ${hairline}">
     <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
       <td bgcolor="${teal}" style="background-color:${teal};background-image:linear-gradient(135deg,${teal},${deep});border-radius:12px">
-        <a href="${primaryFrontendUrl()}/leads" style="display:inline-block;padding:12px 26px;color:#fff;text-decoration:none;font-weight:600;font-size:13.5px;font-family:${FONT_BODY}">Open Leads →</a>
+        <a href="${primaryFrontendUrl()}/leads" style="display:inline-block;padding:13px 28px;color:#fff;text-decoration:none;font-weight:600;font-size:13.5px;letter-spacing:.01em;font-family:${FONT_BODY}">Open Leads →</a>
       </td>
     </tr></table>
   </div>
 
-  <div style="margin-top:36px;background:${BRAND.tealMist};padding:18px 36px;font-size:11.5px;color:${slate};border-top:1px solid ${hairline}">
+  <div style="margin-top:36px;background:${BRAND.tealMist};padding:20px 36px;font-size:11.5px;font-style:italic;font-family:${FONT_DISPLAY};color:${slate};border-top:1px solid ${hairline}">
     Aim Dental Laboratory CRM &nbsp;·&nbsp; Weekly Unassigned Leads Report
   </div>
 </div>
