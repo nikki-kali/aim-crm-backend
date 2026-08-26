@@ -513,7 +513,7 @@ router.get('/my-summary/csv', auth, async (req, res, next) => {
 router.get('/team-comparison', auth, requireAdmin, async (req, res, next) => {
   try {
     const { rows: reps } = await db.query(
-      "SELECT id, name, email FROM users WHERE role IN ('staff','sales_rep') ORDER BY name"
+      "SELECT id, name, email, role FROM users WHERE role IN ('staff','sales_rep') ORDER BY name"
     )
     const now = new Date()
 
@@ -575,6 +575,43 @@ router.get('/team-comparison', auth, requireAdmin, async (req, res, next) => {
     }))
 
     res.json(result)
+  } catch (err) { next(err) }
+})
+
+// GET /api/reports/rep/:id/activities — admin-only, Rep Detail page's
+// merged activity feed. `activities.entity_id` is polymorphic (lead,
+// client, or case row depending on entity_type — see v3-migration.sql),
+// so "this rep's activity" has to be assembled as a UNION across all three
+// ownership paths rather than one join: leads/clients are owned directly
+// via assigned_to, cases via the same clients.doctor_name = cases.client_name
+// bridge used everywhere else a case's rep has to be derived.
+router.get('/rep/:id/activities', auth, requireAdmin, async (req, res, next) => {
+  try {
+    const { id } = req.params
+    const { rows } = await db.query(
+      `SELECT a.id, a.entity_type, a.entity_id, a.type, a.description, a.created_at, u.name AS created_by_name
+       FROM activities a
+       JOIN leads l ON a.entity_type='lead' AND a.entity_id=l.id
+       LEFT JOIN users u ON u.id = a.created_by
+       WHERE l.assigned_to = $1
+       UNION ALL
+       SELECT a.id, a.entity_type, a.entity_id, a.type, a.description, a.created_at, u.name AS created_by_name
+       FROM activities a
+       JOIN clients c ON a.entity_type='client' AND a.entity_id=c.id
+       LEFT JOIN users u ON u.id = a.created_by
+       WHERE c.assigned_to = $1
+       UNION ALL
+       SELECT a.id, a.entity_type, a.entity_id, a.type, a.description, a.created_at, u.name AS created_by_name
+       FROM activities a
+       JOIN cases ca ON a.entity_type='case' AND a.entity_id=ca.id
+       JOIN clients c2 ON c2.doctor_name = ca.client_name
+       LEFT JOIN users u ON u.id = a.created_by
+       WHERE c2.assigned_to = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [id]
+    )
+    res.json(rows)
   } catch (err) { next(err) }
 })
 

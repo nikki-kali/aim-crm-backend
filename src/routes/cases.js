@@ -252,15 +252,32 @@ router.post('/import-evident', auth, requireAdmin, async (req, res, next) => {
 // creation time) is aliased to pickup_requested_at since cases already
 // has its own created_at — an unaliased duplicate column name would
 // silently collide in the resulting JSON row.
+// ?rep=<user id> — admin-only drill-down (Rep Detail page): a case has no
+// assigned_to of its own, so "this rep's cases" means cases whose
+// client_name matches one of that rep's clients (same clients.assigned_to
+// join reports.js's team-comparison already uses for the count-only
+// version of this).
 router.get('/', auth, async (req, res, next) => {
   try {
+    const { rep } = req.query
+    const params = []
+    let repJoin = ''
+    let repWhere = ''
+    if (rep) {
+      params.push(rep)
+      repJoin = `JOIN clients cl ON cl.doctor_name = c.client_name`
+      repWhere = `WHERE cl.assigned_to = $${params.length}`
+    }
     const { rows } = await db.query(
       `SELECT c.*, l.pickup_status, l.created_at AS pickup_requested_at,
               l.pickup_dispatched_at, l.pickup_received_at,
               l.pickup_date, l.pickup_window
        FROM cases c
        LEFT JOIN leads l ON l.id = c.original_lead_id
-       ORDER BY c.due_date ASC NULLS LAST`
+       ${repJoin}
+       ${repWhere}
+       ORDER BY c.due_date ASC NULLS LAST`,
+      params
     )
     res.json(rows)
   } catch (err) { next(err) }
