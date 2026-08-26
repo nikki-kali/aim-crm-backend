@@ -5,14 +5,18 @@ const requireAdmin = require('../middleware/requireAdmin')
 
 const router = express.Router()
 
-// GET /api/clinics
+// GET /api/clinics — ?rep=<user id> is an admin drill-down filter: clinics
+// has no assigned_to of its own (a clinic isn't "owned" by one rep the way
+// a lead/client is), so "this rep's clinics" is derived from having at
+// least one of that rep's leads linked to it via leads.clinic_id.
 router.get('/', auth, async (req, res, next) => {
   try {
-    const { search, brand } = req.query
+    const { search, brand, rep } = req.query
     let query = 'SELECT * FROM clinics WHERE 1=1'
     const params = []
     if (brand && brand !== 'All') { params.push(brand); query += ` AND brand=$${params.length}` }
     if (search) { params.push(`%${search}%`); query += ` AND name ILIKE $${params.length}` }
+    if (rep) { params.push(rep); query += ` AND EXISTS (SELECT 1 FROM leads WHERE clinic_id = clinics.id AND assigned_to = $${params.length})` }
     query += ' ORDER BY name ASC'
     const { rows } = await db.query(query, params)
     res.json(rows)
