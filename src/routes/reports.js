@@ -526,6 +526,7 @@ router.get('/team-comparison', auth, requireAdmin, async (req, res, next) => {
     })()
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
     const quarterStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1)
+    const yearStart = new Date(now.getFullYear(), 0, 1)
 
     const getStats = async (repId, start) => {
       const { rows: [r] } = await db.query(
@@ -558,10 +559,16 @@ router.get('/team-comparison', auth, requireAdmin, async (req, res, next) => {
       const { rows: [r] } = await db.query(
         `SELECT
           (SELECT COUNT(*) FROM clients WHERE assigned_to=$1) AS clients_count,
-          (SELECT COUNT(*) FROM cases WHERE client_name IN (SELECT doctor_name FROM clients WHERE assigned_to=$1)) AS cases_count`,
-        [repId]
+          (SELECT COUNT(*) FROM cases WHERE client_name IN (SELECT doctor_name FROM clients WHERE assigned_to=$1)) AS cases_count,
+          (SELECT COALESCE(SUM(c.value), 0) FROM cases c JOIN clients cl ON cl.doctor_name = c.client_name
+            WHERE cl.assigned_to=$1 AND c.created_at >= $2) AS sales_value_ytd`,
+        [repId, yearStart]
       )
-      return { clients_count: Number(r.clients_count), cases_count: Number(r.cases_count) }
+      return {
+        clients_count: Number(r.clients_count),
+        cases_count: Number(r.cases_count),
+        sales_value_ytd: Number(r.sales_value_ytd),
+      }
     }
 
     const result = await Promise.all(reps.map(async (rep) => {
