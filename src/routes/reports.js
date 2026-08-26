@@ -548,13 +548,30 @@ router.get('/team-comparison', auth, requireAdmin, async (req, res, next) => {
       }
     }
 
+    // Existing book of business — current state, not scoped to any one
+    // period like the stats above, so it's computed once per rep and shown
+    // regardless of which week/month/quarter tab is selected. cases has no
+    // assigned_to of its own (see import-evident's comment in cases.js), so
+    // a rep's cases are found via their clients' doctor_name, same join
+    // used everywhere else a rep's case data is derived from clients.
+    const getBook = async (repId) => {
+      const { rows: [r] } = await db.query(
+        `SELECT
+          (SELECT COUNT(*) FROM clients WHERE assigned_to=$1) AS clients_count,
+          (SELECT COUNT(*) FROM cases WHERE client_name IN (SELECT doctor_name FROM clients WHERE assigned_to=$1)) AS cases_count`,
+        [repId]
+      )
+      return { clients_count: Number(r.clients_count), cases_count: Number(r.cases_count) }
+    }
+
     const result = await Promise.all(reps.map(async (rep) => {
-      const [week, month, quarter] = await Promise.all([
+      const [week, month, quarter, book] = await Promise.all([
         getStats(rep.id, weekStart),
         getStats(rep.id, monthStart),
         getStats(rep.id, quarterStart),
+        getBook(rep.id),
       ])
-      return { rep, week, month, quarter }
+      return { rep, week, month, quarter, ...book }
     }))
 
     res.json(result)
