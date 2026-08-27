@@ -526,49 +526,54 @@ router.get('/team-comparison', auth, requireAdmin, async (req, res, next) => {
     })()
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
     const quarterStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1)
-    const yearStart = new Date(now.getFullYear(), 0, 1)
 
+    // cases has no assigned_to of its own (see import-evident's comment in
+    // cases.js), so a rep's cases are found via their clients' doctor_name,
+    // same join used everywhere else a rep's case data is derived from
+    // clients. cases_count/sales_value are scoped to the same `start` as the
+    // lead stats so switching the week/month/quarter tab moves every column
+    // together — this is what makes the daily/MTD Evident bookings we key in
+    // show up correctly under "Week" the same day they're entered.
     const getStats = async (repId, start) => {
-      const { rows: [r] } = await db.query(
-        `SELECT
-          COUNT(*) AS leads_assigned,
-          COUNT(*) FILTER (WHERE status='Won') AS leads_won,
-          COUNT(*) FILTER (WHERE status IN ('Proposal','Won')) AS proposals_sent,
-          COUNT(*) FILTER (WHERE status IN ('Contacted','Proposal','Won')) AS leads_contacted
-         FROM leads WHERE assigned_to=$1 AND created_at >= $2`,
-        [repId, start]
-      )
-      const total = Number(r.leads_assigned)
-      const won = Number(r.leads_won)
+      const [{ rows: [l] }, { rows: [c] }] = await Promise.all([
+        db.query(
+          `SELECT
+            COUNT(*) AS leads_assigned,
+            COUNT(*) FILTER (WHERE status='Won') AS leads_won,
+            COUNT(*) FILTER (WHERE status IN ('Proposal','Won')) AS proposals_sent,
+            COUNT(*) FILTER (WHERE status IN ('Contacted','Proposal','Won')) AS leads_contacted
+           FROM leads WHERE assigned_to=$1 AND created_at >= $2`,
+          [repId, start]
+        ),
+        db.query(
+          `SELECT COUNT(*) AS cases_count, COALESCE(SUM(c.value), 0) AS sales_value
+           FROM cases c JOIN clients cl ON cl.doctor_name = c.client_name
+           WHERE cl.assigned_to=$1 AND c.created_at >= $2`,
+          [repId, start]
+        ),
+      ])
+      const total = Number(l.leads_assigned)
+      const won = Number(l.leads_won)
       return {
         leads_assigned: total,
         leads_won: won,
-        proposals_sent: Number(r.proposals_sent),
-        leads_contacted: Number(r.leads_contacted),
+        proposals_sent: Number(l.proposals_sent),
+        leads_contacted: Number(l.leads_contacted),
         conversion_rate: total > 0 ? Math.round(won / total * 100) : 0,
+        cases_count: Number(c.cases_count),
+        sales_value: Number(c.sales_value),
       }
     }
 
-    // Existing book of business — current state, not scoped to any one
-    // period like the stats above, so it's computed once per rep and shown
-    // regardless of which week/month/quarter tab is selected. cases has no
-    // assigned_to of its own (see import-evident's comment in cases.js), so
-    // a rep's cases are found via their clients' doctor_name, same join
-    // used everywhere else a rep's case data is derived from clients.
+    // Book size (client roster) isn't a period-scoped metric — a rep's
+    // headcount of doctors doesn't reset weekly/monthly like bookings do —
+    // so it's computed once and shown regardless of which tab is selected.
     const getBook = async (repId) => {
       const { rows: [r] } = await db.query(
-        `SELECT
-          (SELECT COUNT(*) FROM clients WHERE assigned_to=$1) AS clients_count,
-          (SELECT COUNT(*) FROM cases WHERE client_name IN (SELECT doctor_name FROM clients WHERE assigned_to=$1)) AS cases_count,
-          (SELECT COALESCE(SUM(c.value), 0) FROM cases c JOIN clients cl ON cl.doctor_name = c.client_name
-            WHERE cl.assigned_to=$1 AND c.created_at >= $2) AS sales_value_ytd`,
-        [repId, yearStart]
+        `SELECT COUNT(*) AS clients_count FROM clients WHERE assigned_to=$1`,
+        [repId]
       )
-      return {
-        clients_count: Number(r.clients_count),
-        cases_count: Number(r.cases_count),
-        sales_value_ytd: Number(r.sales_value_ytd),
-      }
+      return { clients_count: Number(r.clients_count) }
     }
 
     const result = await Promise.all(reps.map(async (rep) => {
