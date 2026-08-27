@@ -526,6 +526,7 @@ router.get('/team-comparison', auth, requireAdmin, async (req, res, next) => {
     })()
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
     const quarterStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1)
+    const yearStart = new Date(now.getFullYear(), 0, 1)
 
     // cases has no assigned_to of its own (see import-evident's comment in
     // cases.js), so a rep's cases are found via their clients' doctor_name,
@@ -577,13 +578,14 @@ router.get('/team-comparison', auth, requireAdmin, async (req, res, next) => {
     }
 
     const result = await Promise.all(reps.map(async (rep) => {
-      const [week, month, quarter, book] = await Promise.all([
+      const [week, month, quarter, year, book] = await Promise.all([
         getStats(rep.id, weekStart),
         getStats(rep.id, monthStart),
         getStats(rep.id, quarterStart),
+        getStats(rep.id, yearStart),
         getBook(rep.id),
       ])
-      return { rep, week, month, quarter, ...book }
+      return { rep, week, month, quarter, year, ...book }
     }))
 
     res.json(result)
