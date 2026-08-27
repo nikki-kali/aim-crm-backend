@@ -160,6 +160,8 @@ router.put('/:id', auth, async (req, res, next) => {
     const estimatedValue = Number(data.estimated_value) || 0
     const aiScore = scoreFromLead({ ...data, estimated_value: estimatedValue })
 
+    const { rows: beforeRows } = await db.query(`SELECT status FROM leads WHERE id=$1`, [req.params.id])
+
     const params = [
       data.doctor_name, data.clinic_name || '', data.brand || 'Aim Dental',
       data.case_interest || '', data.phone || '', data.email || '', data.lead_source || '',
@@ -186,7 +188,59 @@ router.put('/:id', auth, async (req, res, next) => {
 
     const { rows } = await db.query(`UPDATE leads SET ${set} ${where} RETURNING *`, params)
     if (!rows[0]) return res.status(404).json({ error: 'Lead not found' })
+
+    if (beforeRows[0] && beforeRows[0].status !== rows[0].status) {
+      await db.query(
+        `INSERT INTO activities (entity_type, entity_id, type, description, created_by)
+         VALUES ('lead',$1,'status_change',$2,$3)`,
+        [req.params.id, `Status changed to ${rows[0].status}`, req.user.id]
+      ).catch(() => {})
+    }
+
     res.json(rows[0])
+  } catch (err) { next(err) }
+})
+
+// GET /api/leads/:id/activities — timestamped note/status/assignment history
+// for one lead, newest first. Scoped the same way as the lead itself so a
+// rep can't read history off a lead they don't own.
+router.get('/:id/activities', auth, async (req, res, next) => {
+  try {
+    const ownerClause = isScopedRole(req.user.role) ? 'AND assigned_to=$2' : ''
+    const ownerParams = isScopedRole(req.user.role) ? [req.params.id, req.user.id] : [req.params.id]
+    const { rows: leadCheck } = await db.query(`SELECT id FROM leads WHERE id=$1 ${ownerClause}`, ownerParams)
+    if (!leadCheck[0]) return res.status(404).json({ error: 'Lead not found' })
+
+    const { rows } = await db.query(
+      `SELECT a.id, a.type, a.description, a.created_at, u.name AS created_by_name
+       FROM activities a LEFT JOIN users u ON u.id = a.created_by
+       WHERE a.entity_type='lead' AND a.entity_id=$1
+       ORDER BY a.created_at DESC`,
+      [req.params.id]
+    )
+    res.json(rows)
+  } catch (err) { next(err) }
+})
+
+// POST /api/leads/:id/notes — append-only note, distinct from the single
+// overwritable `notes` field on the lead itself. Logged as an activity so
+// nothing gets lost as a lead moves through stages.
+router.post('/:id/notes', auth, async (req, res, next) => {
+  try {
+    const text = (req.body.text || '').trim()
+    if (!text) return res.status(400).json({ error: 'Note text is required' })
+
+    const ownerClause = isScopedRole(req.user.role) ? 'AND assigned_to=$2' : ''
+    const ownerParams = isScopedRole(req.user.role) ? [req.params.id, req.user.id] : [req.params.id]
+    const { rows: leadCheck } = await db.query(`SELECT id FROM leads WHERE id=$1 ${ownerClause}`, ownerParams)
+    if (!leadCheck[0]) return res.status(404).json({ error: 'Lead not found' })
+
+    const { rows } = await db.query(
+      `INSERT INTO activities (entity_type, entity_id, type, description, created_by)
+       VALUES ('lead',$1,'note',$2,$3) RETURNING id, type, description, created_at`,
+      [req.params.id, text, req.user.id]
+    )
+    res.status(201).json({ ...rows[0], created_by_name: req.user.name })
   } catch (err) { next(err) }
 })
 
@@ -250,6 +304,11 @@ router.post('/:id/contacted', auth, async (req, res, next) => {
       params
     )
     if (!rows[0]) return res.status(404).json({ error: 'Lead not found' })
+    await db.query(
+      `INSERT INTO activities (entity_type, entity_id, type, description, created_by)
+       VALUES ('lead',$1,'contacted','Marked as contacted',$2)`,
+      [req.params.id, req.user.id]
+    ).catch(() => {})
     res.json(rows[0])
   } catch (err) { next(err) }
 })
