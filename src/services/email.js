@@ -227,7 +227,7 @@ const BRAND = {
   success: '#059669',
 }
 
-function repReportEmail({ repName, dateLabel, monthLabel, week, month, allTime, sales, tier, coldLeads, suggestions, test }) {
+function repReportEmail({ repName, dateLabel, monthLabel, lastMonthLabel, week, month, allTime, sales, tier, coldLeads, suggestions, test }) {
   const { ink, slate, teal, deep, gold } = BRAND
   const hairline = '#dcebe9'
   const t = TIER_META[tier] || TIER_META.amber
@@ -293,7 +293,7 @@ function repReportEmail({ repName, dateLabel, monthLabel, week, month, allTime, 
   // the list, not just in its place.
   const noPipelineThisWeek = Number(week.leads_created) === 0 && Number(week.cases_created || 0) === 0
   const noPipelineCallout = noPipelineThisWeek ? `
-    <p style="margin:${coldLeads?.count > 0 ? '10px' : '8px'} 0 0;font-size:12.5px;line-height:1.5;color:#9a5b12;background:#fefaf1;border-radius:10px;padding:9px 12px">No new leads or cases came in this week — pipeline needs fresh activity.</p>
+    <p style="margin:${coldLeads?.count > 0 ? '10px' : '8px'} 0 0;font-size:12.5px;line-height:1.5;color:#9a5b12;background:#fefaf1;border-radius:10px;padding:9px 12px">No new leads or cases came in last week — pipeline needs fresh activity.</p>
   ` : ''
 
   const coldSection = coldLeads?.count > 0 ? `
@@ -353,9 +353,10 @@ function repReportEmail({ repName, dateLabel, monthLabel, week, month, allTime, 
   </div>
 
   <div style="padding:30px 36px 0">
-    ${sectionLabel('This Week')}
+    ${sectionLabel('Last Week')}
     ${statRow([
       { label: 'Leads', val: Number(week.leads_created) },
+      { label: 'Cases', val: Number(week.cases_created || 0) },
       { label: 'Contacted', val: Number(week.contacted) },
       { label: 'Proposals', val: Number(week.proposals) },
       { label: 'Wins', val: Number(week.wins), color: Number(week.wins) > 0 ? BRAND.success : undefined },
@@ -401,7 +402,7 @@ function repReportEmail({ repName, dateLabel, monthLabel, week, month, allTime, 
   </table>
 
   <div style="padding:30px 36px 0">
-    ${sectionLabel(`This Month — ${monthLabel}`)}
+    ${sectionLabel(`Last Month — ${lastMonthLabel}`)}
     ${statRow([
       { label: 'Leads', val: mTotal },
       { label: 'Wins', val: mWon, color: mWon > 0 ? BRAND.success : undefined },

@@ -49,28 +49,28 @@ function personalizedSuggestions({ week, month, previousWeek, sales, coldLeads, 
   // than a stuck proposal or a WIP backlog — there's nothing downstream to
   // work if nothing's coming in, so it's checked ahead of those.
   if (Number(week.leads_created) === 0 && Number(week.cases_created || 0) === 0) {
-    rules.push('No new leads or cases came in this week — block time for outreach before the pipeline stalls.')
+    rules.push('No new leads or cases came in last week — block time for outreach before the pipeline stalls.')
   }
   if (month.proposals > 0 && month.wins === 0) {
-    rules.push(`${month.proposals} proposal${month.proposals !== 1 ? 's' : ''} sent this month with no wins yet — a check-in could close one.`)
+    rules.push(`${month.proposals} proposal${month.proposals !== 1 ? 's' : ''} sent last month with no wins yet — a check-in could close one.`)
   }
   if (sales.wip > 0 && sales.wip > sales.billed) {
     rules.push(`$${sales.wip.toLocaleString()} sitting in WIP — check in on production to help convert it to billed.`)
   }
   if (previousWeek?.leads_created > 0 && week.leads_created < previousWeek.leads_created) {
-    rules.push(`Lead creation dipped from last week (${previousWeek.leads_created} → ${week.leads_created}) — even one more this week reverses it.`)
+    rules.push(`Lead creation dipped from the week before (${previousWeek.leads_created} → ${week.leads_created}) — even one more this week reverses it.`)
   }
   if (recentWinName && (week.wins > 0 || month.wins > 0)) {
     rules.push(`Ask ${recentWinName} for a referral while the relationship is still warm.`)
   }
   if (month.leads_created >= 2 && month.conversion_rate >= 50) {
-    rules.push(`Conversion is ${month.conversion_rate}% this month — well above average. Write down what’s working so you can repeat it.`)
+    rules.push(`Conversion is ${month.conversion_rate}% last month — well above average. Write down what’s working so you can repeat it.`)
   }
   if (month.leads_created >= 3 && month.conversion_rate < 20) {
-    rules.push(`Conversion is ${month.conversion_rate}% this month — revisit how new leads get qualified before investing more follow-up time.`)
+    rules.push(`Conversion is ${month.conversion_rate}% last month — revisit how new leads get qualified before investing more follow-up time.`)
   }
   if (previousWeek && week.wins > previousWeek.wins) {
-    rules.push(`Already ahead of last week’s ${previousWeek.wins} win${previousWeek.wins !== 1 ? 's' : ''} — one more keeps the streak building.`)
+    rules.push(`Already ahead of the week before’s ${previousWeek.wins} win${previousWeek.wins !== 1 ? 's' : ''} — one more keeps the streak building.`)
   }
 
   const picked = rules.slice(0, 3)
@@ -89,15 +89,30 @@ function personalizedSuggestions({ week, month, previousWeek, sales, coldLeads, 
 // automated versions of "my report" can never drift apart.
 async function computeRepSummary(repId) {
   const now = new Date()
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+  // Same reasoning as "week" below — "month" means the most recently
+  // *completed* calendar month, not month-to-date, so it doesn't read as
+  // empty right after the month rolls over (e.g. everything from a bulk
+  // import on the 26th would otherwise vanish from "This Month" on the 1st).
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const monthEndISO = currentMonthStart.toISOString()
+  const monthStart = new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() - 1, 1).toISOString()
   const yearStart = new Date(now.getFullYear(), 0, 1).toISOString()
-  const weekStartDate = (() => {
+  // "Week" means the most recently *completed* Mon–Sun week, not week-to-
+  // date — a week-to-date window is emptiest right when it resets (e.g.
+  // reads as "nothing happening" on a Monday), and comparing a partial
+  // current week against a full previous week made the week-over-week
+  // trend suggestion unfair anyway. currentWeekStart is only an
+  // intermediate value here, used to derive the exclusive upper bound for
+  // the "week" queries below (and effectively becomes the granularity now)
+  const currentWeekStart = (() => {
     const d = new Date(now)
     const day = d.getDay()
     d.setDate(d.getDate() - (day === 0 ? 6 : day - 1))
     d.setHours(0, 0, 0, 0)
     return d
   })()
+  const weekEndISO = currentWeekStart.toISOString()
+  const weekStartDate = new Date(currentWeekStart.getTime() - 7 * 24 * 60 * 60 * 1000)
   const weekStartISO = weekStartDate.toISOString()
   const prevWeekStartISO = new Date(weekStartDate.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
   // Same 14-day threshold as the cold_lead automation (services/automations.js)
@@ -110,20 +125,21 @@ async function computeRepSummary(repId) {
       `SELECT COUNT(*) AS leads_created, COUNT(*) FILTER (WHERE status='Won') AS wins,
         COUNT(*) FILTER (WHERE status IN ('Proposal','Won')) AS proposals,
         COUNT(*) FILTER (WHERE status IN ('Contacted','Proposal','Won')) AS contacted
-       FROM leads WHERE assigned_to=$1 AND created_at >= $2`,
-      [repId, weekStartISO]
+       FROM leads WHERE assigned_to=$1 AND created_at >= $2 AND created_at < $3`,
+      [repId, weekStartISO, weekEndISO]
     ),
-    // Cases logged this week, same client-attribution join as the sales
-    // query below — lets the report flag "nothing came in this week" (no
+    // Cases logged last week, same client-attribution join as the sales
+    // query below — lets the report flag "nothing came in last week" (no
     // leads *and* no cases) as its own signal, not just "no cold leads."
     db.query(
       `SELECT COUNT(c.*) AS cases_created
        FROM cases c JOIN clients cl ON cl.doctor_name = c.client_name
-       WHERE cl.assigned_to = $1 AND c.created_at >= $2`,
-      [repId, weekStartISO]
+       WHERE cl.assigned_to = $1 AND c.created_at >= $2 AND c.created_at < $3`,
+      [repId, weekStartISO, weekEndISO]
     ),
-    // Same shape as the current week, one week earlier — powers a genuine
-    // week-over-week trend suggestion rather than a static tier template.
+    // Same shape as the "week" window, one week further back — powers a
+    // genuine week-over-week trend suggestion rather than a static tier
+    // template.
     db.query(
       `SELECT COUNT(*) AS leads_created, COUNT(*) FILTER (WHERE status='Won') AS wins
        FROM leads WHERE assigned_to=$1 AND created_at >= $2 AND created_at < $3`,
@@ -133,8 +149,8 @@ async function computeRepSummary(repId) {
       `SELECT COUNT(*) AS leads_created, COUNT(*) FILTER (WHERE status='Won') AS wins,
         COUNT(*) FILTER (WHERE status IN ('Proposal','Won')) AS proposals,
         COUNT(*) FILTER (WHERE status IN ('Contacted','Proposal','Won')) AS contacted
-       FROM leads WHERE assigned_to=$1 AND created_at >= $2`,
-      [repId, monthStart]
+       FROM leads WHERE assigned_to=$1 AND created_at >= $2 AND created_at < $3`,
+      [repId, monthStart, monthEndISO]
     ),
     db.query(
       `SELECT COUNT(*) FILTER (WHERE status NOT IN ('Won','Lost') AND is_archived=false) AS active_leads,
@@ -148,7 +164,7 @@ async function computeRepSummary(repId) {
     // month_revenue/alltime_revenue are real case value, not leads-based —
     // reps essentially never fill in leads.estimated_value (most real
     // business is repeat cases from existing clients, not new-lead
-    // conversions), so "This Month"/"All-Time Revenue" below now match the
+    // conversions), so "Last Month"/"All-Time Revenue" below now match the
     // real Sales Value hero card instead of always showing $0.
     db.query(
       `SELECT
@@ -156,11 +172,11 @@ async function computeRepSummary(repId) {
         COALESCE(SUM(c.value) FILTER (WHERE c.status = 'Completed' AND c.created_at >= $2), 0) AS billed,
         COALESCE(SUM(c.value) FILTER (WHERE c.status != 'Completed' AND c.created_at >= $2), 0) AS wip,
         COALESCE(SUM(c.value) FILTER (WHERE c.created_at >= $2), 0) AS total,
-        COALESCE(SUM(c.value) FILTER (WHERE c.created_at >= $3), 0) AS month_revenue,
+        COALESCE(SUM(c.value) FILTER (WHERE c.created_at >= $3 AND c.created_at < $4), 0) AS month_revenue,
         COALESCE(SUM(c.value), 0) AS alltime_revenue
        FROM cases c JOIN clients cl ON cl.doctor_name = c.client_name
        WHERE cl.assigned_to = $1`,
-      [repId, yearStart, monthStart]
+      [repId, yearStart, monthStart, monthEndISO]
     ),
     // COUNT(*) OVER() alongside a LIMIT gets the true total in one query,
     // rather than a separate COUNT(*) round trip.
@@ -272,9 +288,16 @@ async function computeRepSummary(repId) {
 
 function buildRepReportHtml(repName, summary, { test = false } = {}) {
   const now = new Date()
+  // monthLabel dates the email itself (current month) — used in the subject
+  // line. lastMonthLabel names the actual completed month the "Last Month"
+  // section's numbers cover (see computeRepSummary's month window) — these
+  // are deliberately different labels so the section header never claims a
+  // month it isn't actually reporting on.
   const monthLabel = now.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+  const lastMonthLabel = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    .toLocaleString('en-US', { month: 'long', year: 'numeric' })
   const dateLabel = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
-  return { html: repReportEmail({ repName, dateLabel, monthLabel, ...summary, test }), monthLabel }
+  return { html: repReportEmail({ repName, dateLabel, monthLabel, lastMonthLabel, ...summary, test }), monthLabel }
 }
 
 // Sends one rep's weekly report. `to`/`cc` overrides exist for the
