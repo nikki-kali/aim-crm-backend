@@ -132,29 +132,35 @@ async function computeRepSummary(repId) {
     db.query(
       `SELECT COUNT(*) AS leads_created, COUNT(*) FILTER (WHERE status='Won') AS wins,
         COUNT(*) FILTER (WHERE status IN ('Proposal','Won')) AS proposals,
-        COUNT(*) FILTER (WHERE status IN ('Contacted','Proposal','Won')) AS contacted,
-        COALESCE(SUM(estimated_value) FILTER (WHERE status='Won'), 0) AS revenue
+        COUNT(*) FILTER (WHERE status IN ('Contacted','Proposal','Won')) AS contacted
        FROM leads WHERE assigned_to=$1 AND created_at >= $2`,
       [repId, monthStart]
     ),
     db.query(
       `SELECT COUNT(*) FILTER (WHERE status NOT IN ('Won','Lost') AND is_archived=false) AS active_leads,
         COUNT(*) AS total_leads, COUNT(*) FILTER (WHERE status='Won') AS total_wins,
-        COUNT(*) FILTER (WHERE status='Lost') AS total_lost,
-        COALESCE(SUM(estimated_value) FILTER (WHERE status='Won'), 0) AS total_revenue
+        COUNT(*) FILTER (WHERE status='Lost') AS total_lost
        FROM leads WHERE assigned_to=$1`,
       [repId]
     ),
     // Same join/derivation as the rep dashboard's Sales Value KPI card —
     // cases have no assigned_to of their own, attributed via their client.
+    // month_revenue/alltime_revenue are real case value, not leads-based —
+    // reps essentially never fill in leads.estimated_value (most real
+    // business is repeat cases from existing clients, not new-lead
+    // conversions), so "This Month"/"All-Time Revenue" below now match the
+    // real Sales Value hero card instead of always showing $0.
     db.query(
-      `SELECT COUNT(c.*) AS case_count,
-        COALESCE(SUM(c.value) FILTER (WHERE c.status = 'Completed'), 0) AS billed,
-        COALESCE(SUM(c.value) FILTER (WHERE c.status != 'Completed'), 0) AS wip,
-        COALESCE(SUM(c.value), 0) AS total
+      `SELECT
+        COUNT(c.*) FILTER (WHERE c.created_at >= $2) AS case_count,
+        COALESCE(SUM(c.value) FILTER (WHERE c.status = 'Completed' AND c.created_at >= $2), 0) AS billed,
+        COALESCE(SUM(c.value) FILTER (WHERE c.status != 'Completed' AND c.created_at >= $2), 0) AS wip,
+        COALESCE(SUM(c.value) FILTER (WHERE c.created_at >= $2), 0) AS total,
+        COALESCE(SUM(c.value) FILTER (WHERE c.created_at >= $3), 0) AS month_revenue,
+        COALESCE(SUM(c.value), 0) AS alltime_revenue
        FROM cases c JOIN clients cl ON cl.doctor_name = c.client_name
-       WHERE cl.assigned_to = $1 AND c.created_at >= $2`,
-      [repId, yearStart]
+       WHERE cl.assigned_to = $1`,
+      [repId, yearStart, monthStart]
     ),
     // COUNT(*) OVER() alongside a LIMIT gets the true total in one query,
     // rather than a separate COUNT(*) round trip.
@@ -228,7 +234,7 @@ async function computeRepSummary(repId) {
       wins: mWon,
       proposals: Number(month.proposals),
       contacted: Number(month.contacted),
-      revenue: Number(month.revenue),
+      revenue: Number(sales.month_revenue),
       conversion_rate: mTotal > 0 ? Math.round(mWon / mTotal * 100) : 0,
     },
     allTime: {
@@ -236,7 +242,7 @@ async function computeRepSummary(repId) {
       total_leads: aTotal,
       total_wins: aWon,
       total_lost: Number(allTime.total_lost),
-      total_revenue: Number(allTime.total_revenue),
+      total_revenue: Number(sales.alltime_revenue),
       conversion_rate: aTotal > 0 ? Math.round(aWon / aTotal * 100) : 0,
     },
     sales: {
