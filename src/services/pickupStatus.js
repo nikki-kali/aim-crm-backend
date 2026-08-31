@@ -2,6 +2,7 @@ const db = require('../config/db')
 const { sendEmail, pickupDispatchedEmail, pickupReceivedEmail, pickupBrand } = require('./email')
 const { generateCaseNumber } = require('../utils/caseNumber')
 const { convertLeadToClient } = require('./leadConversion')
+const { syncClientRevenue } = require('./clientRevenue')
 
 const STAGE_ORDER = { requested: 0, dispatched: 1, received: 2 }
 const STAGE_COLUMN = { dispatched: 'pickup_dispatched_at', received: 'pickup_received_at' }
@@ -41,8 +42,11 @@ async function createCaseFromPickupLead(lead) {
 
   // This lead now has a case at the lab — auto-convert to a client so they
   // show up in the Clients list. Best-effort: shouldn't block case creation.
-  convertLeadToClient(lead.id, {}).catch(err =>
-    console.error('pickup received: lead-to-client conversion failed', err))
+  // The revenue sync has to run *after* that conversion resolves, not in
+  // parallel, since the client row may not exist yet otherwise.
+  convertLeadToClient(lead.id, {})
+    .then(() => syncClientRevenue(lead.doctor_name))
+    .catch(err => console.error('pickup received: lead-to-client conversion failed', err))
 }
 
 // Shared by both trigger paths for stages 2/3 — the authenticated CRM

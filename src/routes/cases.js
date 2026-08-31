@@ -5,6 +5,7 @@ const requireAdmin = require('../middleware/requireAdmin')
 const { generateCaseNumber } = require('../utils/caseNumber')
 const { sendEmail } = require('../services/email')
 const { convertLeadToClient } = require('../services/leadConversion')
+const { syncClientRevenue } = require('../services/clientRevenue')
 const { STAGES } = require('../constants/caseStages')
 
 const router = express.Router()
@@ -235,6 +236,8 @@ router.post('/import-evident', auth, requireAdmin, async (req, res, next) => {
         )
         createdCases++
       }
+
+      await syncClientRevenue(clientName)
     }
 
     res.json({ createdCases, updatedCases, createdClients, skipped, conflicts })
@@ -334,9 +337,15 @@ router.post('/', auth, async (req, res, next) => {
     // auto-created from a received pickup) means that lead now has a case
     // at the lab — auto-convert them to a client so they show up in the
     // Clients list. Best-effort: a failure here shouldn't block case creation.
+    // The revenue sync has to run *after* that conversion resolves (not in
+    // parallel) since the client row may not exist until it does.
     if (d.lead_id) {
-      convertLeadToClient(d.lead_id, { actorId: req.user.id }).catch(err =>
-        console.error('case create: lead-to-client conversion failed', err))
+      convertLeadToClient(d.lead_id, { actorId: req.user.id })
+        .then(() => syncClientRevenue(d.client_name.trim()))
+        .catch(err => console.error('case create: lead-to-client conversion failed', err))
+    } else {
+      syncClientRevenue(d.client_name.trim()).catch(err =>
+        console.error('case create: client revenue sync failed', err))
     }
 
     res.status(201).json(rows[0])
@@ -381,6 +390,14 @@ router.put('/:id', auth, async (req, res, next) => {
        d.outsourcing_return_date || null, d.outsourcing_tracking_number || '',
        d.shipped_to_outsourcing_at || null, req.params.id]
     )
+
+    // Re-sync revenue/case_count for whichever client(s) this case affects —
+    // both the old and new client_name if it was reassigned, since the old
+    // one's total would otherwise still include a case it no longer has.
+    await syncClientRevenue(rows[0].client_name)
+    if (prev[0].client_name && prev[0].client_name !== rows[0].client_name) {
+      await syncClientRevenue(prev[0].client_name)
+    }
 
     // Send notification email if stage changed
     if (stageChanged) await sendCaseNotification(rows[0], d.status)
