@@ -73,6 +73,8 @@ function startScheduler() {
   cron.schedule('0 8 * * *', async () => {
     console.log('[cron] Running cold_lead check')
     await runAutomationLogic('cold_lead').catch(console.error)
+    console.log('[cron] Running no_action_lead check')
+    await runAutomationLogic('no_action_lead').catch(console.error)
     console.log('[cron] Running case_due check')
     await runAutomationLogic('case_due').catch(console.error)
     await sendScheduledReports('daily')

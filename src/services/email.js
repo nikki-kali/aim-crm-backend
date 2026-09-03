@@ -23,13 +23,14 @@ function getResend() {
 // (info@) already exist and are proven working (same account the newsletter
 // signup sync in routes/newsletter.js already uses), so it works as a
 // fallback while Resend's domain verification is stuck pending.
-async function sendViaBrevo({ to, subject, html, cc, attachments }) {
+async function sendViaBrevo({ to, subject, html, cc, bcc, attachments }) {
   // `to` may be a single address or an array — Resend accepts either
   // directly, but Brevo wants an array of {email} objects regardless, so
   // normalize here rather than assuming a single string (a multi-recipient
   // `to` used to silently break this fallback path with a 400).
   const toList = (Array.isArray(to) ? to : [to]).filter(Boolean)
   if (toList.length === 0) toList.push(process.env.ALERT_EMAIL)
+  const bccList = (Array.isArray(bcc) ? bcc : [bcc]).filter(Boolean)
 
   const res = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
@@ -42,6 +43,7 @@ async function sendViaBrevo({ to, subject, html, cc, attachments }) {
       sender: { name: 'Aim Dental CRM', email: 'info@aimdentallab.com' },
       to: toList.map((email) => ({ email })),
       ...(cc?.length ? { cc: cc.map((email) => ({ email })) } : {}),
+      ...(bccList.length ? { bcc: bccList.map((email) => ({ email })) } : {}),
       subject,
       htmlContent: html,
       // Brevo wants base64 text, unlike Resend which takes a raw Buffer —
@@ -62,13 +64,14 @@ async function sendViaBrevo({ to, subject, html, cc, attachments }) {
 // is inferred from filename if omitted. Used by routes/scanSubmission.js to
 // forward a doctor's uploaded scan files straight through in the staff
 // notification email; every other call site omits this.
-async function sendEmail({ to, subject, html, cc, attachments }) {
+async function sendEmail({ to, subject, html, cc, bcc, attachments }) {
   const client = getResend()
   const from = process.env.RESEND_FROM || 'Aim Dental CRM <onboarding@resend.dev>'
   const { error } = await client.emails.send({
     from,
     to: to || process.env.ALERT_EMAIL,
     ...(cc?.length ? { cc } : {}),
+    ...(bcc?.length ? { bcc } : {}),
     subject,
     html,
     ...(attachments?.length ? { attachments } : {}),
@@ -79,7 +82,7 @@ async function sendEmail({ to, subject, html, cc, attachments }) {
     throw new Error(error.message)
   }
   console.warn('sendEmail: Resend failed, falling back to Brevo —', error.message)
-  await sendViaBrevo({ to, subject, html, cc, attachments })
+  await sendViaBrevo({ to, subject, html, cc, bcc, attachments })
 }
 
 function coldLeadEmail(leads) {
@@ -770,7 +773,7 @@ function pickupReceivedEmail(lead) {
   `, lead.brand)
 }
 
-function emailWrapper(content, ctaLabel) {
+function emailWrapper(content, ctaLabel, ctaPath = '') {
   return `
     <!DOCTYPE html>
     <html><body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
@@ -780,7 +783,7 @@ function emailWrapper(content, ctaLabel) {
       </div>
       <div style="padding:32px">${content}</div>
       <div style="padding:0 32px 32px">
-        <a href="${primaryFrontendUrl()}" style="display:inline-block;background:#06babe;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">${ctaLabel} →</a>
+        <a href="${primaryFrontendUrl()}${ctaPath}" style="display:inline-block;background:#06babe;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">${ctaLabel} →</a>
       </div>
       <div style="background:#f9fafb;padding:16px 32px;font-size:12px;color:#9ca3af">
         Aim Dental Laboratory CRM — automated alert
@@ -790,6 +793,35 @@ function emailWrapper(content, ctaLabel) {
   `
 }
 
+// Sent once per lead to its assigned sales rep when it's sat unassigned-to-
+// action for 48+ hours (no last_contacted_at, and none set since — see
+// services/automations.js's `no_action_lead` key for the query/dedupe).
+// Deliberately a lighter, sooner nudge than the 14-day `cold_lead` digest —
+// this is meant to catch a lead before it ever reaches that point, not
+// replace it. Quote picked by day-of-month so the tone varies day to day
+// without needing per-rep state.
+function noActionLeadEmail(lead) {
+  const quote = PUSH_QUOTES[new Date().getDate() % PUSH_QUOTES.length]
+  const hoursWaiting = Math.floor((Date.now() - new Date(lead.last_contacted_at || lead.created_at)) / 3600000)
+  const waitingLabel = hoursWaiting >= 48 ? `${Math.floor(hoursWaiting / 24)} days` : `${hoursWaiting} hours`
+
+  return emailWrapper(`
+    <h2 style="color:#111;margin:0 0 8px">🔔 ${lead.doctor_name} is waiting on you</h2>
+    <p style="color:#6b7280;margin:0 0 20px">
+      ${lead.clinic_name ? `${lead.clinic_name} — ` : ''}assigned to you, no contact logged in ${waitingLabel}.
+    </p>
+    <p style="color:${BRAND.deep};font-style:italic;font-size:14px;margin:0 0 24px;padding:12px 16px;background:${BRAND.tealMist};border-radius:8px;border-left:3px solid ${BRAND.teal}">
+      "${quote}"
+    </p>
+    <p style="color:#111;font-weight:600;font-size:14px;margin:0 0 10px">Quick action items:</p>
+    <ul style="color:#374151;font-size:14px;line-height:1.9;margin:0 0 4px;padding-left:20px">
+      <li>Call ${lead.doctor_name} to introduce yourself and ask about their case needs.</li>
+      <li>No answer? Send a short follow-up email — even one line keeps momentum.</li>
+      <li>Log what happened as a note, then mark the lead "Contacted" so it drops off this list.</li>
+    </ul>
+  `, 'Open Leads', '/leads')
+}
+
 module.exports = {
   sendEmail,
   primaryFrontendUrl,
@@ -797,6 +829,7 @@ module.exports = {
   caseDueEmail,
   lostRecoveryEmail,
   winStreakEmail,
+  noActionLeadEmail,
   repReportEmail,
   unassignedLeadsReportEmail,
   pickupRequestedEmail,

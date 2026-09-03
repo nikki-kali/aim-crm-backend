@@ -1,5 +1,21 @@
 const db = require('../config/db')
-const { sendEmail, coldLeadEmail, caseDueEmail, lostRecoveryEmail, winStreakEmail } = require('./email')
+const { sendEmail, coldLeadEmail, caseDueEmail, lostRecoveryEmail, winStreakEmail, noActionLeadEmail } = require('./email')
+
+const NO_ACTION_HOURS = 48
+// Only leads created on/after this ships (2026-09-03) are eligible — without
+// this, the very first run matched 1,572 leads (1,564 of them the single
+// 2026-08-25 bulk import — see james-leads-bulk-import memory), which would
+// have blasted William/James a thousand+ reminder emails apiece for old
+// backlog rather than nudging on genuinely new leads, which is what "whenever
+// a lead comes in" actually means. created_via can't tell bulk-imported and
+// organic leads apart (both are 'manual'), so a cutover date is the only
+// reliable way to exclude the historical backlog.
+const NO_ACTION_CUTOVER = '2026-09-03T00:00:00Z'
+// Backstop against a *future* large bulk import flooding reps the same way —
+// caps how many reminder emails go out per run; a bigger backlog just drains
+// a batch at a time across days instead (same philosophy as workflowEngine's
+// ENROLL_BATCH_LIMIT).
+const NO_ACTION_BATCH_LIMIT = 25
 
 // Individually notifies each sales_rep assigned to one of `leads` (leaving
 // leads assigned to a 'staff' or unassigned rep untouched — only sales_rep
@@ -58,6 +74,51 @@ async function runAutomationLogic(key) {
       return { message: `${rows.length} cold lead${rows.length > 1 ? 's' : ''} flagged`, found: true }
     }
     return { message: 'No cold leads right now', found: false }
+  }
+
+  if (key === 'no_action_lead') {
+    // Sooner, per-lead nudge than cold_lead's 14-day digest — only fires for
+    // sales_rep-assigned leads (staff don't get per-lead notifications, same
+    // rule as notifyAssignedReps below) that have sat untouched 48+ hours.
+    // "Send once" is enforced by checking for *any* prior alert of this type
+    // for this lead/rep, read or not — unlike notifyAssignedReps' read=false
+    // check (which intentionally re-notifies for an ongoing cold_lead
+    // digest), this one must never re-send once it's gone out.
+    const threshold = new Date(now - NO_ACTION_HOURS * 60 * 60 * 1000).toISOString()
+    const { rows } = await db.query(
+      `SELECT l.id, l.doctor_name, l.clinic_name, l.assigned_to, l.last_contacted_at, l.created_at, u.email AS rep_email
+       FROM leads l JOIN users u ON u.id = l.assigned_to
+       WHERE l.status NOT IN ('Won','Lost') AND u.role='sales_rep'
+         AND l.created_at >= $1
+         AND COALESCE(l.last_contacted_at, l.created_at) < $2
+       ORDER BY l.created_at ASC LIMIT ${NO_ACTION_BATCH_LIMIT}`,
+      [NO_ACTION_CUTOVER, threshold]
+    )
+    let sent = 0
+    for (const lead of rows) {
+      if (!lead.rep_email) continue
+      const { rows: existing } = await db.query(
+        `SELECT id FROM alerts WHERE type='no_action_lead' AND user_id=$1 AND metadata->>'entityId'=$2`,
+        [lead.assigned_to, lead.id]
+      )
+      if (existing.length) continue
+      await sendEmail({
+        to: lead.rep_email,
+        bcc: 'media@aimdentallab.com',
+        subject: `🔔 ${lead.doctor_name} is waiting on you`,
+        html: noActionLeadEmail(lead),
+      }).catch((err) => console.error('no_action_lead email failed:', err.message))
+      await db.query(
+        `INSERT INTO alerts (type, title, message, metadata, user_id) VALUES ('no_action_lead',$1,$2,$3,$4)`,
+        [`Follow up with ${lead.doctor_name}`,
+         `${lead.doctor_name}${lead.clinic_name ? ' — ' + lead.clinic_name : ''} — no contact logged in ${NO_ACTION_HOURS}+ hours`,
+         JSON.stringify({ entityType: 'lead', entityId: lead.id }), lead.assigned_to]
+      )
+      sent++
+    }
+    return sent > 0
+      ? { message: `${sent} reminder email${sent > 1 ? 's' : ''} sent`, found: true }
+      : { message: 'No leads need a reminder right now', found: false }
   }
 
   if (key === 'case_due') {
