@@ -73,8 +73,17 @@ function startScheduler() {
   cron.schedule('0 8 * * *', async () => {
     console.log('[cron] Running cold_lead check')
     await runAutomationLogic('cold_lead').catch(console.error)
-    console.log('[cron] Running no_action_lead check')
-    await runAutomationLogic('no_action_lead').catch(console.error)
+    // Skip weekends — reps aren't expected to be working leads Sat/Sun, so a
+    // reminder landing then would just read as noise. cold_lead/case_due
+    // above stay daily on purpose (they're broader digests, not addressed to
+    // one rep's inbox the way this reminder is).
+    const day = new Date().getDay()
+    if (day !== 0 && day !== 6) {
+      console.log('[cron] Running no_action_lead check')
+      await runAutomationLogic('no_action_lead').catch(console.error)
+    } else {
+      console.log('[cron] no_action_lead check skipped — weekend')
+    }
     console.log('[cron] Running case_due check')
     await runAutomationLogic('case_due').catch(console.error)
     await sendScheduledReports('daily')
