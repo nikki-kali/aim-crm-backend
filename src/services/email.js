@@ -793,31 +793,65 @@ function emailWrapper(content, ctaLabel, ctaPath = '') {
   `
 }
 
+function noActionWaitingLabel(lead) {
+  const hoursWaiting = Math.floor((Date.now() - new Date(lead.last_contacted_at || lead.created_at)) / 3600000)
+  return hoursWaiting >= 48 ? `${Math.floor(hoursWaiting / 24)} days` : `${hoursWaiting} hours`
+}
+
 // Sent once per lead to its assigned sales rep when it's sat unassigned-to-
 // action for 48+ hours (no last_contacted_at, and none set since — see
 // services/automations.js's `no_action_lead` key for the query/dedupe).
 // Deliberately a lighter, sooner nudge than the 14-day `cold_lead` digest —
 // this is meant to catch a lead before it ever reaches that point, not
-// replace it. Quote picked by day-of-month so the tone varies day to day
-// without needing per-rep state.
-function noActionLeadEmail(lead) {
+// replace it. Takes an array, not a single lead — the recurring LinkedIn/
+// Google Maps scrape intake often assigns several leads to the same rep at
+// once, so more than one can cross the 48h threshold in the same run; this
+// renders as one digest per rep rather than a flood of one-lead emails.
+// Quote picked by day-of-month so the tone varies day to day without
+// needing per-rep state.
+function noActionLeadEmail(leads) {
   const quote = PUSH_QUOTES[new Date().getDate() % PUSH_QUOTES.length]
-  const hoursWaiting = Math.floor((Date.now() - new Date(lead.last_contacted_at || lead.created_at)) / 3600000)
-  const waitingLabel = hoursWaiting >= 48 ? `${Math.floor(hoursWaiting / 24)} days` : `${hoursWaiting} hours`
+  const single = leads.length === 1
+
+  const rows = leads.map((l) => `
+    <tr>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-weight:600">${l.doctor_name}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;color:#6b7280">${l.clinic_name || '—'}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;color:#f59e0b;white-space:nowrap">${noActionWaitingLabel(l)}</td>
+    </tr>`).join('')
+
+  const intro = single
+    ? `${leads[0].clinic_name ? `${leads[0].clinic_name} — ` : ''}assigned to you, no contact logged in ${noActionWaitingLabel(leads[0])}.`
+    : `${leads.length} leads assigned to you have no contact logged yet.`
+
+  const table = single ? '' : `
+    <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:24px">
+      <thead><tr style="background:#f9fafb">
+        <th style="text-align:left;padding:8px 12px;color:#6b7280;font-weight:600">Doctor</th>
+        <th style="text-align:left;padding:8px 12px;color:#6b7280;font-weight:600">Clinic</th>
+        <th style="text-align:left;padding:8px 12px;color:#6b7280;font-weight:600">Waiting</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`
+
+  const actionItems = single
+    ? `<li>Call ${leads[0].doctor_name} to introduce yourself and ask about their case needs.</li>
+       <li>No answer? Send a short follow-up email — even one line keeps momentum.</li>
+       <li>Log what happened as a note, then mark the lead "Contacted" so it drops off this list.</li>`
+    : `<li>Work down the list above — a quick call or email to each keeps momentum.</li>
+       <li>No answer? A short follow-up email still counts — even one line.</li>
+       <li>Log what happened as a note, then mark each lead "Contacted" so it drops off this list.</li>`
 
   return emailWrapper(`
-    <h2 style="color:#111;margin:0 0 8px">🔔 ${lead.doctor_name} is waiting on you</h2>
-    <p style="color:#6b7280;margin:0 0 20px">
-      ${lead.clinic_name ? `${lead.clinic_name} — ` : ''}assigned to you, no contact logged in ${waitingLabel}.
-    </p>
+    <h2 style="color:#111;margin:0 0 8px">🔔 ${single ? `${leads[0].doctor_name} is waiting on you` : `${leads.length} leads are waiting on you`}</h2>
+    <p style="color:#6b7280;margin:0 0 20px">${intro}</p>
     <p style="color:${BRAND.deep};font-style:italic;font-size:14px;margin:0 0 24px;padding:12px 16px;background:${BRAND.tealMist};border-radius:8px;border-left:3px solid ${BRAND.teal}">
       "${quote}"
     </p>
+    ${table}
     <p style="color:#111;font-weight:600;font-size:14px;margin:0 0 10px">Quick action items:</p>
     <ul style="color:#374151;font-size:14px;line-height:1.9;margin:0 0 4px;padding-left:20px">
-      <li>Call ${lead.doctor_name} to introduce yourself and ask about their case needs.</li>
-      <li>No answer? Send a short follow-up email — even one line keeps momentum.</li>
-      <li>Log what happened as a note, then mark the lead "Contacted" so it drops off this list.</li>
+      ${actionItems}
     </ul>
   `, 'Open Leads', '/leads')
 }

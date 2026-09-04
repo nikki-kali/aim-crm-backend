@@ -77,13 +77,13 @@ async function runAutomationLogic(key) {
   }
 
   if (key === 'no_action_lead') {
-    // Sooner, per-lead nudge than cold_lead's 14-day digest — only fires for
+    // Sooner, per-rep nudge than cold_lead's 14-day digest — only fires for
     // sales_rep-assigned leads (staff don't get per-lead notifications, same
     // rule as notifyAssignedReps below) that have sat untouched 48+ hours.
-    // "Send once" is enforced by checking for *any* prior alert of this type
-    // for this lead/rep, read or not — unlike notifyAssignedReps' read=false
-    // check (which intentionally re-notifies for an ongoing cold_lead
-    // digest), this one must never re-send once it's gone out.
+    // "Send once" per lead is enforced by checking for *any* prior alert of
+    // this type for this lead/rep, read or not — unlike notifyAssignedReps'
+    // read=false check (which intentionally re-notifies for an ongoing
+    // cold_lead digest), this one must never re-send once it's gone out.
     const threshold = new Date(now - NO_ACTION_HOURS * 60 * 60 * 1000).toISOString()
     const { rows } = await db.query(
       `SELECT l.id, l.doctor_name, l.clinic_name, l.assigned_to, l.last_contacted_at, l.created_at, u.email AS rep_email
@@ -94,7 +94,13 @@ async function runAutomationLogic(key) {
        ORDER BY l.created_at ASC LIMIT ${NO_ACTION_BATCH_LIMIT}`,
       [NO_ACTION_CUTOVER, threshold]
     )
-    let sent = 0
+
+    // Leads routinely land in batches (the recurring LinkedIn/Google Maps
+    // scrapes), often assigned to the same rep, so several can cross the 48h
+    // threshold in the same run — one digest email per rep listing everything
+    // outstanding, not one email per lead, same instinct as cold_lead's own
+    // digest, just scoped to one rep's inbox instead of the whole team.
+    const byRep = new Map()
     for (const lead of rows) {
       if (!lead.rep_email) continue
       const { rows: existing } = await db.query(
@@ -102,22 +108,33 @@ async function runAutomationLogic(key) {
         [lead.assigned_to, lead.id]
       )
       if (existing.length) continue
+      if (!byRep.has(lead.assigned_to)) byRep.set(lead.assigned_to, { repEmail: lead.rep_email, leads: [] })
+      byRep.get(lead.assigned_to).leads.push(lead)
+    }
+
+    let sent = 0
+    for (const { repEmail, leads } of byRep.values()) {
+      const subject = leads.length === 1
+        ? `🔔 ${leads[0].doctor_name} is waiting on you`
+        : `🔔 ${leads.length} leads are waiting on you`
       await sendEmail({
-        to: lead.rep_email,
+        to: repEmail,
         bcc: 'media@aimdentallab.com',
-        subject: `🔔 ${lead.doctor_name} is waiting on you`,
-        html: noActionLeadEmail(lead),
+        subject,
+        html: noActionLeadEmail(leads),
       }).catch((err) => console.error('no_action_lead email failed:', err.message))
-      await db.query(
-        `INSERT INTO alerts (type, title, message, metadata, user_id) VALUES ('no_action_lead',$1,$2,$3,$4)`,
-        [`Follow up with ${lead.doctor_name}`,
-         `${lead.doctor_name}${lead.clinic_name ? ' — ' + lead.clinic_name : ''} — no contact logged in ${NO_ACTION_HOURS}+ hours`,
-         JSON.stringify({ entityType: 'lead', entityId: lead.id }), lead.assigned_to]
-      )
-      sent++
+      for (const lead of leads) {
+        await db.query(
+          `INSERT INTO alerts (type, title, message, metadata, user_id) VALUES ('no_action_lead',$1,$2,$3,$4)`,
+          [`Follow up with ${lead.doctor_name}`,
+           `${lead.doctor_name}${lead.clinic_name ? ' — ' + lead.clinic_name : ''} — no contact logged in ${NO_ACTION_HOURS}+ hours`,
+           JSON.stringify({ entityType: 'lead', entityId: lead.id }), lead.assigned_to]
+        )
+      }
+      sent += leads.length
     }
     return sent > 0
-      ? { message: `${sent} reminder email${sent > 1 ? 's' : ''} sent`, found: true }
+      ? { message: `${sent} lead${sent > 1 ? 's' : ''} flagged across ${byRep.size} reminder email${byRep.size > 1 ? 's' : ''}`, found: true }
       : { message: 'No leads need a reminder right now', found: false }
   }
 
