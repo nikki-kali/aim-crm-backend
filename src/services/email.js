@@ -779,7 +779,7 @@ function emailWrapper(content, ctaLabel, ctaPath = '') {
     <html><body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
     <div style="max-width:600px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.1)">
       <div style="background:#06babe;padding:20px 32px">
-        <span style="color:#fff;font-weight:700;font-size:16px">🦷 Aim Dental CRM</span>
+        <span style="color:#fff;font-weight:700;font-size:16px">Aim Dental CRM</span>
       </div>
       <div style="padding:32px">${content}</div>
       <div style="padding:0 32px 32px">
