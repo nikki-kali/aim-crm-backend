@@ -272,7 +272,19 @@ router.get('/', auth, async (req, res, next) => {
       repWhere = `WHERE cl.assigned_to = $${params.length}`
     }
     const { rows } = await db.query(
-      `SELECT c.*, l.pickup_status, l.created_at AS pickup_requested_at,
+      // to_char (not c.due_date/c.outsourcing_return_date raw) so the
+      // response carries plain YYYY-MM-DD strings — the pg driver otherwise
+      // hands back a JS Date for these `date` columns, serialized through
+      // the server's local timezone into a full ISO timestamp. The
+      // frontend's `c.due_date + 'T12:00:00'` parsing (Cases.jsx) then
+      // corrupts into "<timestamp>T12:00:00", which renders as literal
+      // "Invalid Date" — reproduced 2026-09-12 on real case rows. Aliased
+      // to the same names as c.* so they override those raw columns
+      // (node-postgres keeps the later value when a query has two
+      // same-named fields).
+      `SELECT c.*, to_char(c.due_date, 'YYYY-MM-DD') AS due_date,
+              to_char(c.outsourcing_return_date, 'YYYY-MM-DD') AS outsourcing_return_date,
+              l.pickup_status, l.created_at AS pickup_requested_at,
               l.pickup_dispatched_at, l.pickup_received_at,
               l.pickup_date, l.pickup_window
        FROM cases c
