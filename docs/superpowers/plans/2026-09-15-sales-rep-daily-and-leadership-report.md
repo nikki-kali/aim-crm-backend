@@ -241,10 +241,14 @@ node -c src/routes/goals.js
 ```
 Expected: no output.
 
-- [ ] **Step 3: Verify the query against one synthetic client**
+- [ ] **Step 3: Verify the CHECK constraint and the query, against one synthetic row each**
 
-No staging database exists — test with exactly one synthetic `clients` row
-against the real DB, then delete it immediately.
+No staging database exists — test with exactly one synthetic `goals` row
+and one synthetic `clients` row against the real DB, then delete both
+immediately. The `goals` insert proves Task 1's CHECK constraint actually
+accepts `metric='new_doctors'` end-to-end (Task 1's own verification only
+inspected the constraint definition, not a real insert against it); the
+`clients` insert proves the new branch's query logic.
 
 ```bash
 node -e "
@@ -254,6 +258,15 @@ const TEST_REP_ID = '06a960b8-b33e-4cf4-96d3-b63a60e41f69'; // TEST ACCOUNT
 const DOCTOR_NAME = 'ZZZ TEST DOCTOR (goals verification)';
 (async () => {
   const today = new Date().toISOString().slice(0, 10);
+
+  const { rows: [goal] } = await db.query(
+    \`INSERT INTO goals (rep_id, title, metric, target, period, period_start, period_end)
+     VALUES (\$1, 'ZZZ TEST GOAL (verification)', 'new_doctors', 5, 'weekly', \$2, \$2) RETURNING id\`,
+    [TEST_REP_ID, today]
+  );
+  console.log('goals row with metric=new_doctors accepted by CHECK constraint:', !!goal.id);
+  await db.query('DELETE FROM goals WHERE id = \$1', [goal.id]);
+
   await db.query(
     \`INSERT INTO clients (doctor_name, brand, assigned_to, created_at) VALUES (\$1, 'Aim Dental', \$2, NOW())\`,
     [DOCTOR_NAME, TEST_REP_ID]
@@ -269,7 +282,8 @@ const DOCTOR_NAME = 'ZZZ TEST DOCTOR (goals verification)';
 })().catch(e => { console.error(e); process.exit(1); });
 "
 ```
-Expected: `new_doctors count for today: true`, then `cleaned up`.
+Expected: `goals row with metric=new_doctors accepted by CHECK constraint:
+true`, `new_doctors count for today: true`, then `cleaned up`.
 
 - [ ] **Step 4: Commit**
 
