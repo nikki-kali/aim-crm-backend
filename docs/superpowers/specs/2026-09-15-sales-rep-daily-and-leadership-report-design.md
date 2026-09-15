@@ -28,10 +28,27 @@ Following a call with the CEO, two changes are needed to AIM's automated reporti
 - **Recipients — Leadership Report**: unchanged `to` list
   (`ben@aimdentallab.com`, `execassistant@aimdentallab.com`,
   `yoel@khdentallab.com`), plus `media@aimdentallab.com` added as **bcc**.
-- **Old Weekly Rep Report**: deleted cleanly — service file, routes, and its
-  `scheduler.js` cron registration all removed. Confirmed no Frontend
-  dependency on its routes (`Frontend/src` has zero references to
-  `weekly-rep-report`/`weeklyRepReport`).
+- **Old Weekly Rep Report — corrected scope.** Initial research checked the
+  Frontend for the literal string `weekly-rep-report`/`weeklyRepReport` and
+  found nothing, but missed that `weeklyRepReport.js`'s `computeRepSummary`/
+  `buildRepReportHtml`/`sendRepWeeklyReport` are *also* the data source for
+  two live Rep Dashboard widgets shipped in the customizable-dashboard work
+  ("Your 1% This Week" suggestions, "Cold Leads" — `Frontend/src/pages/Dashboard.jsx:229,278-297,747-769`)
+  and a working self-service "email me my report" button
+  (`Frontend/src/pages/Reports.jsx:1160` → `POST /my-summary/email`), via
+  `GET /api/reports/my-summary`. None of that was mentioned for
+  termination — only the automated Monday all-reps broadcast was. So:
+  **`weeklyRepReport.js` is not deleted.** Only `sendAllWeeklyRepReports()`
+  (the automated broadcast function, `weeklyRepReport.js:322-340`) and its
+  `scheduler.js` cron registration are removed, along with the two
+  admin-testing routes for that specific broadcast
+  (`GET /weekly-rep-report/preview`, `POST /weekly-rep-report/send`).
+  `computeRepSummary`, `buildRepReportHtml`, `sendRepWeeklyReport`,
+  `personalizedSuggestions`, `REPORT_CC`, `repReportEmail` (in `email.js`),
+  and the `GET /my-summary`, `GET /my-summary/csv`, `POST /my-summary/email`
+  routes all stay exactly as they are — they're a separate, still-live
+  feature (a rep's own live dashboard summary and on-demand report), not the
+  automated weekly broadcast being replaced.
 - **New-doctor weekly goal**: reuses the existing Goals system
   (`src/routes/goals.js`, `goals` table) rather than a parallel mechanism —
   extended with a new `new_doctors` metric. If no admin-set goal exists for a
@@ -132,19 +149,45 @@ Brand styling matches the existing report templates in this codebase (teal
 `#06babe`/navy `#207290`, per `CLAUDE.md`'s documented convention) — no new
 visual system, just the up/down + green/red indicator per doctor row.
 
-### Removing the old Weekly Rep Report
+### Retiring the automated Weekly Rep Report broadcast (not the whole file)
 
-- Delete `src/services/weeklyRepReport.js` entirely.
-- Remove its two routes from `src/routes/reports.js`
-  (`weekly-rep-report/preview`, `weekly-rep-report/send`) and its import.
-- Remove its cron registration from `src/jobs/scheduler.js` (the
-  `'0 8 * * 1'` / `WEEKLY_REPORT_ENABLED`-gated block, `scheduler.js:109-116`
-  per this session's own research). This is a **scoped, deliberate exception**
+`weeklyRepReport.js` **stays** — `computeRepSummary`, `buildRepReportHtml`,
+`sendRepWeeklyReport`, `personalizedSuggestions`, `REPORT_CC` all remain
+exactly as they are, because they're the live data source for the Rep
+Dashboard's "Your 1% This Week"/"Cold Leads" widgets and the "email me my
+report" self-service button (`Frontend/src/pages/Dashboard.jsx`,
+`Frontend/src/pages/Reports.jsx` → `GET/POST /api/reports/my-summary*`) —
+none of that was part of the CEO's "terminate the weekly report" ask, which
+was specifically about the automated Monday broadcast to every rep.
+
+Only removed:
+- `sendAllWeeklyRepReports()` (`weeklyRepReport.js:322-340`) and its
+  `module.exports` entry — the function that emails *every* staff/sales_rep
+  user on Monday. Nothing else in the file calls it.
+- Its cron registration in `src/jobs/scheduler.js` (the `'0 8 * * 1'` /
+  `WEEKLY_REPORT_ENABLED`-gated block, `scheduler.js:109-116` per this
+  session's own research), and the now-unused `sendAllWeeklyRepReports`
+  import at the top of that file. This is a **scoped, deliberate exception**
   to this codebase's established "never touch `scheduler.js`" rule — that
-  rule exists to protect real *unrelated* in-progress work in that file; this
-  edit directly removes the specific dead code this task is tasked with
-  retiring, not unrelated work. The edit removes exactly that one
-  `cron.schedule(...)` block and nothing else in the file.
+  rule exists to protect real *unrelated* in-progress work in that file;
+  this edit removes exactly the one `cron.schedule(...)` block (and its
+  now-dead import) this task is tasked with retiring, nothing else in the
+  file.
+- Two admin-testing routes in `src/routes/reports.js` that exist
+  specifically to test that broadcast: `GET /weekly-rep-report/preview`,
+  `POST /weekly-rep-report/send`. The `computeRepSummary`/`buildRepReportHtml`
+  imports at the top of `reports.js` stay (still used by `/my-summary` and
+  `/my-summary/email`) — only remove `sendRepWeeklyReport`... no, wait:
+  `sendRepWeeklyReport` is also still used by `/my-summary/email`
+  (`reports.js:408`) — so the import line itself is unchanged; only the two
+  route handlers that reference `REPORT_CC` exclusively for the admin-test
+  broadcast path go away. (`REPORT_CC` is still imported since
+  `/my-summary/email` calls `sendRepWeeklyReport(..., { cc: [] })` — check
+  at implementation time whether `REPORT_CC` is referenced anywhere else in
+  `reports.js` after the two routes are removed; if not, drop it from the
+  import list, but do not remove it from `weeklyRepReport.js`'s own exports
+  since `sendRepWeeklyReport` itself still defaults `cc = REPORT_CC`
+  internally.)
 - `WEEKLY_REPORT_ENABLED` was never actually documented in `.env.example`
   (confirmed during the Evident report's final review) — nothing to remove
   there.
