@@ -7,7 +7,13 @@ const db = require('../../config/db')
 // and buildReport.js already calls Number() on everything it compares.
 
 async function getHistory() {
-  const { rows } = await db.query('SELECT * FROM evident_report_log ORDER BY date DESC')
+  const { rows } = await db.query(
+    `SELECT id, to_char(date, 'YYYY-MM-DD') AS date, booked_daily_count, booked_daily_value,
+            booked_mtd_count, booked_mtd_billed, booked_mtd_wip, booked_mtd_value,
+            wip_cases, wip_value, aim_wip_value, kh_wip_value, james_wip_value, william_wip_value,
+            created_at
+     FROM evident_report_log ORDER BY date DESC`
+  )
   return rows
 }
 
