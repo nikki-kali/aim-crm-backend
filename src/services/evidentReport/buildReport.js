@@ -1,6 +1,8 @@
 // Builds the consolidated HTML email from the aggregate figures, computing
 // day-over-day deltas against the logged history rows.
 
+const { buildTrendChartUrl } = require('./chart');
+
 function fmtMoney(n) {
   return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -106,6 +108,9 @@ function buildEmail(agg, historyRows = []) {
       <td style="padding:8px 10px;">${fmtMoney(agg.wip.kh.value)}</td>
     </tr>
   </table>
+
+  <h3 style="font-size:14px;margin:0 0 8px;color:#374151;">30-Day Booked vs. Billed Trend</h3>
+  <img src="${buildTrendChartUrl(historyRows)}" alt="30-day booked vs. billed trend chart" style="max-width:100%;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:22px;" />
 
   <p style="font-size:11px;color:#9ca3af;margin-top:22px;">
     A PDF copy of this report is attached.
