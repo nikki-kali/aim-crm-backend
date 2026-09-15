@@ -10,6 +10,7 @@ const {
   buildUnassignedLeadsReportHtml, sendUnassignedLeadsReport,
   REPORT_TO: UL_REPORT_TO, REPORT_CC: UL_REPORT_CC,
 } = require('../services/unassignedLeadsReport')
+const { runEvidentReport } = require('../services/evidentReport')
 
 const router = express.Router()
 
@@ -476,6 +477,22 @@ router.post('/unassigned-leads-report/send', auth, requireAdmin, async (req, res
       success: true,
       message: `${test ? 'Test report' : 'Report'} (${result.count} lead${result.count === 1 ? '' : 's'}) sent to ${to || UL_REPORT_TO}${include_cc ? ` (cc: ${UL_REPORT_CC.join(', ')})` : ''}`,
     })
+  } catch (err) { next(err) }
+})
+
+// POST /api/reports/evident-report/send — admin-only manual trigger, runs
+// the full pipeline once (fetch → parse → build → PDF → send → log) and
+// reports which stage it reached. No `test`/redirect flag like the other
+// manual-send routes have — unlike a per-rep report, there's no
+// alternate target to redirect this to; it always sends to the real
+// recipients and logs against the real day. evident_report_log.date's
+// UNIQUE constraint means a same-day re-run fails loudly (a clear error
+// response) rather than silently duplicating or overwriting that day's
+// figures.
+router.post('/evident-report/send', auth, requireAdmin, async (req, res, next) => {
+  try {
+    const result = await runEvidentReport()
+    res.json({ success: true, subject: result.subject, missing: result.aggregate.missing })
   } catch (err) { next(err) }
 })
 
