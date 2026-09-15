@@ -47,6 +47,8 @@ function classify(subject) {
   if (/^Daily Booked Cases\s*-\s*William/i.test(s)) return { type: 'dailyBooked', rep: 'william' };
   if (/^MTD Booked Cases\s*-\s*James/i.test(s)) return { type: 'mtdBooked', rep: 'james' };
   if (/^MTD Booked Cases\s*-\s*William/i.test(s)) return { type: 'mtdBooked', rep: 'william' };
+  if (/^YTD Booked Cases\s*-\s*James/i.test(s)) return { type: 'ytdBooked', rep: 'james' };
+  if (/^YTD Booked Cases\s*-\s*William/i.test(s)) return { type: 'ytdBooked', rep: 'william' };
   if (/^Cases Currently In Progress/i.test(s)) return { type: 'wip' };
   return { type: 'other' };
 }
@@ -63,6 +65,8 @@ const EXPECTED = [
   { type: 'dailyBooked', rep: 'william', label: "Daily Booked Cases - William's Doctors" },
   { type: 'mtdBooked', rep: 'james', label: "MTD Booked Cases - James' Doctors" },
   { type: 'mtdBooked', rep: 'william', label: "MTD Booked Cases - William's Doctors" },
+  { type: 'ytdBooked', rep: 'james', label: "YTD Booked Cases - James' Doctors" },
+  { type: 'ytdBooked', rep: 'william', label: "YTD Booked Cases - William's Doctors" },
   { type: 'wip', rep: null, label: 'Cases Currently In Progress' },
 ];
 
@@ -71,7 +75,7 @@ const EXPECTED = [
  * @returns aggregate object with combined + per-rep + per-brand figures
  */
 function parseAndAggregate(messages, { runDate } = {}) {
-  const found = { dailyBooked: {}, mtdBooked: {}, wip: null };
+  const found = { dailyBooked: {}, mtdBooked: {}, ytdBooked: {}, wip: null };
 
   for (const msg of messages) {
     const cls = classify(msg.subject || '');
@@ -136,6 +140,22 @@ function parseAndAggregate(messages, { runDate } = {}) {
       };
     }
     found[cls.type][cls.rep] = rep;
+
+    if (cls.type === 'ytdBooked') {
+      let rep = { count: 0, billed: 0, wip: 0, value: 0, hasData: false };
+      if (table && table.rows.length > 0) {
+        const { headers, rows } = table;
+        const totalsRow = rowToObj(headers, rows[rows.length - 1]);
+        const countCol = findCol(headers, 'Cases (Total)');
+        const billedCol = findCol(headers, 'Total Billed');
+        const wipCol = findCol(headers, 'Total WIP');
+        const billed = toNum(totalsRow[billedCol]);
+        const wip = toNum(totalsRow[wipCol]);
+        rep = { count: toNum(totalsRow[countCol]), billed, wip, value: billed + wip, hasData: true };
+      }
+      found.ytdBooked[cls.rep] = rep;
+      continue;
+    }
   }
 
   const zero = { count: 0, billed: 0, wip: 0, value: 0, hasData: false };
@@ -143,6 +163,8 @@ function parseAndAggregate(messages, { runDate } = {}) {
   const dw = found.dailyBooked.william || zero;
   const mj = found.mtdBooked.james || zero;
   const mw = found.mtdBooked.william || zero;
+  const yj = found.ytdBooked.james || zero;
+  const yw = found.ytdBooked.william || zero;
   const wip = found.wip || {
     cases: 0,
     value: 0,
@@ -170,6 +192,13 @@ function parseAndAggregate(messages, { runDate } = {}) {
         wip: mj.wip + mw.wip,
         value: mj.value + mw.value,
         byRep: { james: mj, william: mw },
+      },
+      ytd: {
+        count: yj.count + yw.count,
+        billed: yj.billed + yw.billed,
+        wip: yj.wip + yw.wip,
+        value: yj.value + yw.value,
+        byRep: { james: yj, william: yw },
       },
     },
     wip,

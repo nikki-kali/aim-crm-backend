@@ -18,9 +18,11 @@ const ALL_MESSAGES = [
   { subject: "MTD Booked Cases - James' Doctors", html: fixture('mtd-booked-james.html') },
   { subject: "MTD Booked Cases - William's Doctors", html: fixture('mtd-booked-william.html') },
   { subject: 'Cases Currently In Progress', html: fixture('wip-cases-in-progress.html') },
+  { subject: "YTD Booked Cases - James' Doctors", html: fixture('ytd-booked-james.html') },
+  { subject: "YTD Booked Cases - William's Doctors", html: fixture('ytd-booked-william.html') },
 ];
 
-test('parses and combines all 5 report types correctly', () => {
+test('parses and combines all 7 report types correctly', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
 
   assert.equal(agg.missing.length, 0);
@@ -34,6 +36,14 @@ test('parses and combines all 5 report types correctly', () => {
   assert.equal(agg.booked.mtd.billed, 578.49);
   assert.equal(agg.booked.mtd.wip, 1324.38);
   assert.equal(Math.round(agg.booked.mtd.value * 100) / 100, 1902.87);
+
+  // YTD: James 36 cases/$3866.85 billed/$515.94 WIP, William 38 cases/$4152.28 billed/$262.47 WIP.
+  assert.equal(agg.booked.ytd.count, 74);
+  assert.equal(Math.round(agg.booked.ytd.billed * 100) / 100, 8019.13);
+  assert.equal(Math.round(agg.booked.ytd.wip * 100) / 100, 778.41);
+  assert.equal(Math.round(agg.booked.ytd.value * 100) / 100, 8797.54);
+  assert.equal(agg.booked.ytd.byRep.james.count, 36);
+  assert.equal(agg.booked.ytd.byRep.william.count, 38);
 
   // WIP: 382 cases / $46,709.54 total, split AIM 166/$16,756.54 and KH 216/$29,953.
   assert.equal(agg.wip.cases, 382);
@@ -60,7 +70,7 @@ test('flags missing reports instead of silently under-reporting', () => {
     [{ subject: "Daily Booked Cases - James' Doctors", html: fixture('daily-booked-james.html') }],
     { runDate: '2026-09-11' }
   );
-  assert.equal(agg.missing.length, 4);
+  assert.equal(agg.missing.length, 6);
   assert.ok(agg.missing.includes('Cases Currently In Progress'));
 });
 
