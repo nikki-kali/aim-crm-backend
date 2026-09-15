@@ -319,24 +319,4 @@ async function sendRepWeeklyReport(rep, { to, cc = REPORT_CC, test = false } = {
   return summary
 }
 
-// Monday-morning automated send (jobs/scheduler.js) — every staff/sales_rep
-// user, cc'd to leadership. Best-effort per rep so one bad email/DB hiccup
-// doesn't block the rest of the team's reports.
-async function sendAllWeeklyRepReports() {
-  const { rows: reps } = await db.query(
-    `SELECT id, name, email FROM users WHERE role IN ('staff','sales_rep')`
-  )
-  const results = []
-  for (const rep of reps) {
-    try {
-      await sendRepWeeklyReport(rep)
-      results.push({ rep: rep.email, success: true })
-    } catch (err) {
-      console.error(`[weekly-rep-report] failed for ${rep.email}:`, err.message)
-      results.push({ rep: rep.email, success: false, error: err.message })
-    }
-  }
-  return results
-}
-
-module.exports = { computeRepSummary, buildRepReportHtml, sendRepWeeklyReport, sendAllWeeklyRepReports, REPORT_CC }
+module.exports = { computeRepSummary, buildRepReportHtml, sendRepWeeklyReport, REPORT_CC }
