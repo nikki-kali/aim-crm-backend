@@ -1,0 +1,32 @@
+// src/services/evidentReport/pdf.js
+const chromium = require('@sparticuz/chromium')
+const puppeteer = require('puppeteer-core')
+
+// puppeteer-core + @sparticuz/chromium instead of full puppeteer's own
+// bundled Chromium: aim-crm-backend deploys to Render as a native Node
+// web service (no Dockerfile), which is missing the system shared
+// libraries (libnss3, libgbm1, libatk-bridge2.0-0, etc.) full puppeteer's
+// Chromium needs to launch — @sparticuz/chromium is a Chromium build made
+// specifically for restricted/serverless Linux environments like this one,
+// and avoids migrating this shared production service to a Docker deploy
+// just for one feature.
+async function renderPdf(html) {
+  const browser = await puppeteer.launch({
+    args: chromium.args,
+    executablePath: await chromium.executablePath(),
+    headless: chromium.headless,
+  })
+  try {
+    const page = await browser.newPage()
+    await page.setContent(html, { waitUntil: 'networkidle0' })
+    return await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '20px', bottom: '20px', left: '20px', right: '20px' },
+    })
+  } finally {
+    await browser.close()
+  }
+}
+
+module.exports = { renderPdf }
