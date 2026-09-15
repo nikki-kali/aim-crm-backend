@@ -19,11 +19,15 @@ async function renderPdf(html) {
   try {
     const page = await browser.newPage()
     await page.setContent(html, { waitUntil: 'networkidle0' })
-    return await page.pdf({
+    // puppeteer-core@24.43.1's page.pdf() resolves to a Uint8Array, not a
+    // Node Buffer — wrap it so callers (Task 6's orchestrator, which feeds
+    // this straight into services/email.js's attachments) get the real
+    // Buffer the interface promises.
+    return Buffer.from(await page.pdf({
       format: 'A4',
       printBackground: true,
       margin: { top: '20px', bottom: '20px', left: '20px', right: '20px' },
-    })
+    }))
   } finally {
     await browser.close()
   }
