@@ -1,7 +1,6 @@
 const cron = require('node-cron')
 const { runAutomationLogic } = require('../services/automations')
 const { runEngineTick } = require('../services/workflowEngine')
-const { sendAllWeeklyRepReports } = require('../services/weeklyRepReport')
 const { sendUnassignedLeadsReport } = require('../services/unassignedLeadsReport')
 const db = require('../config/db')
 const { sendEmail, primaryFrontendUrl } = require('../services/email')
@@ -99,27 +98,12 @@ function startScheduler() {
     await sendScheduledReports('weekly')
   })
 
-  // Every Monday at 8:00 AM Eastern — per-rep weekly performance reports
-  // (one email per staff/sales_rep user, cc'd to leadership). Gated behind
-  // WEEKLY_REPORT_ENABLED — the report design is still under review with
-  // Elizabeth/Ben as of 2026-08-25, so this stays a no-op until that env
-  // var is explicitly set to 'true' on Render, even though the code has
-  // been deployed. Don't remove this gate without checking that review is
-  // actually done.
-  cron.schedule('0 8 * * 1', async () => {
-    if (process.env.WEEKLY_REPORT_ENABLED !== 'true') {
-      console.log('[cron] Weekly rep reports skipped — WEEKLY_REPORT_ENABLED is not set to true')
-      return
-    }
-    console.log('[cron] Sending weekly rep reports')
-    await sendAllWeeklyRepReports().catch((err) => console.error('[cron] weekly rep reports failed:', err))
-  }, { timezone: 'America/New_York' })
-
   // Every Monday at 8:00 AM Eastern — weekly unassigned-leads report to
   // leadership (media@, cc execassistant@/ben@), covering leads created in
   // the past 7 days that still have no owner. Gated behind
   // UNASSIGNED_LEADS_REPORT_ENABLED — left unset until the user has
-  // reviewed a test send, same pattern as WEEKLY_REPORT_ENABLED above.
+  // reviewed a test send, same pattern as other gated report crons in this
+  // file.
   cron.schedule('0 8 * * 1', async () => {
     if (process.env.UNASSIGNED_LEADS_REPORT_ENABLED !== 'true') {
       console.log('[cron] Unassigned leads report skipped — UNASSIGNED_LEADS_REPORT_ENABLED is not set to true')

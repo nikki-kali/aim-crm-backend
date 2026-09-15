@@ -3,13 +3,15 @@ const db = require('../config/db')
 const auth = require('../middleware/auth')
 const requireAdmin = require('../middleware/requireAdmin')
 const { sendEmail, primaryFrontendUrl } = require('../services/email')
-const {
-  computeRepSummary, buildRepReportHtml, sendRepWeeklyReport, REPORT_CC,
-} = require('../services/weeklyRepReport')
+const { computeRepSummary, sendRepWeeklyReport } = require('../services/weeklyRepReport')
 const {
   buildUnassignedLeadsReportHtml, sendUnassignedLeadsReport,
   REPORT_TO: UL_REPORT_TO, REPORT_CC: UL_REPORT_CC,
 } = require('../services/unassignedLeadsReport')
+const {
+  sendRepDailyReport, buildDailyReportHtml, computeDailyDoctorStatus,
+  computeWeeklyNewDoctorGoal, REPORT_CC: DAILY_REPORT_CC,
+} = require('../services/salesRepDailyReport')
 const { runEvidentReport } = require('../services/evidentReport')
 
 const router = express.Router()
@@ -401,8 +403,10 @@ router.get('/my-summary', auth, async (req, res, next) => {
 })
 
 // POST /api/reports/my-summary/email — email the rep's own weekly report to
-// themselves, no cc. (The Monday automated send to every rep, cc'd to
-// leadership, lives in jobs/scheduler.js via sendAllWeeklyRepReports.)
+// themselves, no cc. (The old Monday automated send to every rep, cc'd to
+// leadership, has been retired — the Sales Rep Daily Report, a weekday
+// send to James/William cc'd to Yoel, replaces it. See
+// jobs/salesRepDailyReport.js.)
 router.post('/my-summary/email', auth, async (req, res, next) => {
   try {
     await sendRepWeeklyReport(
@@ -410,43 +414,6 @@ router.post('/my-summary/email', auth, async (req, res, next) => {
       { cc: [] }
     )
     res.json({ success: true, message: `Report sent to ${req.user.email}` })
-  } catch (err) { next(err) }
-})
-
-// GET /api/reports/weekly-rep-report/preview?rep_id=... — admin-only HTML
-// preview of exactly what a rep's weekly report email looks like, without
-// sending anything. Defaults to the requesting admin's own data if rep_id
-// is omitted.
-router.get('/weekly-rep-report/preview', auth, requireAdmin, async (req, res, next) => {
-  try {
-    const repId = req.query.rep_id || req.user.id
-    const { rows } = await db.query(`SELECT id, name, email FROM users WHERE id=$1`, [repId])
-    if (!rows[0]) return res.status(404).json({ error: 'Rep not found' })
-    const summary = await computeRepSummary(repId)
-    const { html } = buildRepReportHtml(rows[0].name || rows[0].email, summary)
-    res.set('Content-Type', 'text/html').send(html)
-  } catch (err) { next(err) }
-})
-
-// POST /api/reports/weekly-rep-report/send — admin-only manual trigger.
-// Body: { rep_id, to?, include_cc?, test? }. Omit `to` to send to the rep's
-// own address; pass it to redirect the send elsewhere (a test to the
-// admin's own inbox, say) without changing whose numbers are reported.
-// `include_cc` defaults true (the real leadership cc list) — set false for
-// a quiet dry run. `test` (default false) marks the send with a "TEST —"
-// subject prefix and a banner inside the email itself, so it can never be
-// mistaken for a real report landing in someone's inbox.
-router.post('/weekly-rep-report/send', auth, requireAdmin, async (req, res, next) => {
-  try {
-    const { rep_id, to, include_cc = true, test = false } = req.body
-    if (!rep_id) return res.status(400).json({ error: 'rep_id is required' })
-    const { rows } = await db.query(
-      `SELECT id, name, email FROM users WHERE id=$1 AND role IN ('staff','sales_rep')`, [rep_id]
-    )
-    if (!rows[0]) return res.status(400).json({ error: 'rep_id must be an existing staff/sales_rep user' })
-
-    await sendRepWeeklyReport(rows[0], { to, cc: include_cc ? REPORT_CC : [], test })
-    res.json({ success: true, message: `${test ? 'Test report' : 'Report'} sent to ${to || rows[0].email}${include_cc ? ` (cc: ${REPORT_CC.join(', ')})` : ''}` })
   } catch (err) { next(err) }
 })
 
@@ -460,11 +427,10 @@ router.get('/unassigned-leads-report/preview', auth, requireAdmin, async (req, r
 })
 
 // POST /api/reports/unassigned-leads-report/send — admin-only manual
-// trigger. Body: { to?, include_cc?, test? } — same shape/defaults as
-// weekly-rep-report/send above. `to` defaults to UL_REPORT_TO
+// trigger. Body: { to?, include_cc?, test? }. `to` defaults to UL_REPORT_TO
 // (media@aimdentallab.com); `include_cc` (default true) is the real
 // UL_REPORT_CC leadership list; `test` marks the send clearly so it can't
-// be mistaken for the real weekly report.
+// be mistaken for a real automated send.
 router.post('/unassigned-leads-report/send', auth, requireAdmin, async (req, res, next) => {
   try {
     const { to, include_cc = true, test = false } = req.body
@@ -477,6 +443,42 @@ router.post('/unassigned-leads-report/send', auth, requireAdmin, async (req, res
       success: true,
       message: `${test ? 'Test report' : 'Report'} (${result.count} lead${result.count === 1 ? '' : 's'}) sent to ${to || UL_REPORT_TO}${include_cc ? ` (cc: ${UL_REPORT_CC.join(', ')})` : ''}`,
     })
+  } catch (err) { next(err) }
+})
+
+// GET /api/reports/sales-rep-daily-report/preview?rep_id=... — admin-only
+// HTML preview of exactly what a rep's daily report email looks like,
+// without sending anything. Defaults to the requesting admin's own data
+// if rep_id is omitted.
+router.get('/sales-rep-daily-report/preview', auth, requireAdmin, async (req, res, next) => {
+  try {
+    const repId = req.query.rep_id || req.user.id
+    const { rows } = await db.query(`SELECT id, name, email FROM users WHERE id=$1`, [repId])
+    if (!rows[0]) return res.status(404).json({ error: 'Rep not found' })
+    const dateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+    const status = await computeDailyDoctorStatus(repId, dateStr)
+    const goal = await computeWeeklyNewDoctorGoal(repId, dateStr)
+    const { html } = buildDailyReportHtml(rows[0].name || rows[0].email, dateStr, status, goal)
+    res.set('Content-Type', 'text/html').send(html)
+  } catch (err) { next(err) }
+})
+
+// POST /api/reports/sales-rep-daily-report/send — admin-only manual
+// trigger. Body: { rep_id, to?, include_cc?, test? }. Omit `to` to send to
+// the rep's own address; pass it to redirect the send elsewhere (a test
+// to the admin's own inbox) without changing whose numbers are reported.
+// `include_cc` defaults true (Yoel Klein); `test` marks the send with a
+// "TEST —" subject prefix and banner, same convention as every other
+// manual-send route in this file.
+router.post('/sales-rep-daily-report/send', auth, requireAdmin, async (req, res, next) => {
+  try {
+    const { rep_id, to, include_cc = true, test = false } = req.body
+    if (!rep_id) return res.status(400).json({ error: 'rep_id is required' })
+    const { rows } = await db.query(`SELECT id, name, email FROM users WHERE id=$1`, [rep_id])
+    if (!rows[0]) return res.status(400).json({ error: 'rep_id must be an existing user' })
+
+    await sendRepDailyReport(rows[0], { to, cc: include_cc ? DAILY_REPORT_CC : [], test })
+    res.json({ success: true, message: `${test ? 'Test report' : 'Report'} sent to ${to || rows[0].email}${include_cc ? ` (cc: ${DAILY_REPORT_CC.join(', ')})` : ''}` })
   } catch (err) { next(err) }
 })
 

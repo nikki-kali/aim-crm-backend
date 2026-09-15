@@ -1,6 +1,8 @@
 // Builds the consolidated HTML email from the aggregate figures, computing
 // day-over-day deltas against the logged history rows.
 
+const { buildTrendChartUrl } = require('./chart');
+
 function fmtMoney(n) {
   return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -22,10 +24,18 @@ function buildEmail(agg, historyRows = []) {
   const bookedMtdDelta = prior ? delta(agg.booked.mtd.value, Number(prior.booked_mtd_value)) : { text: '', cls: '' };
   const billedMtdDelta = prior ? delta(agg.booked.mtd.billed, Number(prior.booked_mtd_billed)) : { text: '', cls: '' };
   const wipDelta = prior ? delta(agg.wip.value, Number(prior.wip_value)) : { text: '', cls: '' };
+  // `ytd_billed_value` is a newly-added column — production's one existing
+  // log row (from before this column existed) has it at the column
+  // default of 0, unbackfilled (deliberate, per the design spec's "no
+  // backfill" decision). Treat a zero/missing prior specifically for this
+  // tile as "no prior data" rather than computing a delta against 0, which
+  // would render a fabricated, misleading spike on the first real run.
+  // Self-heals once a second row with a genuine nonzero value exists.
+  const ytdBilledDelta = prior && Number(prior.ytd_billed_value) > 0 ? delta(agg.booked.ytd.billed, Number(prior.ytd_billed_value)) : { text: '', cls: '' };
 
   const missingBanner = agg.missing.length
     ? `<div style="background:#fff3cd;border:1px solid #ffe69c;color:#664d03;padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:16px;">
-         Heads up: today's figures are missing ${agg.missing.length} of the 5 expected Evident reports (${agg.missing.join(', ')}). Numbers below may be understated.
+         Heads up: today's figures are missing ${agg.missing.length} of the ${agg.expectedCount} expected Evident reports (${agg.missing.join(', ')}). Numbers below may be understated.
        </div>`
     : '';
 
@@ -46,7 +56,7 @@ function buildEmail(agg, historyRows = []) {
 
   const html = `
 <div style="font-family:Arial,Helvetica,sans-serif;max-width:640px;margin:0 auto;color:#111827;">
-  <h2 style="margin:0 0 4px;font-size:18px;">Evident Consolidated Report</h2>
+  <h2 style="margin:0 0 4px;font-size:18px;">AIM Leadership Report</h2>
   <p style="margin:0 0 18px;color:#6b7280;font-size:13px;">${dateLabel} · AIM Dental Laboratory + Kings Highway</p>
   ${missingBanner}
 
@@ -70,6 +80,11 @@ function buildEmail(agg, historyRows = []) {
       <p style="${labelStyle}">WIP (in lab)</p>
       <p style="${valueStyle}">${fmtMoney(agg.wip.value)}</p>
       <p style="${deltaStyleFn(wipDelta.cls)}">${agg.wip.cases} cases · ${wipDelta.text}</p>
+    </div>
+    <div style="${tileStyle}">
+      <p style="${labelStyle}">Billed (YTD)</p>
+      <p style="${valueStyle}">${fmtMoney(agg.booked.ytd.billed)}</p>
+      <p style="${deltaStyleFn(ytdBilledDelta.cls)}">${ytdBilledDelta.text}</p>
     </div>
   </div>
 
@@ -101,6 +116,9 @@ function buildEmail(agg, historyRows = []) {
     </tr>
   </table>
 
+  <h3 style="font-size:14px;margin:0 0 8px;color:#374151;">30-Day Booked vs. Billed Trend</h3>
+  <img src="${buildTrendChartUrl(historyRows)}" alt="30-day booked vs. billed trend chart" style="max-width:100%;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:22px;" />
+
   <p style="font-size:11px;color:#9ca3af;margin-top:22px;">
     A PDF copy of this report is attached.
   </p>
@@ -121,10 +139,11 @@ function buildEmail(agg, historyRows = []) {
     kh_wip_value: agg.wip.kh.value,
     james_wip_value: agg.wip.byRep.james || 0,
     william_wip_value: agg.wip.byRep.william || 0,
+    ytd_billed_value: agg.booked.ytd.billed,
   };
 
   return {
-    subject: `Evident Consolidated Report - ${dateLabel}`,
+    subject: `AIM Leadership Report - ${dateLabel}`,
     html,
     sheetRow,
   };

@@ -175,19 +175,15 @@ Only removed:
   file.
 - Two admin-testing routes in `src/routes/reports.js` that exist
   specifically to test that broadcast: `GET /weekly-rep-report/preview`,
-  `POST /weekly-rep-report/send`. The `computeRepSummary`/`buildRepReportHtml`
-  imports at the top of `reports.js` stay (still used by `/my-summary` and
-  `/my-summary/email`) — only remove `sendRepWeeklyReport`... no, wait:
-  `sendRepWeeklyReport` is also still used by `/my-summary/email`
-  (`reports.js:408`) — so the import line itself is unchanged; only the two
-  route handlers that reference `REPORT_CC` exclusively for the admin-test
-  broadcast path go away. (`REPORT_CC` is still imported since
-  `/my-summary/email` calls `sendRepWeeklyReport(..., { cc: [] })` — check
-  at implementation time whether `REPORT_CC` is referenced anywhere else in
-  `reports.js` after the two routes are removed; if not, drop it from the
-  import list, but do not remove it from `weeklyRepReport.js`'s own exports
-  since `sendRepWeeklyReport` itself still defaults `cc = REPORT_CC`
-  internally.)
+  `POST /weekly-rep-report/send`. The `computeRepSummary`/`buildRepReportHtml`/
+  `sendRepWeeklyReport` imports at the top of `reports.js` stay — all three
+  are still used by `/my-summary` and `/my-summary/email` — only the two
+  route handlers themselves, and their exclusive reference to `REPORT_CC`
+  for the admin-test broadcast path, go away. (`REPORT_CC` is still needed
+  elsewhere since `sendRepWeeklyReport` defaults `cc = REPORT_CC`
+  internally; check at implementation time whether `reports.js` still
+  imports it directly after the two routes are removed, and drop that one
+  import line only if nothing else in the file references it.)
 - `WEEKLY_REPORT_ENABLED` was never actually documented in `.env.example`
   (confirmed during the Evident report's final review) — nothing to remove
   there.
@@ -303,8 +299,15 @@ none was given explicitly in the original migration, which needs a quick
   "real" rep beyond James/William for this specific report — that's an
   existing, separate convention.
 - A UI for admins to set the weekly new-doctor goal — the existing Goals
-  admin UI (if one exists in the Frontend) already covers creating a `goals`
-  row; this spec only extends the backend metric type it can hold.
+  admin UI does NOT currently support creating a `new_doctors`/weekly goal
+  (confirmed: `Frontend/src/components/GoalsBoard.jsx` hardcodes its metric
+  options list, which doesn't include `new_doctors`, and hardcodes
+  `period: 'monthly'` on every goal it creates), so the combination
+  `computeWeeklyNewDoctorGoal()` queries for (`metric='new_doctors' AND
+  period='weekly'`) can't actually be produced through the UI today. Every
+  rep effectively gets the default target of 5 until a separate Frontend
+  follow-up adds `new_doctors` plus a period selector to that UI — this
+  spec only extends the backend metric type the `goals` table can hold.
 - Historical backfill of `ytd_billed_value` for `evident_report_log` rows
   that predate this change (only today's row so far exists in production —
   no backfill needed).
