@@ -403,8 +403,10 @@ router.get('/my-summary', auth, async (req, res, next) => {
 })
 
 // POST /api/reports/my-summary/email — email the rep's own weekly report to
-// themselves, no cc. (The Monday automated send to every rep, cc'd to
-// leadership, lives in jobs/scheduler.js via sendAllWeeklyRepReports.)
+// themselves, no cc. (The old Monday automated send to every rep, cc'd to
+// leadership, has been retired — the Sales Rep Daily Report, a weekday
+// send to James/William cc'd to Yoel, replaces it. See
+// jobs/salesRepDailyReport.js.)
 router.post('/my-summary/email', auth, async (req, res, next) => {
   try {
     await sendRepWeeklyReport(
