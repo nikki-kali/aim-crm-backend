@@ -34,18 +34,31 @@ function mondayOfWeekEastern(dateStr) {
 
 // "Submitted a case today" mirrors weeklyRepReport.js's/cases.js's
 // existing client<->case attribution: cases have no assigned_to or
-// client_id of their own, matched by cl.doctor_name = c.client_name. The
-// day boundary is computed in Postgres via AT TIME ZONE (not JS Date
-// arithmetic) — the same DST/UTC-drift class of bug the Evident report's
-// review already caught once in this codebase.
+// client_id of their own, matched by cl.doctor_name = c.client_name.
+//
+// The day boundary is a plain `created_at::date = $2::date` rather than an
+// `AT TIME ZONE` window. Two reasons: (1) `$2::date AT TIME ZONE
+// 'America/New_York'` doesn't resolve to the overload its shape suggests —
+// it resolves to `timezone(text, timestamptz)`, which treats the date as
+// already being UTC midnight and re-offsets it, producing a window shifted
+// by several hours from true ET midnight (proven against this live DB: for
+// '2026-09-09' it produced a [2026-09-08 20:00Z, 2026-09-09 20:00Z) window
+// instead of true ET midnight-to-midnight). (2) Evident-imported cases —
+// the dominant source of case-creation volume (see cases.js's
+// import-evident) — have `created_at` stored as UTC midnight of Evident's
+// own business date (`new Date(row.first_arrival).toISOString()`), not a
+// real-time timestamp, so a wall-clock ET window isn't even the right tool
+// here: a plain date-equality cast is. This also matches the existing
+// `::date` convention already used elsewhere in this codebase for the same
+// kind of check (weeklyRepReport.js's cold-lead query, goals.js's
+// computeProgress).
 async function computeDailyDoctorStatus(repId, dateStr) {
   const { rows } = await db.query(
     `SELECT cl.doctor_name, cl.clinic_name,
       EXISTS (
         SELECT 1 FROM cases c
         WHERE c.client_name = cl.doctor_name
-          AND c.created_at >= ($2::date AT TIME ZONE 'America/New_York')
-          AND c.created_at <  (($2::date + 1) AT TIME ZONE 'America/New_York')
+          AND c.created_at::date = $2::date
       ) AS submitted_today
      FROM clients cl
      WHERE cl.assigned_to = $1
@@ -82,11 +95,18 @@ async function computeWeeklyNewDoctorGoal(repId, dateStr) {
          AND period_start <= $2 AND period_end >= $2`,
       [repId, dateStr]
     ),
+    // Same `::date` reasoning as computeDailyDoctorStatus above — the
+    // previous `AT TIME ZONE` boundary here was the same genuine bug, and
+    // mattered more for this query than for the cases one, since
+    // `clients.created_at` is set via a real `NOW()` at insert time (see
+    // cases.js's import-evident client-create path), not UTC-midnight-of-
+    // business-date, so it doesn't get the accidental cushion Evident-
+    // imported `cases.created_at` rows do. Inclusive on both ends: Monday
+    // (weekStart) through dateStr, matching "this week so far."
     db.query(
       `SELECT COUNT(*) AS val FROM clients
        WHERE assigned_to=$1
-         AND created_at >= ($2::date AT TIME ZONE 'America/New_York')
-         AND created_at <  (($3::date + 1) AT TIME ZONE 'America/New_York')`,
+         AND created_at::date >= $2::date AND created_at::date <= $3::date`,
       [repId, weekStart, dateStr]
     ),
   ])

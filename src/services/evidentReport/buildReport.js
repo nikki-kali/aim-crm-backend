@@ -24,11 +24,18 @@ function buildEmail(agg, historyRows = []) {
   const bookedMtdDelta = prior ? delta(agg.booked.mtd.value, Number(prior.booked_mtd_value)) : { text: '', cls: '' };
   const billedMtdDelta = prior ? delta(agg.booked.mtd.billed, Number(prior.booked_mtd_billed)) : { text: '', cls: '' };
   const wipDelta = prior ? delta(agg.wip.value, Number(prior.wip_value)) : { text: '', cls: '' };
-  const ytdBilledDelta = prior ? delta(agg.booked.ytd.billed, Number(prior.ytd_billed_value)) : { text: '', cls: '' };
+  // `ytd_billed_value` is a newly-added column — production's one existing
+  // log row (from before this column existed) has it at the column
+  // default of 0, unbackfilled (deliberate, per the design spec's "no
+  // backfill" decision). Treat a zero/missing prior specifically for this
+  // tile as "no prior data" rather than computing a delta against 0, which
+  // would render a fabricated, misleading spike on the first real run.
+  // Self-heals once a second row with a genuine nonzero value exists.
+  const ytdBilledDelta = prior && Number(prior.ytd_billed_value) > 0 ? delta(agg.booked.ytd.billed, Number(prior.ytd_billed_value)) : { text: '', cls: '' };
 
   const missingBanner = agg.missing.length
     ? `<div style="background:#fff3cd;border:1px solid #ffe69c;color:#664d03;padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:16px;">
-         Heads up: today's figures are missing ${agg.missing.length} of the 5 expected Evident reports (${agg.missing.join(', ')}). Numbers below may be understated.
+         Heads up: today's figures are missing ${agg.missing.length} of the ${agg.expectedCount} expected Evident reports (${agg.missing.join(', ')}). Numbers below may be understated.
        </div>`
     : '';
 

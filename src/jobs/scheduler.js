@@ -102,7 +102,8 @@ function startScheduler() {
   // leadership (media@, cc execassistant@/ben@), covering leads created in
   // the past 7 days that still have no owner. Gated behind
   // UNASSIGNED_LEADS_REPORT_ENABLED — left unset until the user has
-  // reviewed a test send, same pattern as WEEKLY_REPORT_ENABLED above.
+  // reviewed a test send, same pattern as other gated report crons in this
+  // file.
   cron.schedule('0 8 * * 1', async () => {
     if (process.env.UNASSIGNED_LEADS_REPORT_ENABLED !== 'true') {
       console.log('[cron] Unassigned leads report skipped — UNASSIGNED_LEADS_REPORT_ENABLED is not set to true')

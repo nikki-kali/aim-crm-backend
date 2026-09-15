@@ -75,18 +75,28 @@ async function runEvidentReport() {
       : {}),
   })
 
-  // Only log today's row when all 5 expected Evident reports actually came
-  // in — a zeroed sheetRow from a Gmail outage / sender-address change
-  // would otherwise get persisted and poison TOMORROW's delta computation
-  // with a fabricated zero baseline (a confident, unflagged "▲ $X vs.
-  // yesterday" comparing against garbage), and burn today's UNIQUE `date`
-  // slot so a corrected re-run isn't possible without manual DB surgery.
-  if (aggregate.missing.length === 0) {
+  // The log-write gate only requires the original 5 non-YTD reports — the
+  // two YTD Booked Cases reports' actual arrival cadence isn't confirmed
+  // yet (they may not arrive every weekday), and gating the entire day's
+  // log write on them would silently stop day-over-day deltas/the trend
+  // chart from ever working again if that's the case. The email's own
+  // missing-reports banner still reflects ALL missing reports (YTD
+  // included) for transparency — only the persistence gate is loosened.
+  const criticalMissing = aggregate.missing.filter((label) => !label.startsWith('YTD Booked Cases'))
+
+  // Only log today's row when all 5 critical (non-YTD) expected Evident
+  // reports actually came in — a zeroed sheetRow from a Gmail outage /
+  // sender-address change would otherwise get persisted and poison
+  // TOMORROW's delta computation with a fabricated zero baseline (a
+  // confident, unflagged "▲ $X vs. yesterday" comparing against garbage),
+  // and burn today's UNIQUE `date` slot so a corrected re-run isn't
+  // possible without manual DB surgery.
+  if (criticalMissing.length === 0) {
     console.log('[evident-report] logging today\'s totals...')
     await appendRow(sheetRow)
   } else {
     console.warn(
-      `[evident-report] NOT logging today's (${runDate}) totals — ${aggregate.missing.length} of 5 expected reports were missing (${aggregate.missing.join(', ')}). ` +
+      `[evident-report] NOT logging today's (${runDate}) totals — ${criticalMissing.length} of 5 critical (non-YTD) expected reports were missing (${criticalMissing.join(', ')}). ` +
       'Tomorrow\'s delta will compare against an older day instead of a fabricated zero baseline.'
     )
   }

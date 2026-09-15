@@ -180,6 +180,7 @@ function parseAndAggregate(messages, { runDate } = {}) {
 
   return {
     runDate: runDate || new Date().toISOString().slice(0, 10),
+    expectedCount: EXPECTED.length,
     booked: {
       daily: {
         count: dj.count + dw.count,

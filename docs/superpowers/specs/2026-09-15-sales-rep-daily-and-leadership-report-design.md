@@ -260,8 +260,15 @@ none was given explicitly in the original migration, which needs a quick
   "real" rep beyond James/William for this specific report — that's an
   existing, separate convention.
 - A UI for admins to set the weekly new-doctor goal — the existing Goals
-  admin UI (if one exists in the Frontend) already covers creating a `goals`
-  row; this spec only extends the backend metric type it can hold.
+  admin UI does NOT currently support creating a `new_doctors`/weekly goal
+  (confirmed: `Frontend/src/components/GoalsBoard.jsx` hardcodes its metric
+  options list, which doesn't include `new_doctors`, and hardcodes
+  `period: 'monthly'` on every goal it creates), so the combination
+  `computeWeeklyNewDoctorGoal()` queries for (`metric='new_doctors' AND
+  period='weekly'`) can't actually be produced through the UI today. Every
+  rep effectively gets the default target of 5 until a separate Frontend
+  follow-up adds `new_doctors` plus a period selector to that UI — this
+  spec only extends the backend metric type the `goals` table can hold.
 - Historical backfill of `ytd_billed_value` for `evident_report_log` rows
   that predate this change (only today's row so far exists in production —
   no backfill needed).

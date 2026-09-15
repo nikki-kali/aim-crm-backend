@@ -23,8 +23,8 @@ function buildTrendChartUrl(historyRows) {
     data: {
       labels,
       datasets: [
-        { label: 'Booked', data: booked, borderColor: '#06babe', fill: false },
-        { label: 'Billed', data: billed, borderColor: '#207290', fill: false },
+        { label: 'Booked (MTD)', data: booked, borderColor: '#06babe', fill: false },
+        { label: 'Billed (MTD)', data: billed, borderColor: '#207290', fill: false },
       ],
     },
     options: { plugins: { legend: { display: true } } },
