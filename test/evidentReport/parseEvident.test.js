@@ -88,7 +88,7 @@ test('email copy has no em dashes and no removed footer line', () => {
 
 test('day-over-day delta shows against a logged prior day', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
-  const history = [{ date: '2026-09-10', booked_mtd_value: '1702.87', booked_mtd_billed: '528.49', wip_value: '46209.54' }];
+  const history = [{ date: '2026-09-10', booked_mtd_value: '1702.87', booked_mtd_billed: '528.49', wip_value: '46209.54', ytd_billed_value: '7519.13' }];
   const { html } = buildEmail(agg, history);
 
   assert.match(html, /▲ \$200\.00 vs\. yesterday/);

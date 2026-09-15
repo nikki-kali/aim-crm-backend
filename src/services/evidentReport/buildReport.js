@@ -22,6 +22,7 @@ function buildEmail(agg, historyRows = []) {
   const bookedMtdDelta = prior ? delta(agg.booked.mtd.value, Number(prior.booked_mtd_value)) : { text: '', cls: '' };
   const billedMtdDelta = prior ? delta(agg.booked.mtd.billed, Number(prior.booked_mtd_billed)) : { text: '', cls: '' };
   const wipDelta = prior ? delta(agg.wip.value, Number(prior.wip_value)) : { text: '', cls: '' };
+  const ytdBilledDelta = prior ? delta(agg.booked.ytd.billed, Number(prior.ytd_billed_value)) : { text: '', cls: '' };
 
   const missingBanner = agg.missing.length
     ? `<div style="background:#fff3cd;border:1px solid #ffe69c;color:#664d03;padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:16px;">
@@ -70,6 +71,11 @@ function buildEmail(agg, historyRows = []) {
       <p style="${labelStyle}">WIP (in lab)</p>
       <p style="${valueStyle}">${fmtMoney(agg.wip.value)}</p>
       <p style="${deltaStyleFn(wipDelta.cls)}">${agg.wip.cases} cases · ${wipDelta.text}</p>
+    </div>
+    <div style="${tileStyle}">
+      <p style="${labelStyle}">Billed (YTD)</p>
+      <p style="${valueStyle}">${fmtMoney(agg.booked.ytd.billed)}</p>
+      <p style="${deltaStyleFn(ytdBilledDelta.cls)}">${ytdBilledDelta.text}</p>
     </div>
   </div>
 
@@ -121,6 +127,7 @@ function buildEmail(agg, historyRows = []) {
     kh_wip_value: agg.wip.kh.value,
     james_wip_value: agg.wip.byRep.james || 0,
     william_wip_value: agg.wip.byRep.william || 0,
+    ytd_billed_value: agg.booked.ytd.billed,
   };
 
   return {
