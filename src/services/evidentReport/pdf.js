@@ -11,6 +11,15 @@ const puppeteer = require('puppeteer-core')
 // and avoids migrating this shared production service to a Docker deploy
 // just for one feature.
 async function renderPdf(html) {
+  // This report renders plain HTML/CSS to a PDF, not canvas/WebGL content,
+  // so it has no need for @sparticuz/chromium's default graphics:true mode
+  // (--use-gl=angle/--use-angle=swiftshader/--enable-unsafe-swiftshader).
+  // That mode's supporting library archive is only extracted when the
+  // package detects an AWS Lambda environment, which Render's native Node
+  // runtime never signals — disabling it removes one more dependency on
+  // Lambda-gated library extraction this environment may not provide.
+  chromium.setGraphicsMode = false
+
   const browser = await puppeteer.launch({
     args: chromium.args,
     executablePath: await chromium.executablePath(),

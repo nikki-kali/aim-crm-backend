@@ -125,14 +125,32 @@ them).
 `Dockerfile`/`render.yaml` exists). Full `puppeteer`'s bundled Chromium
 needs system shared libraries (`libnss3`, `libgbm1`, `libatk-bridge2.0-0`,
 etc.) that Render's native Node runtime doesn't provide — it would very
-likely fail at runtime with missing-`.so` errors. The fix used elsewhere
-for this exact problem (Render/Vercel/Lambda-style restricted Linux
-environments) is `@sparticuz/chromium`, a Chromium build compiled
-specifically for these environments, paired with `puppeteer-core` (the
-same Puppeteer API, without its own bundled browser download). This avoids
-switching `aim-crm-backend`'s entire deployment to Docker just for one
-feature — which would be a much larger, riskier change to a service
-carrying live production CRM traffic.
+likely fail at runtime with missing-`.so` errors. `@sparticuz/chromium`,
+a Chromium build compiled for restricted/serverless Linux environments,
+paired with `puppeteer-core` (the same Puppeteer API, without its own
+bundled browser download), is the fix commonly used for this exact
+problem — but **whether it actually solves the missing-library problem on
+Render specifically is unconfirmed, not settled by this package choice**.
+Reading `node_modules/@sparticuz/chromium/build/helper.js`, the package
+only extracts its bundled shared-library archive when it detects it's
+running inside AWS Lambda (checking the `AWS_EXECUTION_ENV`/
+`AWS_LAMBDA_JS_RUNTIME` env vars) — Render never sets these, so on Render
+those libraries may simply never get extracted, and Chromium could still
+fail with the same `libnss3.so`-style error this package was chosen to
+avoid. This was reproduced in a Docker container simulating a bare Linux
+host without the libraries pre-installed, but that only proves the code
+path is real — a bare Docker `node:X` image is not a proven proxy for
+Render's actual native-Node buildpack image, which may or may not already
+ship these libraries as part of its own base OS image regardless of
+anything `@sparticuz/chromium` extracts. Local/Docker testing can rule out
+the *code itself* being broken, but cannot conclusively answer whether it
+works on Render either way — that answer, whichever way it goes, comes
+from the live Render deploy plus the manual test-send this plan already
+calls for (see "Testing" below), not from anything run locally. Avoiding a
+Docker migration is still worth trying first regardless of how that
+question resolves — this remains a much smaller, lower-risk change than
+switching `aim-crm-backend`'s entire deployment to Docker for one feature,
+on a service carrying live production CRM traffic.
 
 ```js
 // src/services/evidentReport/pdf.js
