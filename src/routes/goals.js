@@ -12,6 +12,7 @@ const METRIC_LABELS = {
   leads_contacted: 'Leads Contacted',
   proposals_sent: 'Proposals Sent',
   conversion_rate: '% Conversion Rate',
+  new_doctors: 'New Doctors',
 }
 
 async function computeProgress(goal) {
@@ -50,6 +51,12 @@ async function computeProgress(goal) {
     )
     const total = Number(r.total)
     current = total > 0 ? Math.round(Number(r.won) * 100 / total) : 0
+  } else if (metric === 'new_doctors') {
+    const { rows: [r] } = await db.query(
+      `SELECT COUNT(*) AS val FROM clients WHERE assigned_to=$1 AND created_at::date BETWEEN $2 AND $3`,
+      [rep_id, period_start, period_end]
+    )
+    current = Number(r.val)
   }
 
   const pct = Number(target) > 0 ? Math.min(Math.round((current / Number(target)) * 100), 100) : 0
