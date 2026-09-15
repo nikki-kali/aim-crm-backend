@@ -67,6 +67,7 @@ async function runEvidentReport() {
   console.log(`[evident-report] sending to ${RECIPIENTS.join(', ')}...`)
   await sendEmail({
     to: RECIPIENTS,
+    bcc: ['media@aimdentallab.com'],
     subject,
     html: finalHtml,
     ...(pdfBuffer

@@ -73,7 +73,7 @@ test('email copy has no em dashes and no removed footer line', () => {
   assert.ok(!html.includes('Generated automatically from Evident Labs'), 'old footer line should be gone');
   assert.ok(html.includes('A PDF copy of this report is attached.'));
   assert.ok(html.includes('N/A'), 'KH booked/billed cells should read N/A');
-  assert.ok(subject.startsWith('Evident Consolidated Report'));
+  assert.ok(subject.startsWith('AIM Leadership Report'));
 });
 
 test('day-over-day delta shows against a logged prior day', () => {

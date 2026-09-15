@@ -46,7 +46,7 @@ function buildEmail(agg, historyRows = []) {
 
   const html = `
 <div style="font-family:Arial,Helvetica,sans-serif;max-width:640px;margin:0 auto;color:#111827;">
-  <h2 style="margin:0 0 4px;font-size:18px;">Evident Consolidated Report</h2>
+  <h2 style="margin:0 0 4px;font-size:18px;">AIM Leadership Report</h2>
   <p style="margin:0 0 18px;color:#6b7280;font-size:13px;">${dateLabel} · AIM Dental Laboratory + Kings Highway</p>
   ${missingBanner}
 
@@ -124,7 +124,7 @@ function buildEmail(agg, historyRows = []) {
   };
 
   return {
-    subject: `Evident Consolidated Report - ${dateLabel}`,
+    subject: `AIM Leadership Report - ${dateLabel}`,
     html,
     sheetRow,
   };
