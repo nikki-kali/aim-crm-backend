@@ -427,11 +427,10 @@ router.get('/unassigned-leads-report/preview', auth, requireAdmin, async (req, r
 })
 
 // POST /api/reports/unassigned-leads-report/send — admin-only manual
-// trigger. Body: { to?, include_cc?, test? } — same shape/defaults as
-// weekly-rep-report/send above. `to` defaults to UL_REPORT_TO
+// trigger. Body: { to?, include_cc?, test? }. `to` defaults to UL_REPORT_TO
 // (media@aimdentallab.com); `include_cc` (default true) is the real
 // UL_REPORT_CC leadership list; `test` marks the send clearly so it can't
-// be mistaken for the real weekly report.
+// be mistaken for a real automated send.
 router.post('/unassigned-leads-report/send', auth, requireAdmin, async (req, res, next) => {
   try {
     const { to, include_cc = true, test = false } = req.body
