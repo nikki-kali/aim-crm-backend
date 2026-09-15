@@ -10,6 +10,10 @@ const {
   buildUnassignedLeadsReportHtml, sendUnassignedLeadsReport,
   REPORT_TO: UL_REPORT_TO, REPORT_CC: UL_REPORT_CC,
 } = require('../services/unassignedLeadsReport')
+const {
+  sendRepDailyReport, buildDailyReportHtml, computeDailyDoctorStatus,
+  computeWeeklyNewDoctorGoal, REPORT_CC: DAILY_REPORT_CC,
+} = require('../services/salesRepDailyReport')
 const { runEvidentReport } = require('../services/evidentReport')
 
 const router = express.Router()
@@ -477,6 +481,42 @@ router.post('/unassigned-leads-report/send', auth, requireAdmin, async (req, res
       success: true,
       message: `${test ? 'Test report' : 'Report'} (${result.count} lead${result.count === 1 ? '' : 's'}) sent to ${to || UL_REPORT_TO}${include_cc ? ` (cc: ${UL_REPORT_CC.join(', ')})` : ''}`,
     })
+  } catch (err) { next(err) }
+})
+
+// GET /api/reports/sales-rep-daily-report/preview?rep_id=... — admin-only
+// HTML preview of exactly what a rep's daily report email looks like,
+// without sending anything. Defaults to the requesting admin's own data
+// if rep_id is omitted.
+router.get('/sales-rep-daily-report/preview', auth, requireAdmin, async (req, res, next) => {
+  try {
+    const repId = req.query.rep_id || req.user.id
+    const { rows } = await db.query(`SELECT id, name, email FROM users WHERE id=$1`, [repId])
+    if (!rows[0]) return res.status(404).json({ error: 'Rep not found' })
+    const dateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+    const status = await computeDailyDoctorStatus(repId, dateStr)
+    const goal = await computeWeeklyNewDoctorGoal(repId, dateStr)
+    const { html } = buildDailyReportHtml(rows[0].name || rows[0].email, dateStr, status, goal)
+    res.set('Content-Type', 'text/html').send(html)
+  } catch (err) { next(err) }
+})
+
+// POST /api/reports/sales-rep-daily-report/send — admin-only manual
+// trigger. Body: { rep_id, to?, include_cc?, test? }. Omit `to` to send to
+// the rep's own address; pass it to redirect the send elsewhere (a test
+// to the admin's own inbox) without changing whose numbers are reported.
+// `include_cc` defaults true (Yoel Klein); `test` marks the send with a
+// "TEST —" subject prefix and banner, same convention as every other
+// manual-send route in this file.
+router.post('/sales-rep-daily-report/send', auth, requireAdmin, async (req, res, next) => {
+  try {
+    const { rep_id, to, include_cc = true, test = false } = req.body
+    if (!rep_id) return res.status(400).json({ error: 'rep_id is required' })
+    const { rows } = await db.query(`SELECT id, name, email FROM users WHERE id=$1`, [rep_id])
+    if (!rows[0]) return res.status(400).json({ error: 'rep_id must be an existing user' })
+
+    await sendRepDailyReport(rows[0], { to, cc: include_cc ? DAILY_REPORT_CC : [], test })
+    res.json({ success: true, message: `${test ? 'Test report' : 'Report'} sent to ${to || rows[0].email}${include_cc ? ` (cc: ${DAILY_REPORT_CC.join(', ')})` : ''}` })
   } catch (err) { next(err) }
 })
 
