@@ -24,6 +24,10 @@ test('renders totals, doctor rows, and weekly goal progress', () => {
   assert.match(html, /Submitted/)
   assert.match(html, /Not submitted/)
   assert.match(html, />2 <span[^>]*>of 5<\/span></)
+  // Verify CSS declarations are properly separated by semicolons (no concatenation bugs)
+  // The SAMPLE fixture has 2 doctors, so the second row's border-top and text-align
+  // must be separated by a semicolon, not concatenated
+  assert.doesNotMatch(html, /border-top:1px solid #[0-9a-f]{6}text-align/)
 })
 
 test('test send shows the TEST banner', () => {

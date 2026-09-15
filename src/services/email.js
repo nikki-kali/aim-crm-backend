@@ -471,7 +471,7 @@ function salesRepDailyReportEmail({ repName, dateLabel, doctors, totalCount, sub
         <p style="margin:0;font-size:13.5px;font-weight:600;color:${ink}">${d.doctor_name}</p>
         ${d.clinic_name ? `<p style="margin:2px 0 0;font-size:12px;color:${slate}">${d.clinic_name}</p>` : ''}
       </td>
-      <td style="padding:11px 0;${i > 0 ? `border-top:1px solid ${hairline}` : ''}text-align:right;white-space:nowrap">
+      <td style="padding:11px 0;${i > 0 ? `border-top:1px solid ${hairline};` : ''}text-align:right;white-space:nowrap">
         ${d.submitted_today
           ? `<span style="font-family:${FONT_DATA};font-size:11px;font-weight:500;color:${success};background:#ecfdf5;border-radius:999px;padding:4px 10px">&#9650; Submitted</span>`
           : `<span style="font-family:${FONT_DATA};font-size:11px;font-weight:500;color:${danger};background:#fef2f2;border-radius:999px;padding:4px 10px">&#9660; Not submitted</span>`}
