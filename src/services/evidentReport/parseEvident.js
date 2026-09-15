@@ -118,6 +118,22 @@ function parseAndAggregate(messages, { runDate } = {}) {
       continue;
     }
 
+    if (cls.type === 'ytdBooked') {
+      let rep = { count: 0, billed: 0, wip: 0, value: 0, hasData: false };
+      if (table && table.rows.length > 0) {
+        const { headers, rows } = table;
+        const totalsRow = rowToObj(headers, rows[rows.length - 1]);
+        const countCol = findCol(headers, 'Cases (Total)');
+        const billedCol = findCol(headers, 'Total Billed');
+        const wipCol = findCol(headers, 'Total WIP');
+        const billed = toNum(totalsRow[billedCol]);
+        const wip = toNum(totalsRow[wipCol]);
+        rep = { count: toNum(totalsRow[countCol]), billed, wip, value: billed + wip, hasData: true };
+      }
+      found.ytdBooked[cls.rep] = rep;
+      continue;
+    }
+
     // dailyBooked / mtdBooked. "value" is derived as billed + wip rather than
     // read from a "Sales Value (Total)" column, because the Daily report
     // doesn't include that column at all (only MTD/YTD do) - billed+wip
@@ -140,22 +156,6 @@ function parseAndAggregate(messages, { runDate } = {}) {
       };
     }
     found[cls.type][cls.rep] = rep;
-
-    if (cls.type === 'ytdBooked') {
-      let rep = { count: 0, billed: 0, wip: 0, value: 0, hasData: false };
-      if (table && table.rows.length > 0) {
-        const { headers, rows } = table;
-        const totalsRow = rowToObj(headers, rows[rows.length - 1]);
-        const countCol = findCol(headers, 'Cases (Total)');
-        const billedCol = findCol(headers, 'Total Billed');
-        const wipCol = findCol(headers, 'Total WIP');
-        const billed = toNum(totalsRow[billedCol]);
-        const wip = toNum(totalsRow[wipCol]);
-        rep = { count: toNum(totalsRow[countCol]), billed, wip, value: billed + wip, hasData: true };
-      }
-      found.ytdBooked[cls.rep] = rep;
-      continue;
-    }
   }
 
   const zero = { count: 0, billed: 0, wip: 0, value: 0, hasData: false };
