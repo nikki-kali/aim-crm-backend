@@ -664,7 +664,9 @@ async function computeWeeklyNewDoctorGoal(repId, dateStr) {
     ),
     db.query(
       `SELECT COUNT(*) AS val FROM clients
-       WHERE assigned_to=$1 AND created_at::date >= $2 AND created_at::date <= $3`,
+       WHERE assigned_to=$1
+         AND created_at >= ($2::date AT TIME ZONE 'America/New_York')
+         AND created_at <  (($3::date + 1) AT TIME ZONE 'America/New_York')`,
       [repId, weekStart, dateStr]
     ),
   ])
@@ -754,7 +756,11 @@ const { computeDailyDoctorStatus, computeWeeklyNewDoctorGoal } = require('./src/
 const TEST_REP_ID = '06a960b8-b33e-4cf4-96d3-b63a60e41f69'; // TEST ACCOUNT
 const DOCTOR_NAME = 'ZZZ TEST DOCTOR (daily report verification)';
 (async () => {
-  const today = new Date().toISOString().slice(0, 10);
+  // ET-anchored, not new Date().toISOString() — the queries under test
+  // bound their day/week windows in America/New_York, so 'today' here
+  // must match that frame (a plain UTC-derived date can be off by one
+  // near the ET/UTC day boundary and produce a false verification failure).
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
   const before = await computeWeeklyNewDoctorGoal(TEST_REP_ID, today);
   await db.query(
     \`INSERT INTO clients (doctor_name, brand, assigned_to, created_at) VALUES (\$1, 'Aim Dental', \$2, NOW())\`,
