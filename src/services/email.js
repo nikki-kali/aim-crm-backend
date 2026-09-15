@@ -439,6 +439,110 @@ function repReportEmail({ repName, dateLabel, monthLabel, lastMonthLabel, week, 
 </body></html>`
 }
 
+// Sales Rep Daily Report — replaces the old automated, leadership-cc'd
+// Weekly Rep Report send (see
+// docs/superpowers/specs/2026-09-15-sales-rep-daily-and-leadership-report-design.md).
+// repReportEmail (above) stays in use for the unrelated rep self-summary
+// feature (GET/POST /api/reports/my-summary*) — this is a new, simpler
+// template on purpose: a daily operational checklist (who submitted a
+// case today, who didn't, weekly new-doctor goal progress), not a
+// performance narrative with tiers/coaching suggestions.
+function salesRepDailyReportEmail({ repName, dateLabel, doctors, totalCount, submittedCount, notSubmittedCount, goal, test }) {
+  const { ink, slate, teal, deep, success } = BRAND
+  const hairline = '#dcebe9'
+  const danger = '#b91c1c'
+
+  const statRow = (cells) => `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+      <tr>
+        ${cells.map((c) => `
+        <td width="${Math.floor(100 / cells.length)}%" style="text-align:center;padding:0 6px">
+          <p style="margin:0;font-family:${FONT_DATA};font-size:21px;font-weight:500;color:${c.color || ink};letter-spacing:-.01em">${c.val}</p>
+          <p style="margin:6px 0 0;font-family:${FONT_DATA};font-size:9.5px;color:${slate};text-transform:uppercase;letter-spacing:.08em">${c.label}</p>
+        </td>`).join('')}
+      </tr>
+    </table>`
+
+  const sectionLabel = (text) => `<p style="margin:0 0 14px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${slate}">${text}</p>`
+
+  const doctorRows = doctors.map((d, i) => `
+    <tr>
+      <td style="padding:11px 0;${i > 0 ? `border-top:1px solid ${hairline}` : ''}">
+        <p style="margin:0;font-size:13.5px;font-weight:600;color:${ink}">${d.doctor_name}</p>
+        ${d.clinic_name ? `<p style="margin:2px 0 0;font-size:12px;color:${slate}">${d.clinic_name}</p>` : ''}
+      </td>
+      <td style="padding:11px 0;${i > 0 ? `border-top:1px solid ${hairline}` : ''}text-align:right;white-space:nowrap">
+        ${d.submitted_today
+          ? `<span style="font-family:${FONT_DATA};font-size:11px;font-weight:500;color:${success};background:#ecfdf5;border-radius:999px;padding:4px 10px">&#9650; Submitted</span>`
+          : `<span style="font-family:${FONT_DATA};font-size:11px;font-weight:500;color:${danger};background:#fef2f2;border-radius:999px;padding:4px 10px">&#9660; Not submitted</span>`}
+      </td>
+    </tr>`).join('')
+
+  const goalPct = goal.target > 0 ? Math.min(Math.round((goal.current / goal.target) * 100), 100) : 0
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body style="margin:0;padding:0;background-color:${BRAND.deep};background-image:linear-gradient(160deg,${BRAND.skyBlue} 0%,${BRAND.deep} 100%);font-family:${FONT_BODY}">
+<div style="max-width:600px;margin:40px auto;background:#fff;border-radius:24px;overflow:hidden;box-shadow:0 6px 28px rgba(32,114,144,.16)">
+
+  ${test ? `
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+      <td bgcolor="#fbbf24" style="background-color:#fbbf24;padding:10px 20px;text-align:center">
+        <p style="margin:0;font-family:${FONT_DATA};font-size:11.5px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#78350f">Test send — not a real daily report</p>
+      </td>
+    </tr>
+  </table>
+  ` : ''}
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+      <td bgcolor="${teal}" style="background-color:${teal};background-image:linear-gradient(135deg,${teal},${deep});padding:34px 36px 28px">
+        <h1 style="color:#fff;margin:0;font-family:${FONT_DISPLAY};font-size:28px;font-weight:700;letter-spacing:-.01em">Daily Sales Report</h1>
+        <p style="color:rgba(255,255,255,.72);margin:12px 0 0;font-size:13px">${repName} &nbsp;·&nbsp; ${dateLabel}</p>
+      </td>
+    </tr>
+  </table>
+
+  <div style="padding:30px 36px 0">
+    ${statRow([
+      { label: 'Doctors Assigned', val: totalCount },
+      { label: 'Submitted Today', val: submittedCount, color: submittedCount > 0 ? success : undefined },
+      { label: 'Not Submitted', val: notSubmittedCount, color: notSubmittedCount > 0 ? danger : undefined },
+    ])}
+  </div>
+
+  <div style="margin:30px 36px 0;padding:20px 22px;background:${BRAND.tealMist};border-radius:16px">
+    ${sectionLabel('Weekly Goal — New Doctors')}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td><p style="margin:0;font-family:${FONT_DATA};font-size:22px;font-weight:500;color:${ink}">${goal.current} <span style="font-size:14px;color:${slate}">of ${goal.target}</span></p></td>
+      <td style="text-align:right"><p style="margin:0;font-family:${FONT_DATA};font-size:13px;color:${teal}">${goalPct}%</p></td>
+    </tr></table>
+    <div style="margin-top:10px;height:6px;background:#fff;border-radius:999px;overflow:hidden">
+      <div style="width:${goalPct}%;height:100%;background:${teal}"></div>
+    </div>
+  </div>
+
+  <div style="padding:30px 36px 36px">
+    ${sectionLabel('Your Doctors')}
+    ${doctors.length === 0
+      ? `<p style="margin:0;font-size:13px;color:${slate}">No doctors assigned yet.</p>`
+      : `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${doctorRows}</table>`}
+  </div>
+
+  <div style="background:${BRAND.tealMist};padding:18px 36px;font-size:11.5px;color:${slate};border-top:1px solid ${hairline}">
+    Aim Dental Laboratory CRM &nbsp;·&nbsp; Daily report for ${repName}
+  </div>
+</div>
+</body></html>`
+}
+
 // Weekly Unassigned Leads Report — sent every Monday to leadership (not
 // reps), listing leads that came in over the past 7 days and are still
 // sitting with no owner. Reuses repReportEmail's brand chrome (gradient
@@ -865,6 +969,7 @@ module.exports = {
   winStreakEmail,
   noActionLeadEmail,
   repReportEmail,
+  salesRepDailyReportEmail,
   unassignedLeadsReportEmail,
   pickupRequestedEmail,
   pickupDispatchedEmail,
