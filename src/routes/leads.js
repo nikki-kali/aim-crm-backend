@@ -76,7 +76,10 @@ router.post('/import', auth, async (req, res, next) => {
 router.get('/', auth, async (req, res, next) => {
   try {
     const { brand, status, search, archived } = req.query
-    let query = `SELECT l.*, u.name AS assigned_to_name FROM leads l LEFT JOIN users u ON u.id = l.assigned_to WHERE l.is_archived = $1`
+    // Converted leads (Won and/or already have a case at the lab) live in the
+    // Clients list now, not here — exclude them regardless of the archived/
+    // status/view filters below, since they're no longer "a lead" at all.
+    let query = `SELECT l.*, u.name AS assigned_to_name FROM leads l LEFT JOIN users u ON u.id = l.assigned_to WHERE l.is_archived = $1 AND l.converted_to_client_id IS NULL`
     const params = [archived === 'true']
 
     // ?view=mine|all|unassigned; default: staff→mine, admin→all
@@ -186,7 +189,7 @@ router.put('/:id', auth, async (req, res, next) => {
       where += ` AND assigned_to=$${params.length}`
     }
 
-    const { rows } = await db.query(`UPDATE leads SET ${set} ${where} RETURNING *`, params)
+    let { rows } = await db.query(`UPDATE leads SET ${set} ${where} RETURNING *`, params)
     if (!rows[0]) return res.status(404).json({ error: 'Lead not found' })
 
     if (beforeRows[0] && beforeRows[0].status !== rows[0].status) {
@@ -195,6 +198,18 @@ router.put('/:id', auth, async (req, res, next) => {
          VALUES ('lead',$1,'status_change',$2,$3)`,
         [req.params.id, `Status changed to ${rows[0].status}`, req.user.id]
       ).catch(() => {})
+    }
+
+    // Setting a lead to Won moves it to Clients — auto-convert right away
+    // instead of waiting for a separate manual "Convert" click. Best-effort:
+    // a failure here shouldn't fail the status update itself.
+    if (rows[0].status === 'Won' && !rows[0].converted_to_client_id) {
+      try {
+        const result = await convertLeadToClient(req.params.id, { actorId: req.user.id })
+        if (result.client) rows[0].converted_to_client_id = result.client.id
+      } catch (err) {
+        console.error('lead update: auto-convert to client failed', err)
+      }
     }
 
     res.json(rows[0])
