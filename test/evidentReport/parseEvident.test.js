@@ -120,6 +120,24 @@ test('Billed (MTD) shows no delta when the prior row predates company-wide track
   assert.ok(!html.includes('vs. yesterday'), 'no delta anywhere — both the Billed (MTD) guard and the existing Billed (YTD) zero-guard should suppress their deltas on a pre-transition prior row');
 });
 
+test("Billed (MTD) suppresses its delta when today's own MTD Total Billed report is missing", () => {
+  const messagesWithoutMtdBilled = ALL_MESSAGES.filter((m) => m.subject !== 'Daily MTD Total Billed');
+  const agg = parseAndAggregate(messagesWithoutMtdBilled, { runDate: '2026-09-11' });
+  assert.ok(agg.missing.includes('Daily MTD Total Billed'));
+  assert.equal(agg.companyMtdBilled, 0);
+
+  const history = [{
+    date: '2026-09-10', booked_mtd_value: '1702.87', booked_mtd_billed: '89242.46',
+    wip_value: '46209.54', ytd_billed_value: '7519.13', company_daily_booked_value: '100',
+  }];
+  const { html } = buildEmail(agg, history);
+
+  // Without the guard, this would render a confident "▼ $89,242.46 vs.
+  // yesterday" — a fabricated comparison against an absent-data 0, not a
+  // real measured decline.
+  assert.ok(!html.includes('$89,242.46'), 'fabricated delta must not render when the report that feeds it never arrived');
+});
+
 test('Booked (MTD) accumulates from logged same-month days plus today', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-16' });
   const history = [

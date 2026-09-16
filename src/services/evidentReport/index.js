@@ -75,7 +75,7 @@ async function runEvidentReport() {
       : {}),
   })
 
-  // The log-write gate only requires the original 5 non-YTD reports — the
+  // The log-write gate only requires the 8 non-YTD reports — the
   // two YTD Booked Cases reports' actual arrival cadence isn't confirmed
   // yet (they may not arrive every weekday), and gating the entire day's
   // log write on them would silently stop day-over-day deltas/the trend
@@ -84,7 +84,7 @@ async function runEvidentReport() {
   // included) for transparency — only the persistence gate is loosened.
   const criticalMissing = aggregate.missing.filter((label) => !label.startsWith('YTD Booked Cases'))
 
-  // Only log today's row when all 5 critical (non-YTD) expected Evident
+  // Only log today's row when all 8 critical (non-YTD) expected Evident
   // reports actually came in — a zeroed sheetRow from a Gmail outage /
   // sender-address change would otherwise get persisted and poison
   // TOMORROW's delta computation with a fabricated zero baseline (a
@@ -96,7 +96,7 @@ async function runEvidentReport() {
     await appendRow(sheetRow)
   } else {
     console.warn(
-      `[evident-report] NOT logging today's (${runDate}) totals — ${criticalMissing.length} of 5 critical (non-YTD) expected reports were missing (${criticalMissing.join(', ')}). ` +
+      `[evident-report] NOT logging today's (${runDate}) totals — ${criticalMissing.length} of 8 critical (non-YTD) expected reports were missing (${criticalMissing.join(', ')}). ` +
       'Tomorrow\'s delta will compare against an older day instead of a fabricated zero baseline.'
     )
   }

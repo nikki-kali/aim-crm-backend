@@ -32,7 +32,6 @@ function buildEmail(agg, historyRows = []) {
     .reduce((sum, r) => sum + Number(r.company_daily_booked_value || 0), 0);
   const companyMtdBooked = mtdBookedFromHistory + agg.companyDailyBooked;
 
-  const bookedMtdDelta = prior ? delta(agg.booked.mtd.value, Number(prior.booked_mtd_value)) : { text: '', cls: '' };
   // Billed (MTD) now reads Evident's own company-wide "Daily MTD Total
   // Billed" figure instead of the James+William-only sum. A `prior` row
   // whose company_daily_booked_value is NULL predates this change (the
@@ -41,7 +40,12 @@ function buildEmail(agg, historyRows = []) {
   // from the OLD, much-smaller data source, so comparing against it would
   // render a fabricated multi-thousand-dollar "spike" on the very first
   // day this ships. Same guard pattern already proven for ytd_billed_value.
-  const billedMtdDelta = prior && prior.company_daily_booked_value != null
+  // Also suppressed when today's own "Daily MTD Total Billed" report never
+  // arrived — agg.companyMtdBilled would be a placeholder 0 in that case
+  // (see the missing-reports banner above), and computing a delta against
+  // it would render a confident, false "▼ $89,xxx.xx" rather than an
+  // honest absence of data.
+  const billedMtdDelta = prior && prior.company_daily_booked_value != null && !agg.missing.includes('Daily MTD Total Billed')
     ? delta(agg.companyMtdBilled, Number(prior.booked_mtd_billed))
     : { text: '', cls: '' };
   // `ytd_billed_value` is a newly-added column — production's one existing
@@ -106,6 +110,7 @@ function buildEmail(agg, historyRows = []) {
       <p style="${labelStyle}">Billed (YTD)</p>
       <p style="${valueStyle}">${fmtMoney(agg.booked.ytd.billed)}</p>
       <p style="${deltaStyleFn(ytdBilledDelta.cls)}">${ytdBilledDelta.text}</p>
+      <p style="font-size:11px;color:#9ca3af;margin:2px 0 0;">James + William only</p>
     </div>
   </div>
 
