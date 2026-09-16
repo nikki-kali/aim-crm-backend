@@ -184,6 +184,7 @@ function parseAndAggregate(messages, { runDate } = {}) {
     booked: {
       daily: {
         count: dj.count + dw.count,
+        billed: dj.billed + dw.billed,
         value: dj.value + dw.value,
         byRep: { james: dj, william: dw },
       },

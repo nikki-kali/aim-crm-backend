@@ -23,7 +23,6 @@ function buildEmail(agg, historyRows = []) {
 
   const bookedMtdDelta = prior ? delta(agg.booked.mtd.value, Number(prior.booked_mtd_value)) : { text: '', cls: '' };
   const billedMtdDelta = prior ? delta(agg.booked.mtd.billed, Number(prior.booked_mtd_billed)) : { text: '', cls: '' };
-  const wipDelta = prior ? delta(agg.wip.value, Number(prior.wip_value)) : { text: '', cls: '' };
   // `ytd_billed_value` is a newly-added column — production's one existing
   // log row (from before this column existed) has it at the column
   // default of 0, unbackfilled (deliberate, per the design spec's "no
@@ -60,12 +59,19 @@ function buildEmail(agg, historyRows = []) {
   <p style="margin:0 0 18px;color:#6b7280;font-size:13px;">${dateLabel} · AIM Dental Laboratory + Kings Highway</p>
   ${missingBanner}
 
-  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:22px;">
-    <div style="${tileStyle}">
-      <p style="${labelStyle}">Booked (today)</p>
-      <p style="${valueStyle}">${fmtMoney(agg.booked.daily.value)}</p>
-      <p style="font-size:12px;color:#6b7280;margin:2px 0 0;">${agg.booked.daily.count} case${agg.booked.daily.count === 1 ? '' : 's'}</p>
+  <div style="display:flex;gap:14px;margin-bottom:16px;">
+    <div style="flex:1;background-color:#e6f9f9;background-image:linear-gradient(160deg,#e6f9f9,#eaf3f7);border:1px solid #06babe;border-radius:12px;padding:20px 22px;">
+      <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#207290;text-transform:uppercase;letter-spacing:.04em;">Booked (Today)</p>
+      <p style="margin:0;font-size:36px;font-weight:700;color:#06babe;letter-spacing:-.01em;">${fmtMoney(agg.booked.daily.value)}</p>
+      <p style="margin:6px 0 0;font-size:13px;color:#374151;">${agg.booked.daily.count} case${agg.booked.daily.count === 1 ? '' : 's'}</p>
     </div>
+    <div style="flex:1;background-color:#e6f9f9;background-image:linear-gradient(160deg,#e6f9f9,#eaf3f7);border:1px solid #06babe;border-radius:12px;padding:20px 22px;">
+      <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#207290;text-transform:uppercase;letter-spacing:.04em;">Billed (Today)</p>
+      <p style="margin:0;font-size:36px;font-weight:700;color:#06babe;letter-spacing:-.01em;">${fmtMoney(agg.booked.daily.billed)}</p>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:22px;">
     <div style="${tileStyle}">
       <p style="${labelStyle}">Booked (MTD)</p>
       <p style="${valueStyle}">${fmtMoney(agg.booked.mtd.value)}</p>
@@ -77,44 +83,11 @@ function buildEmail(agg, historyRows = []) {
       <p style="${deltaStyleFn(billedMtdDelta.cls)}">${billedMtdDelta.text}</p>
     </div>
     <div style="${tileStyle}">
-      <p style="${labelStyle}">WIP (in lab)</p>
-      <p style="${valueStyle}">${fmtMoney(agg.wip.value)}</p>
-      <p style="${deltaStyleFn(wipDelta.cls)}">${agg.wip.cases} cases · ${wipDelta.text}</p>
-    </div>
-    <div style="${tileStyle}">
       <p style="${labelStyle}">Billed (YTD)</p>
       <p style="${valueStyle}">${fmtMoney(agg.booked.ytd.billed)}</p>
       <p style="${deltaStyleFn(ytdBilledDelta.cls)}">${ytdBilledDelta.text}</p>
     </div>
   </div>
-
-  <h3 style="font-size:14px;margin:0 0 8px;color:#374151;">Breakdown by rep and brand</h3>
-  <table style="width:100%;border-collapse:collapse;font-size:13px;">
-    <tr style="background:#f3f4f6;text-align:left;">
-      <th style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">Segment</th>
-      <th style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">Booked (MTD)</th>
-      <th style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">Billed (MTD)</th>
-      <th style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">WIP (in lab)</th>
-    </tr>
-    <tr>
-      <td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;">AIM (James)</td>
-      <td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;">${fmtMoney(agg.booked.mtd.byRep.james.value)}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;">${fmtMoney(agg.booked.mtd.byRep.james.billed)}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;">${fmtMoney(agg.wip.byRep.james || 0)}</td>
-    </tr>
-    <tr>
-      <td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;">AIM (William)</td>
-      <td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;">${fmtMoney(agg.booked.mtd.byRep.william.value)}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;">${fmtMoney(agg.booked.mtd.byRep.william.billed)}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;">${fmtMoney(agg.wip.byRep.william || 0)}</td>
-    </tr>
-    <tr>
-      <td style="padding:8px 10px;">Kings Highway (KH)</td>
-      <td style="padding:8px 10px;color:#9ca3af;">N/A</td>
-      <td style="padding:8px 10px;color:#9ca3af;">N/A</td>
-      <td style="padding:8px 10px;">${fmtMoney(agg.wip.kh.value)}</td>
-    </tr>
-  </table>
 
   <h3 style="font-size:14px;margin:0 0 8px;color:#374151;">30-Day Booked vs. Billed Trend</h3>
   <img src="${buildTrendChartUrl(historyRows)}" alt="30-day booked vs. billed trend chart" style="max-width:100%;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:22px;" />

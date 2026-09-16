@@ -29,6 +29,7 @@ test('parses and combines all 7 report types correctly', () => {
 
   // Daily: only James had a booking (1 case, $117 WIP, $0 billed); William had none.
   assert.equal(agg.booked.daily.count, 1);
+  assert.equal(agg.booked.daily.billed, 0);
   assert.equal(agg.booked.daily.value, 117);
 
   // MTD: James 8 cases/$501 billed/$1061.91 WIP, William 4 cases/$77.49 billed/$262.47 WIP.
@@ -82,7 +83,7 @@ test('email copy has no em dashes and no removed footer line', () => {
   assert.ok(!html.includes('&mdash;'), 'html should not contain an em dash entity');
   assert.ok(!html.includes('Generated automatically from Evident Labs'), 'old footer line should be gone');
   assert.ok(html.includes('A PDF copy of this report is attached.'));
-  assert.ok(html.includes('N/A'), 'KH booked/billed cells should read N/A');
+  assert.ok(!html.includes('Kings Highway (KH)'), 'KH row was removed from the rep/brand breakdown');
   assert.ok(subject.startsWith('AIM Leadership Report'));
 });
 
