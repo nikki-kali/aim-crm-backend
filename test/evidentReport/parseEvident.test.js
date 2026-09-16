@@ -94,7 +94,7 @@ test('email copy has no em dashes and no removed footer line', () => {
   assert.ok(!html.includes('&mdash;'), 'html should not contain an em dash entity');
   assert.ok(!html.includes('Generated automatically from Evident Labs'), 'old footer line should be gone');
   assert.ok(html.includes('A PDF copy of this report is attached.'));
-  assert.ok(!html.includes('Kings Highway (KH)'), 'KH row was removed from the rep/brand breakdown');
+  assert.ok(!html.includes('Kings Highway'), 'Kings Highway should not appear anywhere in the email — removed from both the rep/brand breakdown and the header subtitle');
   assert.ok(subject.startsWith('AIM Leadership Report'));
 });
 

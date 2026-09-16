@@ -1,7 +1,7 @@
 // Builds the consolidated HTML email from the aggregate figures, computing
 // day-over-day deltas against the logged history rows.
 
-const { buildTrendChartUrl } = require('./chart');
+const { buildMonthlyRevenueChartUrl } = require('./chart');
 
 function fmtMoney(n) {
   return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -70,6 +70,8 @@ function buildEmail(agg, historyRows = []) {
     year: 'numeric',
   });
 
+  const { url: chartUrl, monthCount: chartMonthCount } = buildMonthlyRevenueChartUrl(historyRows, agg);
+
   const tileStyle = 'flex:1;min-width:150px;background:#f8f9fa;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;';
   const labelStyle = 'font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;margin:0 0 4px;';
   const valueStyle = 'font-size:22px;font-weight:600;color:#111827;margin:0;';
@@ -81,7 +83,7 @@ function buildEmail(agg, historyRows = []) {
   const html = `
 <div style="font-family:Arial,Helvetica,sans-serif;max-width:640px;margin:0 auto;color:#111827;">
   <h2 style="margin:0 0 4px;font-size:18px;">AIM Leadership Report</h2>
-  <p style="margin:0 0 18px;color:#6b7280;font-size:13px;">${dateLabel} · AIM Dental Laboratory + Kings Highway</p>
+  <p style="margin:0 0 18px;color:#6b7280;font-size:13px;">${dateLabel} · AIM Dental Laboratory</p>
   ${missingBanner}
 
   <div style="display:flex;gap:14px;margin-bottom:16px;">
@@ -114,8 +116,9 @@ function buildEmail(agg, historyRows = []) {
     </div>
   </div>
 
-  <h3 style="font-size:14px;margin:0 0 8px;color:#374151;">30-Day Booked vs. Billed Trend</h3>
-  <img src="${buildTrendChartUrl(historyRows)}" alt="30-day booked vs. billed trend chart" style="max-width:100%;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:22px;" />
+  <h3 style="font-size:14px;margin:0 0 8px;color:#374151;">Monthly Booked vs. Billed Revenue</h3>
+  <img src="${chartUrl}" alt="Monthly booked vs. billed revenue chart" style="max-width:100%;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:${chartMonthCount < 2 ? '6px' : '22px'};" />
+  ${chartMonthCount < 2 ? `<p style="font-size:11px;color:#9ca3af;margin:0 0 22px;">Only ${chartMonthCount === 0 ? 'no months' : 'one month'} showing so far. We only recently started receiving the company-wide Evident reports these figures come from. A new point will appear here each month as more real data logs.</p>` : ''}
 
   <p style="font-size:11px;color:#9ca3af;margin-top:22px;">
     A PDF copy of this report is attached.
