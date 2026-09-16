@@ -59,7 +59,7 @@ showing a small, misleading slice of real revenue since it shipped.
 `Customer Code`, `Customer Name`, `Sales Value (Total)`, `Salesperson`.
 Grand total is the last table row's `Sales Value (Total)` cell. Real
 fixture: `test/evidentReport/fixtures/company-daily-booked-nadine.html`
-(total `8065.22`, 95 real case rows before the totals row).
+(total `8065.22`, 94 real case rows before the totals row).
 
 **"Daily Billed Report - Nadine"** — columns: `Ref`, `Case Number`,
 `Customer Code`, `Customer Name`, `Sales Value (Total)`, `Sales Value
