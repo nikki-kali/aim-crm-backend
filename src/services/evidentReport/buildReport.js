@@ -21,8 +21,29 @@ function buildEmail(agg, historyRows = []) {
     .filter((r) => r.date && r.date < agg.runDate)
     .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
 
+  // Booked (MTD) has no Evident-provided company-wide equivalent — we
+  // accumulate it ourselves from each day's own company-wide "Booked
+  // (Today)" figure, logged daily. Sum every history row in the same
+  // calendar month as today, plus today's own value (not yet in
+  // historyRows at build time — appendRow() runs after this).
+  const runMonth = agg.runDate.slice(0, 7); // 'YYYY-MM'
+  const mtdBookedFromHistory = historyRows
+    .filter((r) => r.date && r.date.slice(0, 7) === runMonth)
+    .reduce((sum, r) => sum + Number(r.company_daily_booked_value || 0), 0);
+  const companyMtdBooked = mtdBookedFromHistory + agg.companyDailyBooked;
+
   const bookedMtdDelta = prior ? delta(agg.booked.mtd.value, Number(prior.booked_mtd_value)) : { text: '', cls: '' };
-  const billedMtdDelta = prior ? delta(agg.booked.mtd.billed, Number(prior.booked_mtd_billed)) : { text: '', cls: '' };
+  // Billed (MTD) now reads Evident's own company-wide "Daily MTD Total
+  // Billed" figure instead of the James+William-only sum. A `prior` row
+  // whose company_daily_booked_value is NULL predates this change (the
+  // column is nullable with no default specifically so this check works —
+  // see the migration's own comment) — its booked_mtd_billed value is
+  // from the OLD, much-smaller data source, so comparing against it would
+  // render a fabricated multi-thousand-dollar "spike" on the very first
+  // day this ships. Same guard pattern already proven for ytd_billed_value.
+  const billedMtdDelta = prior && prior.company_daily_booked_value != null
+    ? delta(agg.companyMtdBilled, Number(prior.booked_mtd_billed))
+    : { text: '', cls: '' };
   // `ytd_billed_value` is a newly-added column — production's one existing
   // log row (from before this column existed) has it at the column
   // default of 0, unbackfilled (deliberate, per the design spec's "no
@@ -62,24 +83,23 @@ function buildEmail(agg, historyRows = []) {
   <div style="display:flex;gap:14px;margin-bottom:16px;">
     <div style="flex:1;background-color:#e6f9f9;background-image:linear-gradient(160deg,#e6f9f9,#eaf3f7);border:1px solid #06babe;border-radius:12px;padding:20px 22px;">
       <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#207290;text-transform:uppercase;letter-spacing:.04em;">Booked (Today)</p>
-      <p style="margin:0;font-size:36px;font-weight:700;color:#06babe;letter-spacing:-.01em;">${fmtMoney(agg.booked.daily.value)}</p>
-      <p style="margin:6px 0 0;font-size:13px;color:#374151;">${agg.booked.daily.count} case${agg.booked.daily.count === 1 ? '' : 's'}</p>
+      <p style="margin:0;font-size:36px;font-weight:700;color:#06babe;letter-spacing:-.01em;">${fmtMoney(agg.companyDailyBooked)}</p>
+      <p style="margin:6px 0 0;font-size:13px;color:#374151;">${agg.companyDailyBookedCount} case${agg.companyDailyBookedCount === 1 ? '' : 's'}</p>
     </div>
     <div style="flex:1;background-color:#e6f9f9;background-image:linear-gradient(160deg,#e6f9f9,#eaf3f7);border:1px solid #06babe;border-radius:12px;padding:20px 22px;">
       <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#207290;text-transform:uppercase;letter-spacing:.04em;">Billed (Today)</p>
-      <p style="margin:0;font-size:36px;font-weight:700;color:#06babe;letter-spacing:-.01em;">${fmtMoney(agg.booked.daily.billed)}</p>
+      <p style="margin:0;font-size:36px;font-weight:700;color:#06babe;letter-spacing:-.01em;">${fmtMoney(agg.companyDailyBilled)}</p>
     </div>
   </div>
 
   <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:22px;">
     <div style="${tileStyle}">
       <p style="${labelStyle}">Booked (MTD)</p>
-      <p style="${valueStyle}">${fmtMoney(agg.booked.mtd.value)}</p>
-      <p style="${deltaStyleFn(bookedMtdDelta.cls)}">${bookedMtdDelta.text}</p>
+      <p style="${valueStyle}">${fmtMoney(companyMtdBooked)}</p>
     </div>
     <div style="${tileStyle}">
       <p style="${labelStyle}">Billed (MTD)</p>
-      <p style="${valueStyle}">${fmtMoney(agg.booked.mtd.billed)}</p>
+      <p style="${valueStyle}">${fmtMoney(agg.companyMtdBilled)}</p>
       <p style="${deltaStyleFn(billedMtdDelta.cls)}">${billedMtdDelta.text}</p>
     </div>
     <div style="${tileStyle}">
@@ -103,7 +123,7 @@ function buildEmail(agg, historyRows = []) {
     booked_daily_count: agg.booked.daily.count,
     booked_daily_value: agg.booked.daily.value,
     booked_mtd_count: agg.booked.mtd.count,
-    booked_mtd_billed: agg.booked.mtd.billed,
+    booked_mtd_billed: agg.companyMtdBilled,
     booked_mtd_wip: agg.booked.mtd.wip,
     booked_mtd_value: agg.booked.mtd.value,
     wip_cases: agg.wip.cases,
@@ -113,6 +133,7 @@ function buildEmail(agg, historyRows = []) {
     james_wip_value: agg.wip.byRep.james || 0,
     william_wip_value: agg.wip.byRep.william || 0,
     ytd_billed_value: agg.booked.ytd.billed,
+    company_daily_booked_value: agg.companyDailyBooked,
   };
 
   return {

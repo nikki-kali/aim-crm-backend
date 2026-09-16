@@ -98,10 +98,38 @@ test('email copy has no em dashes and no removed footer line', () => {
   assert.ok(subject.startsWith('AIM Leadership Report'));
 });
 
-test('day-over-day delta shows against a logged prior day', () => {
+test('Billed (MTD) delta shows against a logged prior day (guard allows it once company-wide tracking exists)', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
-  const history = [{ date: '2026-09-10', booked_mtd_value: '1702.87', booked_mtd_billed: '528.49', wip_value: '46209.54', ytd_billed_value: '7519.13' }];
+  const history = [{
+    date: '2026-09-10', booked_mtd_value: '1702.87', booked_mtd_billed: '89242.46',
+    wip_value: '46209.54', ytd_billed_value: '7519.13', company_daily_booked_value: '100',
+  }];
   const { html } = buildEmail(agg, history);
 
   assert.match(html, /▲ \$200\.00 vs\. yesterday/);
+});
+
+test('Billed (MTD) shows no delta when the prior row predates company-wide tracking', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
+  const history = [{
+    date: '2026-09-10', booked_mtd_value: '1702.87', booked_mtd_billed: '1124.46',
+    wip_value: '46209.54', ytd_billed_value: '0', company_daily_booked_value: null,
+  }];
+  const { html } = buildEmail(agg, history);
+
+  assert.ok(!html.includes('vs. yesterday'), 'no delta anywhere — both the Billed (MTD) guard and the existing Billed (YTD) zero-guard should suppress their deltas on a pre-transition prior row');
+});
+
+test('Booked (MTD) accumulates from logged same-month days plus today', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-16' });
+  const history = [
+    { date: '2026-09-14', company_daily_booked_value: '500' },
+    { date: '2026-09-15', company_daily_booked_value: '300' },
+    { date: '2026-08-30', company_daily_booked_value: '9999' },
+  ];
+  const { html } = buildEmail(agg, history);
+
+  // 500 + 300 (same-month history) + 8065.22 (today's real companyDailyBooked) = 8865.22.
+  // The 2026-08-30 row must NOT be included (different month).
+  assert.match(html, /\$8,865\.22/);
 });
