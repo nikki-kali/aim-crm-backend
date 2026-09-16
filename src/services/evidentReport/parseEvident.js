@@ -50,6 +50,9 @@ function classify(subject) {
   if (/^YTD Booked Cases\s*-\s*James/i.test(s)) return { type: 'ytdBooked', rep: 'james' };
   if (/^YTD Booked Cases\s*-\s*William/i.test(s)) return { type: 'ytdBooked', rep: 'william' };
   if (/^Cases Currently In Progress/i.test(s)) return { type: 'wip' };
+  if (/^Daily Booking Report\s*-\s*Nadine/i.test(s)) return { type: 'companyDailyBooked' };
+  if (/^Daily Billed Report\s*-\s*Nadine/i.test(s)) return { type: 'companyDailyBilled' };
+  if (/^Daily MTD Total Billed/i.test(s)) return { type: 'companyMtdBilled' };
   return { type: 'other' };
 }
 
@@ -68,6 +71,9 @@ const EXPECTED = [
   { type: 'ytdBooked', rep: 'james', label: "YTD Booked Cases - James' Doctors" },
   { type: 'ytdBooked', rep: 'william', label: "YTD Booked Cases - William's Doctors" },
   { type: 'wip', rep: null, label: 'Cases Currently In Progress' },
+  { type: 'companyDailyBooked', rep: null, label: 'Daily Booking Report - Nadine' },
+  { type: 'companyDailyBilled', rep: null, label: 'Daily Billed Report - Nadine' },
+  { type: 'companyMtdBilled', rep: null, label: 'Daily MTD Total Billed' },
 ];
 
 /**
@@ -75,7 +81,10 @@ const EXPECTED = [
  * @returns aggregate object with combined + per-rep + per-brand figures
  */
 function parseAndAggregate(messages, { runDate } = {}) {
-  const found = { dailyBooked: {}, mtdBooked: {}, ytdBooked: {}, wip: null };
+  const found = {
+    dailyBooked: {}, mtdBooked: {}, ytdBooked: {}, wip: null,
+    companyDailyBooked: null, companyDailyBilled: null, companyMtdBilled: null,
+  };
 
   for (const msg of messages) {
     const cls = classify(msg.subject || '');
@@ -115,6 +124,34 @@ function parseAndAggregate(messages, { runDate } = {}) {
           william: williamCol ? toNum(totalsRow[williamCol]) : 0,
         },
       };
+      continue;
+    }
+
+    if (cls.type === 'companyDailyBooked') {
+      if (!table || table.rows.length === 0) { found.companyDailyBooked = 0; found.companyDailyBookedCount = 0; continue; }
+      const { headers, rows } = table;
+      const totalsRow = rowToObj(headers, rows[rows.length - 1]);
+      const totalCol = findCol(headers, 'Sales Value (Total)');
+      found.companyDailyBooked = toNum(totalsRow[totalCol]);
+      found.companyDailyBookedCount = rows.length - 1;
+      continue;
+    }
+
+    if (cls.type === 'companyDailyBilled') {
+      if (!table || table.rows.length === 0) { found.companyDailyBilled = 0; continue; }
+      const { headers, rows } = table;
+      const totalsRow = rowToObj(headers, rows[rows.length - 1]);
+      const billedCol = findCol(headers, 'Total Billed');
+      found.companyDailyBilled = toNum(totalsRow[billedCol]);
+      continue;
+    }
+
+    if (cls.type === 'companyMtdBilled') {
+      if (!table || table.rows.length === 0) { found.companyMtdBilled = 0; continue; }
+      const { headers, rows } = table;
+      const totalsRow = rowToObj(headers, rows[rows.length - 1]);
+      const billedCol = findCol(headers, 'Total Billed');
+      found.companyMtdBilled = toNum(totalsRow[billedCol]);
       continue;
     }
 
@@ -175,6 +212,9 @@ function parseAndAggregate(messages, { runDate } = {}) {
 
   const missing = EXPECTED.filter((e) => {
     if (e.type === 'wip') return !found.wip;
+    if (e.type === 'companyDailyBooked') return found.companyDailyBooked === null;
+    if (e.type === 'companyDailyBilled') return found.companyDailyBilled === null;
+    if (e.type === 'companyMtdBilled') return found.companyMtdBilled === null;
     return !found[e.type][e.rep];
   }).map((e) => e.label);
 
@@ -204,6 +244,10 @@ function parseAndAggregate(messages, { runDate } = {}) {
       },
     },
     wip,
+    companyDailyBooked: found.companyDailyBooked || 0,
+    companyDailyBookedCount: found.companyDailyBookedCount || 0,
+    companyDailyBilled: found.companyDailyBilled || 0,
+    companyMtdBilled: found.companyMtdBilled || 0,
     missing,
   };
 }

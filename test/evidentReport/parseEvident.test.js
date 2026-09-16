@@ -9,9 +9,10 @@ function fixture(name) {
   return fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf-8');
 }
 
-// These 5 fixtures are real emails pulled from media@aimdentallab.com
-// (Sept 10-12, 2026), not synthetic data - the numbers asserted below are
-// the actual totals Evident sent that night.
+// These fixtures are real emails pulled from media@aimdentallab.com
+// (Sept 10-12 2026, plus 3 company-wide report types added 2026-09-16),
+// not synthetic data - the numbers asserted below are the actual totals
+// Evident sent.
 const ALL_MESSAGES = [
   { subject: "Daily Booked Cases - James' Doctors", html: fixture('daily-booked-james.html') },
   { subject: "Daily Booked Cases - William's Doctors", html: fixture('daily-booked-william-nodata.html') },
@@ -20,9 +21,12 @@ const ALL_MESSAGES = [
   { subject: 'Cases Currently In Progress', html: fixture('wip-cases-in-progress.html') },
   { subject: "YTD Booked Cases - James' Doctors", html: fixture('ytd-booked-james.html') },
   { subject: "YTD Booked Cases - William's Doctors", html: fixture('ytd-booked-william.html') },
+  { subject: 'Daily Booking Report - Nadine', html: fixture('company-daily-booked-nadine.html') },
+  { subject: 'Daily Billed Report - Nadine', html: fixture('company-daily-billed-nadine.html') },
+  { subject: 'Daily MTD Total Billed', html: fixture('company-mtd-total-billed.html') },
 ];
 
-test('parses and combines all 7 report types correctly', () => {
+test('parses and combines all 10 report types correctly', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
 
   assert.equal(agg.missing.length, 0);
@@ -55,6 +59,12 @@ test('parses and combines all 7 report types correctly', () => {
   assert.equal(Math.round(agg.wip.aim.value * 100) / 100, 16756.54);
   assert.equal(agg.wip.byRep.james, 1061.91);
   assert.equal(agg.wip.byRep.william, 262.47);
+
+  // Company-wide totals — real numbers from the 2026-09-16 Evident inbox.
+  assert.equal(agg.companyDailyBooked, 8065.22);
+  assert.equal(agg.companyDailyBookedCount, 94);
+  assert.equal(agg.companyDailyBilled, 1622.74);
+  assert.equal(agg.companyMtdBilled, 89442.46);
 });
 
 test('"No data was returned" reports as zero, not a crash', () => {
@@ -71,8 +81,9 @@ test('flags missing reports instead of silently under-reporting', () => {
     [{ subject: "Daily Booked Cases - James' Doctors", html: fixture('daily-booked-james.html') }],
     { runDate: '2026-09-11' }
   );
-  assert.equal(agg.missing.length, 6);
+  assert.equal(agg.missing.length, 9);
   assert.ok(agg.missing.includes('Cases Currently In Progress'));
+  assert.ok(agg.missing.includes('Daily Booking Report - Nadine'));
 });
 
 test('email copy has no em dashes and no removed footer line', () => {
