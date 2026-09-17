@@ -70,4 +70,30 @@ async function fetchEvidentEmails() {
   return messages
 }
 
-module.exports = { fetchEvidentEmails, extractSubjectAndHtml }
+// Like fetchEvidentEmails, but for an arbitrary Gmail search query
+// (appended to the `from:support@evidentlabs.com` filter) and returning
+// each message's own real calendar date (America/New_York) alongside its
+// subject/html. Used by salesRepDailyReport.js's new-doctor detection,
+// which needs a whole week's worth of a rep's own daily emails, not just
+// today's.
+async function fetchEvidentEmailsInRange(extraQuery) {
+  const auth = getGmailAuth()
+  const gmail = google.gmail({ version: 'v1', auth })
+  const listRes = await gmail.users.messages.list({
+    userId: 'me',
+    q: `from:support@evidentlabs.com ${extraQuery}`,
+    maxResults: 500,
+  })
+  const ids = (listRes.data.messages || []).map((m) => m.id)
+
+  const messages = []
+  for (const id of ids) {
+    const res = await gmail.users.messages.get({ userId: 'me', id, format: 'full' })
+    const { subject, html } = extractSubjectAndHtml(res.data)
+    const date = new Date(Number(res.data.internalDate)).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+    messages.push({ subject, html, date })
+  }
+  return messages
+}
+
+module.exports = { fetchEvidentEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml }

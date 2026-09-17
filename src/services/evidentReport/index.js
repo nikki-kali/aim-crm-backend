@@ -75,17 +75,18 @@ async function runEvidentReport() {
       : {}),
   })
 
-  // The log-write gate only requires the 8 non-YTD reports — the
-  // two YTD Booked Cases reports' actual arrival cadence isn't confirmed
-  // yet (they may not arrive every weekday), and gating the entire day's
-  // log write on them would silently stop day-over-day deltas/the trend
-  // chart from ever working again if that's the case. The email's own
-  // missing-reports banner still reflects ALL missing reports (YTD
-  // included) for transparency — only the persistence gate is loosened.
-  const criticalMissing = aggregate.missing.filter((label) => !label.startsWith('YTD Booked Cases'))
+  // The log-write gate excludes the two YTD Booked Cases reports and the
+  // new MTD Booked Daily Update report — none of their arrival cadence is
+  // confirmed yet (MTD Booked Daily Update only started arriving
+  // 2026-09-16), and gating the entire day's log write on an unproven
+  // report would silently stop day-over-day deltas/the trend chart from
+  // ever working again if it turns out not to arrive every weekday. The
+  // email's own missing-reports banner still reflects ALL missing reports
+  // for transparency — only the persistence gate is loosened.
+  const criticalMissing = aggregate.missing.filter((label) => !label.startsWith('YTD Booked Cases') && label !== 'MTD Booked Daily Update')
 
-  // Only log today's row when all 8 critical (non-YTD) expected Evident
-  // reports actually came in — a zeroed sheetRow from a Gmail outage /
+  // Only log today's row when all critical expected Evident reports
+  // actually came in — a zeroed sheetRow from a Gmail outage /
   // sender-address change would otherwise get persisted and poison
   // TOMORROW's delta computation with a fabricated zero baseline (a
   // confident, unflagged "▲ $X vs. yesterday" comparing against garbage),

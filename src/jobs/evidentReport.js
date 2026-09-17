@@ -6,17 +6,17 @@ const { runEvidentReport } = require('../services/evidentReport')
 // has real in-progress unrelated work and must not be touched. Same
 // pattern as jobs/mediaCleanup.js and jobs/socialTokenRefresh.js.
 function startEvidentReportScheduler() {
-  // Weekdays 6am America/New_York — matches the standalone project's
-  // original schedule (after Evident's overnight reports land, before
-  // the start of the business day).
+  // Weekdays 8am America/New_York — moved from the original 6am slot
+  // 2026-09-17 to line up with the Sales Rep Daily Report's own 8am send,
+  // so leadership and the reps' inboxes get their daily reports together.
   cron.schedule(
-    '0 6 * * 1-5',
+    '0 8 * * 1-5',
     async () => {
       // Gated behind EVIDENT_REPORT_ENABLED, same pattern as
       // WEEKLY_REPORT_ENABLED/UNASSIGNED_LEADS_REPORT_ENABLED in
       // scheduler.js — lets the code ship and be reviewed via the admin
       // manual-send route (routes/reports.js, deliberately NOT gated)
-      // before a real weekday 6am send to leadership goes live on its own.
+      // before a real weekday 8am send to leadership goes live on its own.
       if (process.env.EVIDENT_REPORT_ENABLED !== 'true') {
         console.log('[evident-report] scheduled run skipped — EVIDENT_REPORT_ENABLED is not set to true')
         return

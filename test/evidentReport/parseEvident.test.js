@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { parseAndAggregate } = require('../../src/services/evidentReport/parseEvident');
+const { parseAndAggregate, extractDailyBookedCustomerNames, extractCaseTotals } = require('../../src/services/evidentReport/parseEvident');
 const { buildEmail } = require('../../src/services/evidentReport/buildReport');
 
 function fixture(name) {
@@ -10,9 +10,12 @@ function fixture(name) {
 }
 
 // These fixtures are real emails pulled from media@aimdentallab.com
-// (Sept 10-12 2026, plus 3 company-wide report types added 2026-09-16),
-// not synthetic data - the numbers asserted below are the actual totals
-// Evident sent.
+// (Sept 10-12 2026, plus 3 company-wide report types added 2026-09-16,
+// plus a 4th — MTD Booked Daily Update — that started arriving
+// 2026-09-16 too), not synthetic data - the numbers asserted below are
+// the actual totals Evident sent (the MTD Booked Daily Update fixture is
+// a trimmed-down real-shaped sample, not the full real row list, but its
+// header/totals-row structure matches the real email exactly).
 const ALL_MESSAGES = [
   { subject: "Daily Booked Cases - James' Doctors", html: fixture('daily-booked-james.html') },
   { subject: "Daily Booked Cases - William's Doctors", html: fixture('daily-booked-william-nodata.html') },
@@ -24,9 +27,10 @@ const ALL_MESSAGES = [
   { subject: 'Daily Booking Report - Nadine', html: fixture('company-daily-booked-nadine.html') },
   { subject: 'Daily Billed Report - Nadine', html: fixture('company-daily-billed-nadine.html') },
   { subject: 'Daily MTD Total Billed', html: fixture('company-mtd-total-billed.html') },
+  { subject: 'MTD Booked Daily Update', html: fixture('company-mtd-booked-daily-update.html') },
 ];
 
-test('parses and combines all 10 report types correctly', () => {
+test('parses and combines all 11 report types correctly', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
 
   assert.equal(agg.missing.length, 0);
@@ -65,6 +69,7 @@ test('parses and combines all 10 report types correctly', () => {
   assert.equal(agg.companyDailyBookedCount, 94);
   assert.equal(agg.companyDailyBilled, 1622.74);
   assert.equal(agg.companyMtdBilled, 89442.46);
+  assert.equal(agg.companyMtdBooked, 6935);
 });
 
 test('"No data was returned" reports as zero, not a crash', () => {
@@ -81,9 +86,10 @@ test('flags missing reports instead of silently under-reporting', () => {
     [{ subject: "Daily Booked Cases - James' Doctors", html: fixture('daily-booked-james.html') }],
     { runDate: '2026-09-11' }
   );
-  assert.equal(agg.missing.length, 9);
+  assert.equal(agg.missing.length, 10);
   assert.ok(agg.missing.includes('Cases Currently In Progress'));
   assert.ok(agg.missing.includes('Daily Booking Report - Nadine'));
+  assert.ok(agg.missing.includes('MTD Booked Daily Update'));
 });
 
 test('email copy has no em dashes and no removed footer line', () => {
@@ -138,8 +144,10 @@ test("Billed (MTD) suppresses its delta when today's own MTD Total Billed report
   assert.ok(!html.includes('$89,242.46'), 'fabricated delta must not render when the report that feeds it never arrived');
 });
 
-test('Booked (MTD) accumulates from logged same-month days plus today', () => {
-  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-16' });
+test('Booked (MTD) falls back to accumulating from logged same-month days plus today when MTD Booked Daily Update is missing', () => {
+  const messagesWithoutMtdBooked = ALL_MESSAGES.filter((m) => m.subject !== 'MTD Booked Daily Update');
+  const agg = parseAndAggregate(messagesWithoutMtdBooked, { runDate: '2026-09-16' });
+  assert.ok(agg.missing.includes('MTD Booked Daily Update'));
   const history = [
     { date: '2026-09-14', company_daily_booked_value: '500' },
     { date: '2026-09-15', company_daily_booked_value: '300' },
@@ -150,4 +158,80 @@ test('Booked (MTD) accumulates from logged same-month days plus today', () => {
   // 500 + 300 (same-month history) + 8065.22 (today's real companyDailyBooked) = 8865.22.
   // The 2026-08-30 row must NOT be included (different month).
   assert.match(html, /\$8,865\.22/);
+});
+
+test('Booked/Billed (YTD) auto-accrue real daily figures logged after the verified baseline date', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-18' });
+  const history = [
+    // Same date as the baseline itself — already reflected in the
+    // verified snapshot, so it must NOT be double-counted.
+    { date: '2026-09-16', company_daily_booked_value: '1000', company_daily_billed_value: '500' },
+    // After the baseline — a real day of accrual.
+    { date: '2026-09-17', company_daily_booked_value: '2000', company_daily_billed_value: '700' },
+  ];
+  const { html } = buildEmail(agg, history);
+
+  // 363360.57 (baseline) + 2000 (09-17 only) + 8065.22 (today's real
+  // companyDailyBooked from ALL_MESSAGES) = 373425.79.
+  assert.match(html, /\$373,425\.79/);
+  // 311452.46 (baseline) + 700 (09-17 only) + 1622.74 (today's real
+  // companyDailyBilled from ALL_MESSAGES) = 313775.20.
+  assert.match(html, /\$313,775\.20/);
+  assert.match(html, /Baseline verified Sep 16, 2026 \+ daily activity since/);
+});
+
+test('Booked/Billed (YTD) show exactly the baseline, with no accrual, when run on the baseline date itself', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-16' });
+  const { html } = buildEmail(agg, []);
+
+  assert.match(html, /\$363,360\.57/);
+  assert.match(html, /\$311,452\.46/);
+});
+
+test('Booked/Billed (YTD) accrual treats a NULL company_daily_billed_value as zero (pre-billed-tracking row)', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-18' });
+  const history = [
+    { date: '2026-09-17', company_daily_booked_value: '5000', company_daily_billed_value: null },
+  ];
+  const { html } = buildEmail(agg, history);
+
+  // Booked: 363360.57 + 5000 + 8065.22 = 376425.79.
+  assert.match(html, /\$376,425\.79/);
+  // Billed: 311452.46 + 0 (NULL row contributes nothing) + 1622.74 = 313075.20.
+  assert.match(html, /\$313,075\.20/);
+});
+
+test('Booked (MTD) prefers the real MTD Booked Daily Update figure over the self-accumulated fallback when it arrives', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-16' });
+  assert.ok(!agg.missing.includes('MTD Booked Daily Update'));
+  const history = [
+    { date: '2026-09-14', company_daily_booked_value: '500' },
+    { date: '2026-09-15', company_daily_booked_value: '300' },
+  ];
+  const { html } = buildEmail(agg, history);
+
+  // The fixture's real MTD Booked Daily Update total (6935) wins over the
+  // self-accumulated 500+300+8065.22=8865.22 fallback figure.
+  assert.match(html, /\$6,935\.00/);
+  assert.ok(!html.includes('$8,865.22'));
+});
+
+test('extractDailyBookedCustomerNames pulls row-level Customer Name values, dropping the blank totals row', () => {
+  const names = extractDailyBookedCustomerNames(fixture('daily-booked-james.html'));
+  assert.deepEqual(names, ['DR BRIAN GOLD']);
+});
+
+test('extractCaseTotals reads the totals row into { count, billed, wip, value, hasData }', () => {
+  const totals = extractCaseTotals(fixture('daily-booked-james.html'));
+  assert.deepEqual(totals, { count: 1, billed: 0, wip: 117, value: 117, hasData: true });
+});
+
+test('extractCaseTotals returns a real zero with hasData:false when there is no real data', () => {
+  const totals = extractCaseTotals(fixture('daily-booked-william-nodata.html'));
+  assert.deepEqual(totals, { count: 0, billed: 0, wip: 0, value: 0, hasData: false });
+});
+
+test('extractDailyBookedCustomerNames returns an empty array when there is no real data', () => {
+  const names = extractDailyBookedCustomerNames(fixture('daily-booked-william-nodata.html'));
+  assert.deepEqual(names, []);
 });

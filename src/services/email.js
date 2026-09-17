@@ -447,38 +447,110 @@ function repReportEmail({ repName, dateLabel, monthLabel, lastMonthLabel, week, 
 // template on purpose: a daily operational checklist (who submitted a
 // case today, who didn't, weekly new-doctor goal progress), not a
 // performance narrative with tiers/coaching suggestions.
-function salesRepDailyReportEmail({ repName, dateLabel, doctors, totalCount, submittedCount, notSubmittedCount, goal, test }) {
+function salesRepDailyReportEmail({ repName, dateLabel, doctors, totalCount, submittedCount, notSubmittedCount, goal, test, bookedThisWeek }) {
   const { ink, slate, teal, deep, success } = BRAND
   const hairline = '#dcebe9'
   const danger = '#b91c1c'
-
-  const statRow = (cells) => `
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-      <tr>
-        ${cells.map((c) => `
-        <td width="${Math.floor(100 / cells.length)}%" style="text-align:center;padding:0 6px">
-          <p style="margin:0;font-family:${FONT_DATA};font-size:21px;font-weight:500;color:${c.color || ink};letter-spacing:-.01em">${c.val}</p>
-          <p style="margin:6px 0 0;font-family:${FONT_DATA};font-size:9.5px;color:${slate};text-transform:uppercase;letter-spacing:.08em">${c.label}</p>
-        </td>`).join('')}
-      </tr>
-    </table>`
+  // Quote picked by day-of-month, same pattern already used for this
+  // codebase's other daily-cadence email (noActionLeadEmail below) — tone
+  // varies day to day without needing per-rep state.
+  const quote = PUSH_QUOTES[new Date().getDate() % PUSH_QUOTES.length]
 
   const sectionLabel = (text) => `<p style="margin:0 0 14px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${slate}">${text}</p>`
 
-  const doctorRows = doctors.map((d, i) => `
+  // Each figure gets its own card (not one shared 3-column strip) — same
+  // "one figure, one card" rule as the Leadership Report, so a reader
+  // never has to parse which number belongs to which label.
+  const statCard = (label, val, tint, border, color) => `
+    <div style="background:${tint};border:1px solid ${border};border-radius:14px;padding:14px 10px;text-align:center">
+      <p style="margin:0 0 5px;font-family:${FONT_DATA};font-size:19px;font-weight:500;color:${color}">${val}</p>
+      <p style="margin:0;font-family:${FONT_DATA};font-size:8.5px;color:${slate};text-transform:uppercase;letter-spacing:.06em">${label}</p>
+    </div>`
+
+  const cardRow = (cards) => {
+    const width = (100 / cards.length - 2).toFixed(2)
+    return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      ${cards.map((c, i) => `${i > 0 ? `<td width="2%"></td>` : ''}<td width="${width}%" style="vertical-align:top">${c}</td>`).join('')}
+    </tr></table>`
+  }
+
+  // 0-1 red (behind pace), 2-3 yellow (making progress), 4+ green (on/near
+  // goal) — same red/yellow/green tiers this template already uses
+  // elsewhere (the amber status-ribbon warning, the green/red submitted
+  // pills), just applied to a count instead of a boolean.
+  const newDoctorTier = (count) => count <= 1
+    ? { tint: '#fef2f2', border: '#fecaca', color: danger }
+    : count <= 3
+      ? { tint: '#fefaf1', border: '#fde68a', color: '#b45309' }
+      : { tint: '#ecfdf5', border: '#a7f3d0', color: success }
+  const newDoctorCardColor = newDoctorTier(goal.current)
+
+  // A small rounded badge beside each doctor's name, replacing the old
+  // two-list (Submitted / Did not Submit) split with one unified list —
+  // easier to scan the whole roster at a glance, status right next to
+  // each name instead of inferred from which section it's in.
+  const statusPill = (submittedToday) => submittedToday
+    ? `<span style="display:inline-block;padding:3px 10px;border-radius:999px;background:#ecfdf5;border:1px solid #a7f3d0;font-family:${FONT_DATA};font-size:9.5px;font-weight:500;color:${success};text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">Submitted</span>`
+    : `<span style="display:inline-block;padding:3px 10px;border-radius:999px;background:#fef2f2;border:1px solid #fecaca;font-family:${FONT_DATA};font-size:9.5px;font-weight:500;color:${danger};text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">Not Submitted</span>`
+
+  const doctorListItem = (d) => `
     <tr>
-      <td style="padding:11px 0;${i > 0 ? `border-top:1px solid ${hairline}` : ''}">
-        <p style="margin:0;font-size:13.5px;font-weight:600;color:${ink}">${d.doctor_name}</p>
-        ${d.clinic_name ? `<p style="margin:2px 0 0;font-size:12px;color:${slate}">${d.clinic_name}</p>` : ''}
+      <td style="padding:10px 0;${d.isFirst ? '' : `border-top:1px solid ${hairline}`}">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td style="vertical-align:middle">
+            <p style="margin:0;font-size:13.5px;font-weight:600;color:${ink}">${d.doctor_name}</p>
+            ${d.clinic_name ? `<p style="margin:2px 0 0;font-size:12px;color:${slate}">${d.clinic_name}</p>` : ''}
+          </td>
+          <td width="1%" style="vertical-align:middle;text-align:right;padding-left:12px">${statusPill(d.submitted_this_week)}</td>
+        </tr></table>
       </td>
-      <td style="padding:11px 0;${i > 0 ? `border-top:1px solid ${hairline};` : ''}text-align:right;white-space:nowrap">
-        ${d.submitted_today
-          ? `<span style="font-family:${FONT_DATA};font-size:11px;font-weight:500;color:${success};background:#ecfdf5;border-radius:999px;padding:4px 10px">&#9650; Submitted</span>`
-          : `<span style="font-family:${FONT_DATA};font-size:11px;font-weight:500;color:${danger};background:#fef2f2;border-radius:999px;padding:4px 10px">&#9660; Not submitted</span>`}
-      </td>
-    </tr>`).join('')
+    </tr>`
+
+  // No cap/limit anywhere in computeDailyDoctorStatus's query, so this is
+  // every assigned doctor, not a top-N sample.
+  const activeDoctorsSection = doctors.length > 0 ? `
+    <div style="padding:26px 36px 0">
+      <p style="margin:0 0 12px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${slate}">Active Doctors List &nbsp;(${doctors.length})</p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${doctors.map((d, i) => doctorListItem({ ...d, isFirst: i === 0 })).join('')}</table>
+    </div>` : ''
 
   const goalPct = goal.target > 0 ? Math.min(Math.round((goal.current / goal.target) * 100), 100) : 0
+
+  // Sourced from Evident's own per-rep "Daily Booked Cases" reports,
+  // summed across this week (Monday through today) — the same per-day
+  // figures the Leadership Report reads, so these numbers can never drift
+  // from what leadership sees. Widened from "today only" to "this week"
+  // 2026-09-17, matching the same change to Submitted status, so both
+  // sections describe the same window. Shows real $0s on a week with
+  // genuinely no bookings (a report still arrived, it just had nothing in
+  // it) — only omitted entirely when no report arrived at all this week,
+  // or this rep isn't one Evident tracks. See
+  // fetchRepBookedThisWeek's own comment for how it tells those two cases
+  // apart.
+  const bookedThisWeekSection = bookedThisWeek && bookedThisWeek.hasData ? `
+    <div style="padding:22px 36px 0">
+      ${sectionLabel("This Week's Cases")}
+      ${cardRow([
+        statCard('Cases Booked', bookedThisWeek.count, '#f7faf9', '#e5e7eb', ink),
+        statCard('Booked Value', '$' + Number(bookedThisWeek.value).toLocaleString(), '#f7faf9', '#e5e7eb', ink),
+        statCard('Billed', '$' + Number(bookedThisWeek.billed).toLocaleString(), '#f7faf9', '#e5e7eb', ink),
+      ])}
+    </div>` : ''
+
+  // Status ribbon carries two things: which real doctors are outstanding
+  // (not a generic reminder), and a concrete "1% today" action grounded in
+  // that same real data — reusing the "1% rule" framing from the weekly
+  // report's pushHeadline(), scaled down to a single daily-appropriate
+  // move rather than a tiered 2-3 item list.
+  const statusRibbon = totalCount === 0 ? '' : notSubmittedCount > 0
+    ? `<div style="margin:30px 36px 0;padding:16px 19px;background:#fefaf1;border:1px solid #fde68a;border-left:3px solid #b45309;border-radius:4px 12px 12px 4px">
+         <p style="margin:0 0 6px;font-size:13.5px;line-height:1.55;color:${ink}"><b>${repName}</b>, ${notSubmittedCount} of ${totalCount} doctor${totalCount === 1 ? '' : 's'} ${notSubmittedCount === 1 ? "hasn't" : "haven't"} submitted a case this week yet.</p>
+         <p style="margin:0;font-size:12.5px;line-height:1.5;color:${slate}">Your 1% today: reach out to the ${notSubmittedCount} doctor${notSubmittedCount === 1 ? '' : 's'} below before end of day. A quick check-in is often all it takes.</p>
+       </div>`
+    : `<div style="margin:30px 36px 0;padding:16px 19px;background:#ecfdf5;border:1px solid #a7f3d0;border-left:3px solid ${success};border-radius:4px 12px 12px 4px">
+         <p style="margin:0 0 6px;font-size:13.5px;line-height:1.55;color:${ink}">All caught up, <b>${repName}</b>. Every doctor has submitted this week.</p>
+         <p style="margin:0;font-size:12.5px;line-height:1.5;color:${slate}">Your 1% today: use the extra time to work toward this week's new-doctor goal (${goal.current} of ${goal.target} so far).</p>
+       </div>`
 
   return `<!DOCTYPE html>
 <html>
@@ -504,37 +576,51 @@ function salesRepDailyReportEmail({ repName, dateLabel, doctors, totalCount, sub
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
     <tr>
       <td bgcolor="${teal}" style="background-color:${teal};background-image:linear-gradient(135deg,${teal},${deep});padding:34px 36px 28px">
-        <h1 style="color:#fff;margin:0;font-family:${FONT_DISPLAY};font-size:28px;font-weight:700;letter-spacing:-.01em">Daily Sales Report</h1>
+        <h1 style="color:#fff;margin:0;font-family:${FONT_DISPLAY};font-size:30px;font-weight:700;letter-spacing:-.01em">Daily Sales Report</h1>
+        <p style="color:rgba(255,255,255,.92);margin:10px 0 0;font-family:${FONT_DISPLAY};font-size:16px;font-style:italic;font-weight:600">"${quote}"</p>
         <p style="color:rgba(255,255,255,.72);margin:12px 0 0;font-size:13px">${repName} &nbsp;·&nbsp; ${dateLabel}</p>
       </td>
     </tr>
   </table>
 
-  <div style="padding:30px 36px 0">
-    ${statRow([
-      { label: 'Doctors Assigned', val: totalCount },
-      { label: 'Submitted Today', val: submittedCount, color: submittedCount > 0 ? success : undefined },
-      { label: 'Not Submitted', val: notSubmittedCount, color: notSubmittedCount > 0 ? danger : undefined },
+  ${statusRibbon}
+
+  <div style="padding:26px 36px 0">
+    ${cardRow([
+      statCard('Assigned', totalCount, '#f7faf9', '#e5e7eb', ink),
+      statCard('New Doctors This Week', goal.current, newDoctorCardColor.tint, newDoctorCardColor.border, newDoctorCardColor.color),
     ])}
   </div>
 
-  <div style="margin:30px 36px 0;padding:20px 22px;background:${BRAND.tealMist};border-radius:16px">
+  ${bookedThisWeekSection}
+
+  <div style="margin:26px 36px 0;padding:20px 22px;background:${BRAND.tealMist};border:1px solid rgba(6,186,190,.2);border-radius:16px">
     ${sectionLabel('Weekly Goal — New Doctors')}
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-      <td><p style="margin:0;font-family:${FONT_DATA};font-size:22px;font-weight:500;color:${ink}">${goal.current} <span style="font-size:14px;color:${slate}">of ${goal.target}</span></p></td>
-      <td style="text-align:right"><p style="margin:0;font-family:${FONT_DATA};font-size:13px;color:${teal}">${goalPct}%</p></td>
+      <td><p style="margin:0;font-family:${FONT_DATA};font-size:24px;font-weight:500;color:${ink}">${goal.current} <span style="font-size:14px;color:${slate}">of ${goal.target} doctors this week</span></p></td>
+      <td style="text-align:right"><p style="margin:0;font-family:${FONT_DATA};font-size:14px;color:${teal}">${goalPct}%</p></td>
     </tr></table>
-    <div style="margin-top:10px;height:6px;background:#fff;border-radius:999px;overflow:hidden">
+    <div style="margin-top:12px;height:8px;background:#fff;border:1px solid rgba(6,186,190,.25);border-radius:999px;overflow:hidden">
       <div style="width:${goalPct}%;height:100%;background:${teal}"></div>
     </div>
   </div>
 
-  <div style="padding:30px 36px 36px">
+  ${activeDoctorsSection}
+  ${doctors.length === 0 ? `
+  <div style="padding:26px 36px 0">
     ${sectionLabel('Your Doctors')}
-    ${doctors.length === 0
-      ? `<p style="margin:0;font-size:13px;color:${slate}">No doctors assigned yet.</p>`
-      : `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${doctorRows}</table>`}
-  </div>
+    <p style="margin:0;font-size:13px;color:${slate}">No doctors assigned yet.</p>
+  </div>` : ''}
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:30px 0 0">
+    <tr><td style="padding:0 36px 36px">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td bgcolor="${teal}" style="background-color:${teal};background-image:linear-gradient(135deg,${teal},${deep});border-radius:12px">
+          <a href="${primaryFrontendUrl()}/clients" style="display:inline-block;padding:12px 26px;color:#fff;text-decoration:none;font-weight:600;font-size:13.5px;font-family:${FONT_BODY}">View My Doctors →</a>
+        </td>
+      </tr></table>
+    </td></tr>
+  </table>
 
   <div style="background:${BRAND.tealMist};padding:18px 36px;font-size:11.5px;color:${slate};border-top:1px solid ${hairline}">
     Aim Dental Laboratory CRM &nbsp;·&nbsp; Daily report for ${repName}

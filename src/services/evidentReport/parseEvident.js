@@ -53,6 +53,7 @@ function classify(subject) {
   if (/^Daily Booking Report\s*-\s*Nadine/i.test(s)) return { type: 'companyDailyBooked' };
   if (/^Daily Billed Report\s*-\s*Nadine/i.test(s)) return { type: 'companyDailyBilled' };
   if (/^Daily MTD Total Billed/i.test(s)) return { type: 'companyMtdBilled' };
+  if (/^MTD Booked Daily Update/i.test(s)) return { type: 'companyMtdBooked' };
   return { type: 'other' };
 }
 
@@ -61,6 +62,46 @@ function classify(subject) {
 function findCol(headers, needle) {
   const lower = needle.toLowerCase();
   return headers.find((h) => h.toLowerCase().includes(lower));
+}
+
+// Row-level (not totals-row) customer names from a "Daily Booked Cases"
+// email — used by salesRepDailyReport.js's new-doctor detection, which
+// needs to know WHO booked, not just the day's combined totals every
+// other parser in this file cares about. The totals row has a blank
+// Customer Name (only its numeric columns are filled in), so it drops out
+// on its own via the final filter — sliced off explicitly too, for
+// clarity, matching how every other handler in this file treats the last
+// row as the totals row.
+function extractDailyBookedCustomerNames(html) {
+  const table = parseTable(html);
+  if (!table || table.rows.length === 0) return [];
+  const { headers, rows } = table;
+  const nameCol = findCol(headers, 'Customer Name') || findCol(headers, 'Customer');
+  if (!nameCol) return [];
+  return rows
+    .slice(0, -1)
+    .map((row) => rowToObj(headers, row)[nameCol])
+    .filter(Boolean);
+}
+
+// Shared by dailyBooked/mtdBooked/ytdBooked parsing below AND by
+// salesRepDailyReport.js's week-scoped booked/billed summary — a single
+// email's totals row as { count, billed, wip, value, hasData }. "value"
+// is derived as billed + wip rather than read from a "Sales Value
+// (Total)" column, because the Daily report doesn't include that column
+// at all (only MTD/YTD do) - billed+wip always equals it anyway (verified
+// against real Evident data).
+function extractCaseTotals(html) {
+  const table = parseTable(html);
+  if (!table || table.rows.length === 0) return { count: 0, billed: 0, wip: 0, value: 0, hasData: false };
+  const { headers, rows } = table;
+  const totalsRow = rowToObj(headers, rows[rows.length - 1]);
+  const countCol = findCol(headers, 'Cases (Total)');
+  const billedCol = findCol(headers, 'Total Billed');
+  const wipCol = findCol(headers, 'Total WIP');
+  const billed = toNum(totalsRow[billedCol]);
+  const wip = toNum(totalsRow[wipCol]);
+  return { count: toNum(totalsRow[countCol]), billed, wip, value: billed + wip, hasData: true };
 }
 
 const EXPECTED = [
@@ -74,6 +115,7 @@ const EXPECTED = [
   { type: 'companyDailyBooked', rep: null, label: 'Daily Booking Report - Nadine' },
   { type: 'companyDailyBilled', rep: null, label: 'Daily Billed Report - Nadine' },
   { type: 'companyMtdBilled', rep: null, label: 'Daily MTD Total Billed' },
+  { type: 'companyMtdBooked', rep: null, label: 'MTD Booked Daily Update' },
 ];
 
 /**
@@ -83,7 +125,7 @@ const EXPECTED = [
 function parseAndAggregate(messages, { runDate } = {}) {
   const found = {
     dailyBooked: {}, mtdBooked: {}, ytdBooked: {}, wip: null,
-    companyDailyBooked: null, companyDailyBilled: null, companyMtdBilled: null,
+    companyDailyBooked: null, companyDailyBilled: null, companyMtdBilled: null, companyMtdBooked: null,
   };
 
   for (const msg of messages) {
@@ -155,44 +197,27 @@ function parseAndAggregate(messages, { runDate } = {}) {
       continue;
     }
 
-    if (cls.type === 'ytdBooked') {
-      let rep = { count: 0, billed: 0, wip: 0, value: 0, hasData: false };
-      if (table && table.rows.length > 0) {
-        const { headers, rows } = table;
-        const totalsRow = rowToObj(headers, rows[rows.length - 1]);
-        const countCol = findCol(headers, 'Cases (Total)');
-        const billedCol = findCol(headers, 'Total Billed');
-        const wipCol = findCol(headers, 'Total WIP');
-        const billed = toNum(totalsRow[billedCol]);
-        const wip = toNum(totalsRow[wipCol]);
-        rep = { count: toNum(totalsRow[countCol]), billed, wip, value: billed + wip, hasData: true };
-      }
-      found.ytdBooked[cls.rep] = rep;
+    // Company-wide (Aim + Kings Highway) MTD Booked total — same shape as
+    // companyMtdBilled above (grand total in the last row, under "Sales
+    // Value (Total)"). New as of 2026-09-16; before this, no automated
+    // report gave a true company-wide MTD Booked figure at all, so
+    // buildReport.js fell back to self-accumulating from daily totals.
+    if (cls.type === 'companyMtdBooked') {
+      if (!table || table.rows.length === 0) { found.companyMtdBooked = 0; continue; }
+      const { headers, rows } = table;
+      const totalsRow = rowToObj(headers, rows[rows.length - 1]);
+      const totalCol = findCol(headers, 'Sales Value (Total)');
+      found.companyMtdBooked = toNum(totalsRow[totalCol]);
       continue;
     }
 
-    // dailyBooked / mtdBooked. "value" is derived as billed + wip rather than
-    // read from a "Sales Value (Total)" column, because the Daily report
-    // doesn't include that column at all (only MTD/YTD do) - billed+wip
-    // always equals it anyway (verified against real Evident data).
-    let rep = { count: 0, billed: 0, wip: 0, value: 0, hasData: false };
-    if (table && table.rows.length > 0) {
-      const { headers, rows } = table;
-      const totalsRow = rowToObj(headers, rows[rows.length - 1]);
-      const countCol = findCol(headers, 'Cases (Total)');
-      const billedCol = findCol(headers, 'Total Billed');
-      const wipCol = findCol(headers, 'Total WIP');
-      const billed = toNum(totalsRow[billedCol]);
-      const wip = toNum(totalsRow[wipCol]);
-      rep = {
-        count: toNum(totalsRow[countCol]),
-        billed,
-        wip,
-        value: billed + wip,
-        hasData: true,
-      };
+    if (cls.type === 'ytdBooked') {
+      found.ytdBooked[cls.rep] = extractCaseTotals(msg.html || '');
+      continue;
     }
-    found[cls.type][cls.rep] = rep;
+
+    // dailyBooked / mtdBooked.
+    found[cls.type][cls.rep] = extractCaseTotals(msg.html || '');
   }
 
   const zero = { count: 0, billed: 0, wip: 0, value: 0, hasData: false };
@@ -215,6 +240,7 @@ function parseAndAggregate(messages, { runDate } = {}) {
     if (e.type === 'companyDailyBooked') return found.companyDailyBooked === null;
     if (e.type === 'companyDailyBilled') return found.companyDailyBilled === null;
     if (e.type === 'companyMtdBilled') return found.companyMtdBilled === null;
+    if (e.type === 'companyMtdBooked') return found.companyMtdBooked === null;
     return !found[e.type][e.rep];
   }).map((e) => e.label);
 
@@ -248,8 +274,9 @@ function parseAndAggregate(messages, { runDate } = {}) {
     companyDailyBookedCount: found.companyDailyBookedCount || 0,
     companyDailyBilled: found.companyDailyBilled || 0,
     companyMtdBilled: found.companyMtdBilled || 0,
+    companyMtdBooked: found.companyMtdBooked || 0,
     missing,
   };
 }
 
-module.exports = { parseAndAggregate, parseTable, classify };
+module.exports = { parseAndAggregate, parseTable, classify, toNum, findCol, extractDailyBookedCustomerNames, extractCaseTotals };
