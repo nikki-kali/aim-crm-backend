@@ -170,9 +170,10 @@ async function upsertBilledRow(row, customerCode, dateStr) {
 // fetchEvidentEmailsInRange's own per-message `date` (already computed
 // correctly via internalDate converted to America/New_York) for the
 // precise match below. Critically, this must NOT be `newer_than:1d` —
-// that only ever finds yesterday's email, which is fine for the cron job
-// (always "today") but would silently return nothing for every
-// historical date the backfill script (Task 5) asks for.
+// that only ever finds yesterday's email, which would happen to work for
+// the cron job (which asks for yesterday's date, see jobs/evidentCrmSync.js)
+// but would silently return nothing for every historical date the backfill
+// script (Task 5) asks for.
 function gmailDateBounds(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number)
   const after = new Date(Date.UTC(y, m - 1, d))
