@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { parseAndAggregate, extractDailyBookedCustomerNames, extractCaseTotals } = require('../../src/services/evidentReport/parseEvident');
+const { parseAndAggregate, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows } = require('../../src/services/evidentReport/parseEvident');
 const { buildEmail } = require('../../src/services/evidentReport/buildReport');
 
 function fixture(name) {
@@ -229,6 +229,27 @@ test('extractCaseTotals reads the totals row into { count, billed, wip, value, h
 test('extractCaseTotals returns a real zero with hasData:false when there is no real data', () => {
   const totals = extractCaseTotals(fixture('daily-booked-william-nodata.html'));
   assert.deepEqual(totals, { count: 0, billed: 0, wip: 0, value: 0, hasData: false });
+});
+
+test('extractBookingRows reads every real row from Daily Booking Report - Nadine, dropping the totals row', () => {
+  const rows = extractBookingRows(fixture('company-daily-booked-nadine.html'));
+  assert.equal(rows.length, 94); // 95 total rows in the fixture minus 1 totals row
+  assert.deepEqual(rows[0], { ref: '5569', customerName: 'SUNSET TERRACE', value: 0, salesperson: '' });
+  // Real row with a salesperson attributed — the last real data row in the fixture.
+  assert.deepEqual(rows[rows.length - 1], { ref: '5663', customerName: 'Dr. ALBERTO GONZALEZ', value: 0, salesperson: 'william' });
+});
+
+test('extractBilledRows reads every real row from Daily Billed Report - Nadine, dropping the totals row', () => {
+  const rows = extractBilledRows(fixture('company-daily-billed-nadine.html'));
+  assert.equal(rows.length, 34); // 35 total rows in the fixture minus 1 totals row
+  assert.deepEqual(rows[0], { ref: '4067', customerName: 'WYCKOFF HOSPITAL', value: 102.14, billedValue: 102.14, salesperson: '' });
+  // Real row with a salesperson attributed and a blank (unbilled-this-row) billed value.
+  assert.deepEqual(rows[rows.length - 1], { ref: '5663', customerName: 'Dr. ALBERTO GONZALEZ', value: 0, billedValue: 0, salesperson: 'william' });
+});
+
+test('extractBookingRows / extractBilledRows return an empty array when there is no real data', () => {
+  assert.deepEqual(extractBookingRows('<TABLE><TR><TD>No data was returned, Please double check your filters</TABLE>'), []);
+  assert.deepEqual(extractBilledRows('<TABLE><TR><TD>No data was returned, Please double check your filters</TABLE>'), []);
 });
 
 test('extractDailyBookedCustomerNames returns an empty array when there is no real data', () => {

@@ -104,6 +104,63 @@ function extractCaseTotals(html) {
   return { count: toNum(totalsRow[countCol]), billed, wip, value: billed + wip, hasData: true };
 }
 
+// Row-level detail from "Daily Booking Report - Nadine" — every real
+// booking event that day, company-wide (not just James'/William's own
+// doctors, unlike extractDailyBookedCustomerNames above). Used by
+// evidentCrmSync.js to create/update individual CRM `cases` rows, not
+// just a combined total. Customer Name is trimmed (Evident's own HTML
+// pads it with spaces); Salesperson is '' for the unattributed "N/A"
+// bucket, a lowercase first name ('james'/'william') when attributed.
+function extractBookingRows(html) {
+  const table = parseTable(html);
+  if (!table || table.rows.length === 0) return [];
+  const { headers, rows } = table;
+  const refCol = findCol(headers, 'Ref');
+  const nameCol = findCol(headers, 'Customer Name');
+  const valueCol = findCol(headers, 'Sales Value (Total)');
+  const salespersonCol = findCol(headers, 'Salesperson');
+  return rows
+    .slice(0, -1) // drop the totals row (blank Ref)
+    .map((row) => {
+      const obj = rowToObj(headers, row);
+      return {
+        ref: (obj[refCol] || '').trim(),
+        customerName: (obj[nameCol] || '').trim(),
+        value: toNum(obj[valueCol]),
+        salesperson: (obj[salespersonCol] || '').trim(),
+      };
+    })
+    .filter((r) => r.ref);
+}
+
+// Row-level detail from "Daily Billed Report - Nadine" — every real
+// billing event that day, company-wide. Same shape as
+// extractBookingRows above plus billedValue, since this report's whole
+// purpose is telling us how much of each case's value just got billed.
+function extractBilledRows(html) {
+  const table = parseTable(html);
+  if (!table || table.rows.length === 0) return [];
+  const { headers, rows } = table;
+  const refCol = findCol(headers, 'Ref');
+  const nameCol = findCol(headers, 'Customer Name');
+  const valueCol = findCol(headers, 'Sales Value (Total)');
+  const billedCol = findCol(headers, 'Sales Value (Total Billed)');
+  const salespersonCol = findCol(headers, 'Salesperson');
+  return rows
+    .slice(0, -1)
+    .map((row) => {
+      const obj = rowToObj(headers, row);
+      return {
+        ref: (obj[refCol] || '').trim(),
+        customerName: (obj[nameCol] || '').trim(),
+        value: toNum(obj[valueCol]),
+        billedValue: toNum(obj[billedCol]),
+        salesperson: (obj[salespersonCol] || '').trim(),
+      };
+    })
+    .filter((r) => r.ref);
+}
+
 const EXPECTED = [
   { type: 'dailyBooked', rep: 'james', label: "Daily Booked Cases - James' Doctors" },
   { type: 'dailyBooked', rep: 'william', label: "Daily Booked Cases - William's Doctors" },
@@ -279,4 +336,4 @@ function parseAndAggregate(messages, { runDate } = {}) {
   };
 }
 
-module.exports = { parseAndAggregate, parseTable, classify, toNum, findCol, extractDailyBookedCustomerNames, extractCaseTotals };
+module.exports = { parseAndAggregate, parseTable, classify, toNum, findCol, rowToObj, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows };
