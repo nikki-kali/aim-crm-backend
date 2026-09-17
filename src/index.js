@@ -4,6 +4,7 @@ const { startScheduler } = require('./jobs/scheduler')
 const { startMediaCleanupScheduler } = require('./jobs/mediaCleanup')
 const { startSocialTokenRefreshScheduler } = require('./jobs/socialTokenRefresh')
 const { startEvidentReportScheduler } = require('./jobs/evidentReport')
+const { startEvidentCrmSyncScheduler } = require('./jobs/evidentCrmSync')
 const { startSalesRepDailyReportScheduler } = require('./jobs/salesRepDailyReport')
 
 // Mounted here rather than in app.js — that file has real in-progress
@@ -30,4 +31,5 @@ app.listen(PORT, () => {
   startSocialTokenRefreshScheduler()
   startEvidentReportScheduler()
   startSalesRepDailyReportScheduler()
+  startEvidentCrmSyncScheduler()
 })
