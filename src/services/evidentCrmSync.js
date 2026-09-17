@@ -82,7 +82,13 @@ async function upsertBookingRow(row, customerCode, dateStr) {
 
   const repId = await resolveRepId(row.salesperson)
   const { clientName, created: clientCreated } = await resolveClientName(row.customerName, customerCode, repId)
-  if (!clientName) return { created: false, clientName: null, clientCreated: false }
+  // resolveClientName couldn't resolve a doctor name for this row (blank
+  // customerName) — a real, trackable drop, distinct from the
+  // already-exists no-op above (which also has clientName: null but isn't
+  // a skip). Flagged explicitly so syncCasesForDate's summary.skipped
+  // stays an honest count of rows that never became a case, rather than
+  // conflating it with idempotent re-runs.
+  if (!clientName) return { created: false, clientName: null, clientCreated: false, skipped: true }
 
   const brand = brandFromCustomerCode(customerCode)
   await db.query(
@@ -116,7 +122,10 @@ async function upsertBilledRow(row, customerCode, dateStr) {
 
   const repId = await resolveRepId(row.salesperson)
   const { clientName, created: clientCreated } = await resolveClientName(row.customerName, customerCode, repId)
-  if (!clientName) return { created: false, updated: false, clientName: null, clientCreated: false }
+  // Same distinction as upsertBookingRow above: this is a genuine drop
+  // (blank doctor name), not the already-exists/updated no-op handled
+  // above, so it's the one flagged into summary.skipped.
+  if (!clientName) return { created: false, updated: false, clientName: null, clientCreated: false, skipped: true }
 
   const brand = brandFromCustomerCode(customerCode)
   await db.query(
@@ -130,11 +139,17 @@ async function upsertBilledRow(row, customerCode, dateStr) {
 
 // The one function this whole feature is built around — fetches
 // `dateStr`'s two company-wide Evident reports, processes every row, and
-// returns a plain summary. Never throws over a single bad row (skipped
-// and logged into the returned `errors` array instead) — one malformed
-// row must not abort the rest of the day, matching this codebase's
+// returns a plain summary: { date, casesCreated, casesUpdated,
+// clientsCreated, skipped, errors }. Never throws over a single bad row
+// (logged into the returned `errors` array instead) — one malformed row
+// must not abort the rest of the day, matching this codebase's
 // established best-effort-per-item pattern (see
-// sendAllSalesRepDailyReports).
+// sendAllSalesRepDailyReports). `skipped` counts rows that resolved to no
+// usable doctor name (see resolveClientName/upsertBookingRow/
+// upsertBilledRow's `skipped: true`) — a real, trackable drop, so
+// casesCreated + casesUpdated + skipped accounts for every row a
+// reconciliation run (Task 6) would want to check against the source
+// email, distinct from an already-exists no-op (which isn't a drop).
 // Gmail's `after:`/`before:` take YYYY/MM/DD and are date-only in the
 // account's own timezone — rather than get that boundary exactly right,
 // this brackets one full day of slack on each side and relies on
@@ -155,7 +170,7 @@ function gmailDateBounds(dateStr) {
 }
 
 async function syncCasesForDate(dateStr) {
-  const summary = { date: dateStr, casesCreated: 0, casesUpdated: 0, clientsCreated: 0, errors: [] }
+  const summary = { date: dateStr, casesCreated: 0, casesUpdated: 0, clientsCreated: 0, skipped: 0, errors: [] }
   const touchedClientNames = new Set()
 
   const dateQuery = gmailDateBounds(dateStr)
@@ -189,6 +204,7 @@ async function syncCasesForDate(dateStr) {
           if (result.clientName) touchedClientNames.add(result.clientName)
         }
         if (result.clientCreated) summary.clientsCreated++
+        if (result.skipped) summary.skipped++
       } catch (err) {
         summary.errors.push({ ref: row.ref, message: err.message })
       }
@@ -214,6 +230,7 @@ async function syncCasesForDate(dateStr) {
         if (result.updated) summary.casesUpdated++
         if (result.clientName) touchedClientNames.add(result.clientName)
         if (result.clientCreated) summary.clientsCreated++
+        if (result.skipped) summary.skipped++
       } catch (err) {
         summary.errors.push({ ref: row.ref, message: err.message })
       }
