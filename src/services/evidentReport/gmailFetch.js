@@ -1,5 +1,17 @@
 const { google } = require('googleapis')
 
+// Real per-message delay between fetches in a wide-range pull — Gmail's
+// per-minute quota was hit during design investigation for this feature
+// (fetching 365 days' worth of messages one at a time). 300ms is a
+// starting point, not load-tested at scale; tune upward if the backfill
+// script (scripts/backfill-evident-crm-sync.js) still hits quota errors
+// in practice.
+const THROTTLE_MS = 300
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 // Read-only Gmail fetch, ported from the standalone evident-report-project's
 // gmail.js with its send half removed entirely (sending now goes through
 // this repo's existing services/email.js instead of the Gmail API) — so
@@ -92,8 +104,9 @@ async function fetchEvidentEmailsInRange(extraQuery) {
     const { subject, html } = extractSubjectAndHtml(res.data)
     const date = new Date(Number(res.data.internalDate)).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
     messages.push({ subject, html, date })
+    await sleep(THROTTLE_MS)
   }
   return messages
 }
 
-module.exports = { fetchEvidentEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml }
+module.exports = { fetchEvidentEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }
