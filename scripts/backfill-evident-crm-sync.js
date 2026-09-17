@@ -32,16 +32,22 @@ function yesterdayEasternDateString() {
   return addDays(today, -1)
 }
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
 async function main() {
   const { from, to } = parseArgs()
-  if (!from) {
+  // Zero-padded YYYY-MM-DD only — a typo like --to=2026-9-5 would
+  // otherwise compare incorrectly against the zero-padded date strings
+  // addDays() generates below, and could run for ~100 pointless extra
+  // days before anyone noticed.
+  if (!from || !DATE_RE.test(from) || (to && !DATE_RE.test(to))) {
     console.error('Usage: node scripts/backfill-evident-crm-sync.js --from=YYYY-MM-DD [--to=YYYY-MM-DD]')
     process.exit(1)
   }
   const endDate = to || yesterdayEasternDateString()
 
   console.log(`Backfilling Evident CRM sync from ${from} through ${endDate}...`)
-  const totals = { casesCreated: 0, casesUpdated: 0, clientsCreated: 0, errors: 0 }
+  const totals = { casesCreated: 0, casesUpdated: 0, clientsCreated: 0, skipped: 0, errors: 0 }
   const failedDates = []
 
   let cur = from
@@ -51,8 +57,9 @@ async function main() {
       totals.casesCreated += summary.casesCreated
       totals.casesUpdated += summary.casesUpdated
       totals.clientsCreated += summary.clientsCreated
+      totals.skipped += summary.skipped
       totals.errors += summary.errors.length
-      console.log(`${cur}: +${summary.casesCreated} cases created, ${summary.casesUpdated} updated, +${summary.clientsCreated} clients created, ${summary.errors.length} row errors`)
+      console.log(`${cur}: +${summary.casesCreated} cases created, ${summary.casesUpdated} updated, +${summary.clientsCreated} clients created, ${summary.skipped} skipped, ${summary.errors.length} row errors`)
       if (summary.errors.length > 0) {
         console.log(`  row errors: ${JSON.stringify(summary.errors)}`)
       }
@@ -65,11 +72,11 @@ async function main() {
   }
 
   console.log('\n--- Backfill complete ---')
-  console.log(`Total: ${totals.casesCreated} cases created, ${totals.casesUpdated} updated, ${totals.clientsCreated} clients created, ${totals.errors} row errors`)
+  console.log(`Total: ${totals.casesCreated} cases created, ${totals.casesUpdated} updated, ${totals.clientsCreated} clients created, ${totals.skipped} skipped, ${totals.errors} row errors`)
   if (failedDates.length > 0) {
     console.log(`Dates that failed entirely (retry these individually with --from=X --to=X): ${failedDates.join(', ')}`)
   }
-  process.exit(0)
+  process.exit(failedDates.length ? 1 : 0)
 }
 
 main().catch((err) => {

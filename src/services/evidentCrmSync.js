@@ -113,9 +113,18 @@ async function upsertBilledRow(row, customerCode, dateStr) {
   const wip = Math.max(row.value - row.billedValue, 0)
 
   if (existing.rows[0]) {
+    // value must be refreshed here too, not just billed_value/wip_value —
+    // syncClientRevenue (and every revenue KPI in this codebase) sums
+    // cases.value, never billed_value. Booking rows are frequently booked
+    // at $0 (Evident prices them later), so without this a booked-at-$0
+    // case that's later billed for real money would stay frozen at $0
+    // revenue forever. row.value is the billed report's own "Sales Value
+    // (Total)" column, which per the real fixtures always equals
+    // billed + wip — matches the existing manual import-evident route's
+    // own update branch (routes/cases.js, value=$6).
     await db.query(
-      `UPDATE cases SET billed_value=$1, wip_value=$2, status=$3, updated_at=NOW() WHERE id=$4`,
-      [row.billedValue, wip, status, existing.rows[0].id]
+      `UPDATE cases SET value=$1, billed_value=$2, wip_value=$3, status=$4, updated_at=NOW() WHERE id=$5`,
+      [row.value, row.billedValue, wip, status, existing.rows[0].id]
     )
     return { created: false, updated: true, clientName: existing.rows[0].client_name, clientCreated: false }
   }
@@ -140,16 +149,21 @@ async function upsertBilledRow(row, customerCode, dateStr) {
 // The one function this whole feature is built around — fetches
 // `dateStr`'s two company-wide Evident reports, processes every row, and
 // returns a plain summary: { date, casesCreated, casesUpdated,
-// clientsCreated, skipped, errors }. Never throws over a single bad row
-// (logged into the returned `errors` array instead) — one malformed row
-// must not abort the rest of the day, matching this codebase's
-// established best-effort-per-item pattern (see
+// clientsCreated, skipped, bookingReportFound, billedReportFound, errors }.
+// Never throws over a single bad row (logged into the returned `errors`
+// array instead) — one malformed row must not abort the rest of the day,
+// matching this codebase's established best-effort-per-item pattern (see
 // sendAllSalesRepDailyReports). `skipped` counts rows that resolved to no
 // usable doctor name (see resolveClientName/upsertBookingRow/
 // upsertBilledRow's `skipped: true`) — a real, trackable drop, so
 // casesCreated + casesUpdated + skipped accounts for every row a
 // reconciliation run (Task 6) would want to check against the source
 // email, distinct from an already-exists no-op (which isn't a drop).
+// bookingReportFound/billedReportFound are true only when a message
+// matching `dateStr` exactly was found at all (regardless of whether it
+// had real rows) — without them, "report never sent" and "report sent
+// but zero real rows" and "date already fully synced" all look like the
+// same all-zero summary.
 // Gmail's `after:`/`before:` take YYYY/MM/DD and are date-only in the
 // account's own timezone — rather than get that boundary exactly right,
 // this brackets one full day of slack on each side and relies on
@@ -170,15 +184,50 @@ function gmailDateBounds(dateStr) {
 }
 
 async function syncCasesForDate(dateStr) {
-  const summary = { date: dateStr, casesCreated: 0, casesUpdated: 0, clientsCreated: 0, skipped: 0, errors: [] }
+  const summary = {
+    date: dateStr,
+    casesCreated: 0,
+    casesUpdated: 0,
+    clientsCreated: 0,
+    skipped: 0,
+    bookingReportFound: false,
+    billedReportFound: false,
+    errors: [],
+  }
   const touchedClientNames = new Set()
 
   const dateQuery = gmailDateBounds(dateStr)
   const bookingMessages = await fetchEvidentEmailsInRange(`subject:"Daily Booking Report - Nadine" ${dateQuery}`)
   const billedMessages = await fetchEvidentEmailsInRange(`subject:"Daily Billed Report - Nadine" ${dateQuery}`)
 
-  const bookingMsg = bookingMessages.find((m) => m.date === dateStr)
-  const billedMsg = billedMessages.find((m) => m.date === dateStr)
+  // .filter (not .find) so a delivery-time-drift day — two messages that
+  // both land on `dateStr` in Eastern time, a phenomenon
+  // salesRepDailyReport.js already documents elsewhere in this codebase —
+  // is visible instead of one silently winning over the other with no
+  // signal. Still only the first match is actually processed; merging
+  // rows across multiple same-day messages is out of scope here.
+  const matchingBookingMsgs = bookingMessages.filter((m) => m.date === dateStr)
+  const matchingBilledMsgs = billedMessages.filter((m) => m.date === dateStr)
+  const bookingMsg = matchingBookingMsgs[0]
+  const billedMsg = matchingBilledMsgs[0]
+
+  summary.bookingReportFound = matchingBookingMsgs.length > 0
+  summary.billedReportFound = matchingBilledMsgs.length > 0
+  // Without these, "report never sent"/"report sent but zero real rows"/
+  // "date already fully synced" are indistinguishable in the summary —
+  // all three look like an identical all-zero result.
+  if (!summary.bookingReportFound) {
+    console.warn(`[evidentCrmSync] no Daily Booking Report message found for ${dateStr}`)
+  }
+  if (!summary.billedReportFound) {
+    console.warn(`[evidentCrmSync] no Daily Billed Report message found for ${dateStr}`)
+  }
+  if (matchingBookingMsgs.length > 1) {
+    console.warn(`[evidentCrmSync] ${matchingBookingMsgs.length} Daily Booking Report messages matched ${dateStr} (delivery-time drift?) — processing only the first, the rest are ignored`)
+  }
+  if (matchingBilledMsgs.length > 1) {
+    console.warn(`[evidentCrmSync] ${matchingBilledMsgs.length} Daily Billed Report messages matched ${dateStr} (delivery-time drift?) — processing only the first, the rest are ignored`)
+  }
 
   if (bookingMsg) {
     // customerCode lives in the raw table (Task 1's extractBookingRows
@@ -238,7 +287,16 @@ async function syncCasesForDate(dateStr) {
   }
 
   for (const clientName of touchedClientNames) {
-    await syncClientRevenue(clientName)
+    // Each client re-synced independently — one failure here must not
+    // abort the rest of the batch, and (unlike a row error) can't
+    // self-heal via re-running: an already-existing case is a no-op on
+    // re-run, so a client whose revenue sync failed once would never get
+    // re-added to touchedClientNames on a later day's sync.
+    try {
+      await syncClientRevenue(clientName)
+    } catch (err) {
+      summary.errors.push({ ref: null, message: `syncClientRevenue failed for ${clientName}: ${err.message}` })
+    }
   }
 
   return summary
