@@ -46,6 +46,25 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 }
 
+// Read-only check — does NOT mark the token used. Backs the GET /approve
+// confirmation page (routes/reports.js), which must be safe to load
+// repeatedly without side effects: email clients/providers routinely
+// pre-fetch links in incoming mail to scan them for safety, and a GET that
+// performed the real send (the original design) meant that automated
+// pre-fetch silently burned the single-use token — and sent the real
+// report — before the human ever clicked anything. Only the POST (backed
+// by consumeApprovalToken below, triggered solely by a real click on the
+// confirmation page's button) actually claims the token.
+async function peekApprovalToken(token) {
+  const { rows } = await db.query(
+    `SELECT report_type, rep_id, to_char(report_date, 'YYYY-MM-DD') AS report_date
+     FROM report_approval_tokens
+     WHERE token = $1 AND used_at IS NULL AND expires_at > NOW()`,
+    [token]
+  )
+  return rows[0] || null
+}
+
 // Atomic claim: only succeeds once per token, even under a double-click
 // or the link being opened twice — the UPDATE's WHERE clause (unused,
 // unexpired) means a second attempt matches zero rows and this returns
@@ -74,7 +93,7 @@ function injectApprovalBanner(html, { reportLabel, approveUrl }) {
   <div style="background:#fefaf1;border-bottom:1px solid #fde68a;padding:18px 36px;text-align:center">
     <p style="margin:0 0 10px;font-size:13px;color:#78350f;line-height:1.5">This is a preview of the <b>${escapeHtml(reportLabel)}</b>. Nothing has been sent yet.</p>
     <a href="${approveUrl}" style="display:inline-block;padding:11px 26px;background:#059669;color:#fff;text-decoration:none;font-weight:600;font-size:13.5px;border-radius:10px;font-family:-apple-system,sans-serif">Approve &amp; Send &#8594;</a>
-    <p style="margin:10px 0 0;font-size:10.5px;color:#92702c">This link expires in 24 hours and can only be used once.</p>
+    <p style="margin:10px 0 0;font-size:10.5px;color:#92702c">You'll be asked to confirm before anything sends. This link expires in 24 hours and can only be used once.</p>
   </div>`
   if (!html.includes(CARD_OPEN)) return html // defensive: template changed shape, don't silently drop the report
   return html.replace(CARD_OPEN, CARD_OPEN + banner)
@@ -83,6 +102,7 @@ function injectApprovalBanner(html, { reportLabel, approveUrl }) {
 module.exports = {
   APPROVER_EMAIL,
   createApprovalToken,
+  peekApprovalToken,
   consumeApprovalToken,
   buildApproveUrl,
   injectApprovalBanner,

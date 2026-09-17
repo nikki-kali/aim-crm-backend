@@ -14,7 +14,7 @@ const {
   computeWeeklyNewDoctorGoal, REPORT_CC: DAILY_REPORT_CC,
 } = require('../services/salesRepDailyReport')
 const { runEvidentReport, sendEvidentReportForApproval } = require('../services/evidentReport')
-const { APPROVER_EMAIL, consumeApprovalToken } = require('../services/reportApproval')
+const { APPROVER_EMAIL, peekApprovalToken, consumeApprovalToken } = require('../services/reportApproval')
 const { getCompanyTotalRevenue } = require('../services/clientRevenue')
 
 const router = express.Router()
@@ -529,23 +529,7 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 }
 
-// GET /api/reports/approve?token=... — public, no auth. The only kind of
-// request an email client's "Approve & Send" button can make is a plain
-// unauthenticated GET, so a single-use, 24h-expiring random 256-bit token
-// (see services/reportApproval.js) stands in for auth here instead of a
-// session — same capability-link pattern as a password-reset or
-// unsubscribe link. Rate-limited on top of that (defense in depth, not
-// because the token is brute-forceable at 256 bits of entropy) with the
-// same rateLimiter already used on this codebase's other public routes.
-// Approving always re-runs the real send fresh (fetching live data at
-// click time) rather than replaying the preview's own snapshot — same
-// "always current, never a stale replay" rule as every real send in this
-// pipeline. `title`/`message` below can carry a rep's name/email (from
-// the CRM's own admin-editable `users` table) or a raw error message —
-// neither is a hardcoded constant, so both are HTML-escaped before
-// interpolation rather than trusted.
-router.get('/approve', rateLimiter({ windowMs: 10 * 60 * 1000, max: 20 }), async (req, res) => {
-  const resultPage = (title, message, ok) => `<!DOCTYPE html>
+const resultPage = (title, message, ok) => `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)}</title></head>
 <body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7faf9;padding:60px 20px;text-align:center">
@@ -556,18 +540,87 @@ router.get('/approve', rateLimiter({ windowMs: 10 * 60 * 1000, max: 20 }), async
   </div>
 </body></html>`
 
+const EXPIRED_MESSAGE = 'This approval link has already been used, or is more than 24 hours old. Ask for a fresh preview if you still want to send this report.'
+
+// Real, deliberate confirmation page — a plain HTML form, not a link, so
+// only an actual browser submit (not an automated safety-scanner's GET
+// pre-fetch of the email's link) reaches POST /approve below and claims
+// the token. `token` rides in a hidden field rather than the query string.
+const confirmPage = (label, detail, token) => `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Confirm send</title></head>
+<body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7faf9;padding:60px 20px;text-align:center">
+  <div style="max-width:420px;margin:0 auto;background:#fff;border-radius:16px;padding:36px 30px;box-shadow:0 4px 20px rgba(0,0,0,.06)">
+    <div style="font-size:34px;margin-bottom:12px">📤</div>
+    <h1 style="margin:0 0 10px;font-size:19px;color:#10353f">Send ${escapeHtml(label)}?</h1>
+    <p style="margin:0 0 22px;font-size:14px;color:#5b7a86;line-height:1.5">${escapeHtml(detail)}</p>
+    <form method="POST" action="/api/reports/approve">
+      <input type="hidden" name="token" value="${escapeHtml(token)}">
+      <button type="submit" style="display:inline-block;padding:12px 28px;background:#059669;color:#fff;border:none;text-decoration:none;font-weight:600;font-size:14px;border-radius:10px;font-family:-apple-system,sans-serif;cursor:pointer">Confirm &amp; Send</button>
+    </form>
+  </div>
+</body></html>`
+
+// Report-type-specific label/detail for the confirmation page — a
+// read-only lookup (for the rep's name), safe to run every time this page
+// loads, unlike the actual send it's describing.
+async function describeClaimForConfirmation(claim) {
+  if (claim.report_type === 'evident-report') {
+    return { label: 'the AIM Leadership Report', detail: `This will send the Leadership Report for ${claim.report_date} to leadership now.` }
+  }
+  if (claim.report_type === 'sales-rep-daily-report') {
+    const { rows } = await db.query(`SELECT name, email FROM users WHERE id=$1`, [claim.rep_id])
+    if (!rows[0]) return null
+    return { label: `${rows[0].name || rows[0].email}'s Daily Sales Report`, detail: `This will send ${rows[0].name || rows[0].email}'s Daily Sales Report for ${claim.report_date} now.` }
+  }
+  return null
+}
+
+// GET /api/reports/approve?token=... — public, no auth, read-only. Shows a
+// confirmation page; does NOT send anything or consume the token. Email
+// providers/clients routinely pre-fetch links in incoming mail to scan
+// them for safety — an earlier version of this route sent the real report
+// directly from this GET handler, which meant that automated pre-fetch
+// silently burned the single-use token (and sent the real report) before
+// a human ever clicked "Approve & Send". Splitting the flow so GET only
+// *describes* what a following POST would do fixes that: a safety scanner
+// fetching this page is inert, since peekApprovalToken (unlike
+// consumeApprovalToken) never marks the token used.
+router.get('/approve', rateLimiter({ windowMs: 10 * 60 * 1000, max: 20 }), async (req, res) => {
   try {
     const { token } = req.query
     if (!token) return res.status(400).send(resultPage('Missing link', 'This approval link is missing its token.', false))
 
+    const claim = await peekApprovalToken(token)
+    if (!claim) return res.status(410).send(resultPage('Link expired or already used', EXPIRED_MESSAGE, false))
+
+    const desc = await describeClaimForConfirmation(claim)
+    if (!desc) return res.status(400).send(resultPage('Unknown report', 'This link points to a report this server no longer recognizes.', false))
+
+    return res.send(confirmPage(desc.label, desc.detail, token))
+  } catch (err) {
+    console.error('[reports] approval confirm-page failed:', err)
+    return res.status(500).send(resultPage('Something went wrong', `Couldn't load this confirmation page. ${err.message || ''}`, false))
+  }
+})
+
+// POST /api/reports/approve — public, no auth, the only route that
+// actually sends. Reached solely by a real submit of the confirmation
+// page's form above (a plain <form> POST, not a link a scanner would
+// pre-fetch). Approving always re-runs the real send fresh (fetching live
+// data at click time) rather than replaying the preview's own snapshot —
+// same "always current, never a stale replay" rule as every real send in
+// this pipeline. `title`/`message` below can carry a rep's name/email
+// (from the CRM's own admin-editable `users` table) or a raw error
+// message — neither is a hardcoded constant, so both are HTML-escaped
+// before interpolation rather than trusted.
+router.post('/approve', rateLimiter({ windowMs: 10 * 60 * 1000, max: 20 }), async (req, res) => {
+  try {
+    const { token } = req.body
+    if (!token) return res.status(400).send(resultPage('Missing link', 'This approval link is missing its token.', false))
+
     const claim = await consumeApprovalToken(token)
-    if (!claim) {
-      return res.status(410).send(resultPage(
-        'Link expired or already used',
-        'This approval link has already been used, or is more than 24 hours old. Ask for a fresh preview if you still want to send this report.',
-        false
-      ))
-    }
+    if (!claim) return res.status(410).send(resultPage('Link expired or already used', EXPIRED_MESSAGE, false))
 
     if (claim.report_type === 'evident-report') {
       const result = await runEvidentReport()

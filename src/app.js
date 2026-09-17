@@ -67,6 +67,10 @@ app.use(cors({
   credentials: true,
 }))
 app.use(express.json({ limit: '5mb' }))
+// Only needed by the plain HTML <form method="POST"> on the report-approval
+// confirmation page (routes/reports.js's POST /approve) — a real browser
+// form submit, not fetch/XHR, so it can't send JSON.
+app.use(express.urlencoded({ extended: true }))
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }))
 
