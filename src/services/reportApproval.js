@@ -36,6 +36,16 @@ function buildApproveUrl(token) {
   return `${BACKEND_URL}/api/reports/approve?token=${token}`
 }
 
+// reportLabel can carry a rep's name/email pulled from the CRM's own
+// `users` table (see sendRepDailyReportForApproval) — admin-editable
+// data, not a hardcoded constant, so it isn't safe to interpolate into
+// the banner's HTML unescaped. Same escapeHtml as routes/scanSubmission.js
+// and routes/implantIntake.js — duplicated here rather than shared,
+// matching this codebase's convention for small isolated helpers.
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+}
+
 // Atomic claim: only succeeds once per token, even under a double-click
 // or the link being opened twice — the UPDATE's WHERE clause (unused,
 // unexpired) means a second attempt matches zero rows and this returns
@@ -62,7 +72,7 @@ const CARD_OPEN = '<div style="max-width:600px;margin:40px auto;background:#fff;
 function injectApprovalBanner(html, { reportLabel, approveUrl }) {
   const banner = `
   <div style="background:#fefaf1;border-bottom:1px solid #fde68a;padding:18px 36px;text-align:center">
-    <p style="margin:0 0 10px;font-size:13px;color:#78350f;line-height:1.5">This is a preview of the <b>${reportLabel}</b>. Nothing has been sent yet.</p>
+    <p style="margin:0 0 10px;font-size:13px;color:#78350f;line-height:1.5">This is a preview of the <b>${escapeHtml(reportLabel)}</b>. Nothing has been sent yet.</p>
     <a href="${approveUrl}" style="display:inline-block;padding:11px 26px;background:#059669;color:#fff;text-decoration:none;font-weight:600;font-size:13.5px;border-radius:10px;font-family:-apple-system,sans-serif">Approve &amp; Send &#8594;</a>
     <p style="margin:10px 0 0;font-size:10.5px;color:#92702c">This link expires in 24 hours and can only be used once.</p>
   </div>`

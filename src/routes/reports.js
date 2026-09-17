@@ -2,6 +2,7 @@ const express = require('express')
 const db = require('../config/db')
 const auth = require('../middleware/auth')
 const requireAdmin = require('../middleware/requireAdmin')
+const rateLimiter = require('../middleware/rateLimiter')
 const { sendEmail, primaryFrontendUrl } = require('../services/email')
 const { computeRepSummary, sendRepWeeklyReport } = require('../services/weeklyRepReport')
 const {
@@ -523,23 +524,34 @@ router.post('/sales-rep-daily-report/send-for-approval', auth, requireAdmin, asy
   } catch (err) { next(err) }
 })
 
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+}
+
 // GET /api/reports/approve?token=... — public, no auth. The only kind of
 // request an email client's "Approve & Send" button can make is a plain
-// unauthenticated GET, so a single-use, 24h-expiring random token (see
-// services/reportApproval.js) stands in for auth here instead of a
-// session. Approving always re-runs the real send fresh (fetching live
-// data at click time) rather than replaying the preview's own snapshot —
-// same "always current, never a stale replay" rule as every real send in
-// this pipeline.
-router.get('/approve', async (req, res) => {
+// unauthenticated GET, so a single-use, 24h-expiring random 256-bit token
+// (see services/reportApproval.js) stands in for auth here instead of a
+// session — same capability-link pattern as a password-reset or
+// unsubscribe link. Rate-limited on top of that (defense in depth, not
+// because the token is brute-forceable at 256 bits of entropy) with the
+// same rateLimiter already used on this codebase's other public routes.
+// Approving always re-runs the real send fresh (fetching live data at
+// click time) rather than replaying the preview's own snapshot — same
+// "always current, never a stale replay" rule as every real send in this
+// pipeline. `title`/`message` below can carry a rep's name/email (from
+// the CRM's own admin-editable `users` table) or a raw error message —
+// neither is a hardcoded constant, so both are HTML-escaped before
+// interpolation rather than trusted.
+router.get('/approve', rateLimiter({ windowMs: 10 * 60 * 1000, max: 20 }), async (req, res) => {
   const resultPage = (title, message, ok) => `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title}</title></head>
+<title>${escapeHtml(title)}</title></head>
 <body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7faf9;padding:60px 20px;text-align:center">
   <div style="max-width:420px;margin:0 auto;background:#fff;border-radius:16px;padding:36px 30px;box-shadow:0 4px 20px rgba(0,0,0,.06)">
     <div style="font-size:34px;margin-bottom:12px">${ok ? '✅' : '⚠️'}</div>
-    <h1 style="margin:0 0 10px;font-size:19px;color:#10353f">${title}</h1>
-    <p style="margin:0;font-size:14px;color:#5b7a86;line-height:1.5">${message}</p>
+    <h1 style="margin:0 0 10px;font-size:19px;color:#10353f">${escapeHtml(title)}</h1>
+    <p style="margin:0;font-size:14px;color:#5b7a86;line-height:1.5">${escapeHtml(message)}</p>
   </div>
 </body></html>`
 

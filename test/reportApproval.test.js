@@ -25,3 +25,12 @@ test('injectApprovalBanner leaves the html untouched if the expected wrapper is 
   const html = injectApprovalBanner(withoutWrapper, { reportLabel: 'X', approveUrl: 'https://example.com' });
   assert.equal(html, withoutWrapper);
 });
+
+test('injectApprovalBanner HTML-escapes reportLabel (it can carry a rep name/email pulled from the CRM, not a trusted constant)', () => {
+  const html = injectApprovalBanner(SAMPLE_HTML, {
+    reportLabel: `<script>alert('xss')</script>`,
+    approveUrl: 'https://example.com/approve?token=abc',
+  });
+  assert.ok(!html.includes('<script>alert'), 'raw script tag must not appear unescaped');
+  assert.match(html, /&lt;script&gt;alert\(&#39;xss&#39;\)&lt;\/script&gt;/);
+});
