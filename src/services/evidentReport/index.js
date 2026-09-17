@@ -4,6 +4,7 @@ const { buildEmail } = require('./buildReport')
 const { getHistory, appendRow } = require('./log')
 const { renderPdf } = require('./pdf')
 const { sendEmail } = require('../email')
+const { APPROVER_EMAIL, createApprovalToken, buildApproveUrl, injectApprovalBanner } = require('../reportApproval')
 
 const RECIPIENTS = ['ben@aimdentallab.com', 'execassistant@aimdentallab.com', 'yoel@khdentallab.com']
 
@@ -106,4 +107,33 @@ async function runEvidentReport() {
   return { aggregate, subject }
 }
 
-module.exports = { runEvidentReport }
+// Builds today's report (live data, no PDF, no log write, no send to
+// real leadership) and emails it to APPROVER_EMAIL with an "Approve &
+// Send" button. Clicking that button hits routes/reports.js's public
+// GET /approve, which calls runEvidentReport() above for the actual real
+// send — so approving always re-fetches fresh live data at send time
+// rather than replaying this preview's snapshot, same "always current,
+// never a stale replay" principle as every other real send in this
+// pipeline. Does NOT check evident_report_log for a same-day duplicate
+// the way runEvidentReport does — sending a fresh preview is harmless and
+// repeatable; only the real send (on approval) is duplicate-guarded.
+async function sendEvidentReportForApproval() {
+  const runDate = todayEasternDateString()
+  const historyRows = await getHistory()
+  const messages = await fetchEvidentEmails()
+  const aggregate = parseAndAggregate(messages, { runDate })
+  const { subject, html } = buildEmail(aggregate, historyRows)
+
+  const token = await createApprovalToken({ reportType: 'evident-report', reportDate: runDate })
+  const approveUrl = buildApproveUrl(token)
+  const bannered = injectApprovalBanner(html, { reportLabel: 'AIM Leadership Report', approveUrl })
+
+  await sendEmail({
+    to: [APPROVER_EMAIL],
+    subject: `Approve? — ${subject}`,
+    html: bannered,
+  })
+  return { subject, approveUrl }
+}
+
+module.exports = { runEvidentReport, sendEvidentReportForApproval }

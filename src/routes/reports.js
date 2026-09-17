@@ -9,10 +9,11 @@ const {
   REPORT_TO: UL_REPORT_TO, REPORT_CC: UL_REPORT_CC,
 } = require('../services/unassignedLeadsReport')
 const {
-  sendRepDailyReport, buildDailyReportHtml, computeDailyDoctorStatus,
+  sendRepDailyReport, sendRepDailyReportForApproval, buildDailyReportHtml, computeDailyDoctorStatus,
   computeWeeklyNewDoctorGoal, REPORT_CC: DAILY_REPORT_CC,
 } = require('../services/salesRepDailyReport')
-const { runEvidentReport } = require('../services/evidentReport')
+const { runEvidentReport, sendEvidentReportForApproval } = require('../services/evidentReport')
+const { APPROVER_EMAIL, consumeApprovalToken } = require('../services/reportApproval')
 
 const router = express.Router()
 
@@ -496,6 +497,82 @@ router.post('/evident-report/send', auth, requireAdmin, async (req, res, next) =
     const result = await runEvidentReport()
     res.json({ success: true, subject: result.subject, missing: result.aggregate.missing })
   } catch (err) { next(err) }
+})
+
+// POST /api/reports/evident-report/send-for-approval — admin-only. Emails
+// APPROVER_EMAIL a preview with an "Approve & Send" button instead of
+// sending to real leadership directly — see services/reportApproval.js.
+router.post('/evident-report/send-for-approval', auth, requireAdmin, async (req, res, next) => {
+  try {
+    const result = await sendEvidentReportForApproval()
+    res.json({ success: true, message: `Preview sent to ${APPROVER_EMAIL} for approval.`, subject: result.subject })
+  } catch (err) { next(err) }
+})
+
+// POST /api/reports/sales-rep-daily-report/send-for-approval — admin-only,
+// body: { rep_id }. Same approval-button flow as above, for one rep's
+// Daily Sales Report.
+router.post('/sales-rep-daily-report/send-for-approval', auth, requireAdmin, async (req, res, next) => {
+  try {
+    const { rep_id } = req.body
+    if (!rep_id) return res.status(400).json({ error: 'rep_id is required' })
+    const { rows } = await db.query(`SELECT id, name, email FROM users WHERE id=$1`, [rep_id])
+    if (!rows[0]) return res.status(400).json({ error: 'rep_id must be an existing user' })
+    const result = await sendRepDailyReportForApproval(rows[0])
+    res.json({ success: true, message: `Preview sent to ${APPROVER_EMAIL} for approval.`, subject: result.subject })
+  } catch (err) { next(err) }
+})
+
+// GET /api/reports/approve?token=... — public, no auth. The only kind of
+// request an email client's "Approve & Send" button can make is a plain
+// unauthenticated GET, so a single-use, 24h-expiring random token (see
+// services/reportApproval.js) stands in for auth here instead of a
+// session. Approving always re-runs the real send fresh (fetching live
+// data at click time) rather than replaying the preview's own snapshot —
+// same "always current, never a stale replay" rule as every real send in
+// this pipeline.
+router.get('/approve', async (req, res) => {
+  const resultPage = (title, message, ok) => `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title}</title></head>
+<body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7faf9;padding:60px 20px;text-align:center">
+  <div style="max-width:420px;margin:0 auto;background:#fff;border-radius:16px;padding:36px 30px;box-shadow:0 4px 20px rgba(0,0,0,.06)">
+    <div style="font-size:34px;margin-bottom:12px">${ok ? '✅' : '⚠️'}</div>
+    <h1 style="margin:0 0 10px;font-size:19px;color:#10353f">${title}</h1>
+    <p style="margin:0;font-size:14px;color:#5b7a86;line-height:1.5">${message}</p>
+  </div>
+</body></html>`
+
+  try {
+    const { token } = req.query
+    if (!token) return res.status(400).send(resultPage('Missing link', 'This approval link is missing its token.', false))
+
+    const claim = await consumeApprovalToken(token)
+    if (!claim) {
+      return res.status(410).send(resultPage(
+        'Link expired or already used',
+        'This approval link has already been used, or is more than 24 hours old. Ask for a fresh preview if you still want to send this report.',
+        false
+      ))
+    }
+
+    if (claim.report_type === 'evident-report') {
+      const result = await runEvidentReport()
+      return res.send(resultPage('Sent!', `The Leadership Report ("${result.subject}") has been sent to leadership.`, true))
+    }
+
+    if (claim.report_type === 'sales-rep-daily-report') {
+      const { rows } = await db.query(`SELECT id, name, email FROM users WHERE id=$1`, [claim.rep_id])
+      if (!rows[0]) return res.status(404).send(resultPage('Rep not found', 'The rep this report was for no longer exists.', false))
+      await sendRepDailyReport(rows[0], { dateStr: claim.report_date })
+      return res.send(resultPage('Sent!', `${rows[0].name || rows[0].email}'s Daily Sales Report has been sent.`, true))
+    }
+
+    return res.status(400).send(resultPage('Unknown report type', 'This link points to a report type this server no longer recognizes.', false))
+  } catch (err) {
+    console.error('[reports] approval send failed:', err)
+    return res.status(500).send(resultPage('Something went wrong', `The report could not be sent. ${err.message || ''}`, false))
+  }
 })
 
 // GET /api/reports/my-summary/csv — rep leads as downloadable CSV

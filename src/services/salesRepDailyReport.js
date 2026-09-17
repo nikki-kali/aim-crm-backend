@@ -2,6 +2,7 @@ const db = require('../config/db')
 const { sendEmail, salesRepDailyReportEmail } = require('./email')
 const { fetchEvidentEmailsInRange } = require('./evidentReport/gmailFetch')
 const { extractDailyBookedCustomerNames, extractCaseTotals } = require('./evidentReport/parseEvident')
+const { APPROVER_EMAIL, createApprovalToken, buildApproveUrl, injectApprovalBanner } = require('./reportApproval')
 
 // Recipients are the two real AIM reps by email, not a role query — role
 // IN ('staff','sales_rep') would also catch Yoel Klein and the TEST
@@ -331,6 +332,29 @@ async function sendRepDailyReport(rep, { to, cc = REPORT_CC, test = false, dateS
   return { status, goal }
 }
 
+// Builds this rep's report (live data, no send to the rep) and emails it
+// to APPROVER_EMAIL with an "Approve & Send" button. Clicking it hits
+// routes/reports.js's public GET /approve, which calls sendRepDailyReport
+// above for the actual real send — so approving always re-fetches fresh
+// live data at send time rather than replaying this preview's snapshot,
+// same principle as sendEvidentReportForApproval. No duplicate guard here
+// (a fresh preview is harmless and repeatable); sendRepDailyReport itself
+// has none either, so a double-approval-click is what the token's
+// single-use consumption in routes/reports.js guards against instead.
+async function sendRepDailyReportForApproval(rep, dateStr = todayEasternDateString()) {
+  const status = await computeDailyDoctorStatus(rep.id, dateStr)
+  const goal = await computeWeeklyNewDoctorGoal(rep.id, dateStr, rep.email)
+  const { html, dateLabel } = await buildDailyReportHtml(rep.name || rep.email, rep.email, dateStr, status, goal, {})
+
+  const token = await createApprovalToken({ reportType: 'sales-rep-daily-report', repId: rep.id, reportDate: dateStr })
+  const approveUrl = buildApproveUrl(token)
+  const bannered = injectApprovalBanner(html, { reportLabel: `${rep.name || rep.email}'s Daily Sales Report`, approveUrl })
+
+  const subject = `Approve? — Daily Sales Report — ${rep.name || rep.email} — ${dateLabel}`
+  await sendEmail({ to: [APPROVER_EMAIL], subject, html: bannered })
+  return { subject, approveUrl }
+}
+
 // Weekday-morning automated send (jobs/salesRepDailyReport.js) — James and
 // William only, cc'd to Yoel. Best-effort per rep so one bad email/DB
 // hiccup doesn't block the other rep's report.
@@ -357,6 +381,7 @@ module.exports = {
   computeWeeklyNewDoctorGoal,
   buildDailyReportHtml,
   sendRepDailyReport,
+  sendRepDailyReportForApproval,
   sendAllSalesRepDailyReports,
   mondayOfWeekEastern,
   DAILY_REPORT_REP_EMAILS,
