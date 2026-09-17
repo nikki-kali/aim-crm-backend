@@ -4,6 +4,7 @@ const { runEngineTick } = require('../services/workflowEngine')
 const { sendUnassignedLeadsReport } = require('../services/unassignedLeadsReport')
 const db = require('../config/db')
 const { sendEmail, primaryFrontendUrl } = require('../services/email')
+const { getCompanyTotalRevenue } = require('../services/clientRevenue')
 
 async function sendScheduledReports(frequency) {
   try {
@@ -15,14 +16,15 @@ async function sendScheduledReports(frequency) {
     // Build report summary data
     const yearStart = `${new Date().getFullYear()}-01-01`
     const coldThreshold = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()
-    const [kpiRes, ytdRes, brandRes, coldRes] = await Promise.all([
-      db.query(`SELECT (SELECT COUNT(*) FROM leads WHERE status NOT IN ('Won','Lost') AND is_archived=false) AS active_leads, (SELECT COALESCE(SUM(total_revenue),0) FROM clients) AS total_revenue, (SELECT COUNT(*) FROM clients) AS total_clients`),
+    const [kpiRes, ytdRes, brandRes, coldRes, companyTotalRevenue] = await Promise.all([
+      db.query(`SELECT (SELECT COUNT(*) FROM leads WHERE status NOT IN ('Won','Lost') AND is_archived=false) AS active_leads, (SELECT COUNT(*) FROM clients) AS total_clients`),
       db.query(`SELECT COUNT(*) AS ytd_leads, COUNT(*) FILTER (WHERE status='Won') AS ytd_won FROM leads WHERE created_at >= $1`, [yearStart]),
       db.query(`SELECT brand, COALESCE(SUM(total_revenue),0) AS revenue FROM clients GROUP BY brand`),
       db.query(`SELECT COUNT(*) AS count FROM leads WHERE status NOT IN ('Won','Lost') AND is_archived=false AND COALESCE(last_contacted_at,created_at) < $1`, [coldThreshold]),
+      getCompanyTotalRevenue(),
     ])
 
-    const kpi = kpiRes.rows[0]
+    const kpi = { ...kpiRes.rows[0], total_revenue: companyTotalRevenue }
     const ytd = ytdRes.rows[0]
     const total = Number(ytd.ytd_leads)
     const won = Number(ytd.ytd_won)

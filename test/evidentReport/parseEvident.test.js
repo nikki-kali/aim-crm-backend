@@ -174,9 +174,11 @@ test('Booked/Billed (YTD) auto-accrue real daily figures logged after the verifi
   // 363360.57 (baseline) + 2000 (09-17 only) + 8065.22 (today's real
   // companyDailyBooked from ALL_MESSAGES) = 373425.79.
   assert.match(html, /\$373,425\.79/);
-  // 311452.46 (baseline) + 700 (09-17 only) + 1622.74 (today's real
-  // companyDailyBilled from ALL_MESSAGES) = 313775.20.
-  assert.match(html, /\$313,775\.20/);
+  // 311452.46 (baseline) + 1243759 (LEGACY_YTD_REVENUE_ADJUSTMENT — real
+  // pre-CRM YTD Billed revenue, see clientRevenue.js) + 700 (09-17 only) +
+  // 1622.74 (today's real companyDailyBilled from ALL_MESSAGES) =
+  // 1557534.20.
+  assert.match(html, /\$1,557,534\.20/);
   assert.match(html, /Baseline verified Sep 16, 2026 \+ daily activity since/);
 });
 
@@ -185,7 +187,8 @@ test('Booked/Billed (YTD) show exactly the baseline, with no accrual, when run o
   const { html } = buildEmail(agg, []);
 
   assert.match(html, /\$363,360\.57/);
-  assert.match(html, /\$311,452\.46/);
+  // 311452.46 (baseline) + 1243759 (LEGACY_YTD_REVENUE_ADJUSTMENT) = 1555211.46.
+  assert.match(html, /\$1,555,211\.46/);
 });
 
 test('Booked/Billed (YTD) accrual treats a NULL company_daily_billed_value as zero (pre-billed-tracking row)', () => {
@@ -197,8 +200,9 @@ test('Booked/Billed (YTD) accrual treats a NULL company_daily_billed_value as ze
 
   // Booked: 363360.57 + 5000 + 8065.22 = 376425.79.
   assert.match(html, /\$376,425\.79/);
-  // Billed: 311452.46 + 0 (NULL row contributes nothing) + 1622.74 = 313075.20.
-  assert.match(html, /\$313,075\.20/);
+  // Billed: 311452.46 + 1243759 (LEGACY_YTD_REVENUE_ADJUSTMENT) + 0 (NULL
+  // row contributes nothing) + 1622.74 = 1556834.20.
+  assert.match(html, /\$1,556,834\.20/);
 });
 
 test('Booked (MTD) prefers the real MTD Booked Daily Update figure over the self-accumulated fallback when it arrives', () => {

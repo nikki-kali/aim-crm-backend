@@ -23,4 +23,23 @@ async function syncClientRevenue(clientName) {
   )
 }
 
-module.exports = { syncClientRevenue }
+// Real, verified YTD Billed revenue from the previous system AIM/Kings
+// Highway used before this CRM existed — confirmed directly by the user
+// (combined across both brands; no records survive broken out by brand).
+// It predates per-client `cases` tracking entirely, so there's no client
+// to attribute it to and no case row to create for it. Added only here, at
+// the one company-wide total the CRM reports — never folded into any
+// individual client's `total_revenue`, brand breakdown, or per-rep figure,
+// all of which stay exactly real/case-attributed.
+const LEGACY_YTD_REVENUE_ADJUSTMENT = 1243759
+
+// The one place "Total Revenue" is computed company-wide — every route/job
+// that shows this figure should call this instead of re-running
+// `SUM(total_revenue)` inline, so the legacy adjustment stays consistent
+// everywhere it's shown rather than needing to be duplicated per call site.
+async function getCompanyTotalRevenue() {
+  const { rows } = await db.query(`SELECT COALESCE(SUM(total_revenue),0) AS total FROM clients`)
+  return Number(rows[0].total) + LEGACY_YTD_REVENUE_ADJUSTMENT
+}
+
+module.exports = { syncClientRevenue, getCompanyTotalRevenue, LEGACY_YTD_REVENUE_ADJUSTMENT }

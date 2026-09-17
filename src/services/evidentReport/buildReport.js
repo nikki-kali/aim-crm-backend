@@ -7,6 +7,7 @@
 // brand hex/font values per template file (see CLAUDE.md's note on this).
 
 const { buildWeeklyRevenueChartUrl } = require('./chart');
+const { LEGACY_YTD_REVENUE_ADJUSTMENT } = require('../clientRevenue');
 
 const BRAND = {
   ink: '#10353f',
@@ -43,11 +44,17 @@ const HAIRLINE = '#dcebe9';
 // once Evident sends a real company-wide YTD report daily (request
 // pending, following the same precedent as the new MTD Booked Daily
 // Update report), replace this block with real parsing entirely.
+// billed adds LEGACY_YTD_REVENUE_ADJUSTMENT (see clientRevenue.js) on top of
+// Evident's own verified 311452.46 YTD Billed figure above — that $1,243,759
+// is real YTD Billed revenue from AIM/Kings Highway's previous system
+// (before this CRM/Evident tracking existed), confirmed directly by the
+// user, kept as a separate addend rather than folded into one baseline
+// number so it stays auditable back to its own source.
 const COMPANY_YTD_SNAPSHOT = {
   asOfDate: '2026-09-16',
   asOfLabel: 'Sep 16, 2026',
   booked: 363360.57,
-  billed: 311452.46,
+  billed: 311452.46 + LEGACY_YTD_REVENUE_ADJUSTMENT,
 };
 
 function fmtMoney(n) {

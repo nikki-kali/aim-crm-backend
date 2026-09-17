@@ -15,6 +15,7 @@ const {
 } = require('../services/salesRepDailyReport')
 const { runEvidentReport, sendEvidentReportForApproval } = require('../services/evidentReport')
 const { APPROVER_EMAIL, consumeApprovalToken } = require('../services/reportApproval')
+const { getCompanyTotalRevenue } = require('../services/clientRevenue')
 
 const router = express.Router()
 
@@ -24,12 +25,11 @@ router.get(['/', '/dashboard'], auth, async (req, res, next) => {
     const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
     const coldThreshold = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()
 
-    const [kpiRes, coldRes, recentRes, brandRes, intakeRes, casePipelineRes] = await Promise.all([
+    const [kpiRes, coldRes, recentRes, brandRes, intakeRes, casePipelineRes, companyTotalRevenue] = await Promise.all([
       db.query(`
         SELECT
           (SELECT COUNT(*) FROM leads WHERE status NOT IN ('Won','Lost') AND is_archived=false) AS active_leads,
           (SELECT COUNT(*) FROM clients) AS total_clients,
-          (SELECT COALESCE(SUM(total_revenue),0) FROM clients) AS total_revenue,
           (SELECT COUNT(*) FROM leads WHERE status='Lost') AS lost_leads
       `),
       db.query(`
@@ -50,10 +50,11 @@ router.get(['/', '/dashboard'], auth, async (req, res, next) => {
         WHERE status != 'Completed'
         GROUP BY status ORDER BY status
       `).catch(() => ({ rows: [] })),
+      getCompanyTotalRevenue(),
     ])
 
     res.json({
-      kpis: kpiRes.rows[0],
+      kpis: { ...kpiRes.rows[0], total_revenue: companyTotalRevenue },
       cold_leads: coldRes.rows,
       recent_leads: recentRes.rows,
       brand_revenue: brandRes.rows,
@@ -195,14 +196,13 @@ router.post('/send', auth, requireAdmin, async (req, res, next) => {
     const yearStart = `${new Date().getFullYear()}-01-01`
     const coldThreshold = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()
 
-    const [kpiRes, ytdRes, brandRes, topRes, coldRes, caseRes] = await Promise.all([
+    const [kpiRes, ytdRes, brandRes, topRes, coldRes, caseRes, companyTotalRevenue] = await Promise.all([
       db.query(`
         SELECT
           (SELECT COUNT(*) FROM leads WHERE status NOT IN ('Won','Lost')) AS active_leads,
           (SELECT COUNT(*) FROM leads WHERE status='Won') AS total_won,
           (SELECT COUNT(*) FROM leads WHERE status='Lost') AS total_lost,
-          (SELECT COUNT(*) FROM clients) AS total_clients,
-          (SELECT COALESCE(SUM(total_revenue),0) FROM clients) AS total_revenue
+          (SELECT COUNT(*) FROM clients) AS total_clients
       `),
       db.query(`
         SELECT
@@ -218,9 +218,10 @@ router.post('/send', auth, requireAdmin, async (req, res, next) => {
         WHERE status NOT IN ('Won','Lost') AND COALESCE(last_contacted_at, created_at) < $1
       `, [coldThreshold]),
       db.query(`SELECT COUNT(*) AS overdue FROM cases WHERE due_date < NOW() AND status != 'Delivered'`).catch(() => ({ rows: [{ overdue: 0 }] })),
+      getCompanyTotalRevenue(),
     ])
 
-    const kpi = { ...kpiRes.rows[0], open_cases: caseRes.rows[0]?.overdue ?? 0 }
+    const kpi = { ...kpiRes.rows[0], open_cases: caseRes.rows[0]?.overdue ?? 0, total_revenue: companyTotalRevenue }
     const ytd = ytdRes.rows[0]
     const total = Number(ytd.ytd_leads)
     const won = Number(ytd.ytd_won)
