@@ -72,6 +72,51 @@ test('parses and combines all 11 report types correctly', () => {
   assert.equal(agg.companyMtdBooked, 6935);
 });
 
+test('parseAndAggregate exposes companyDailyBookedRows for the Leadership Report customer-detail table', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
+  assert.equal(agg.companyDailyBookedRows.length, 94);
+  assert.deepEqual(agg.companyDailyBookedRows[0], { ref: '5569', customerName: 'SUNSET TERRACE', value: 0, salesperson: '' });
+  assert.deepEqual(agg.companyDailyBookedRows[93], { ref: '5663', customerName: 'Dr. ALBERTO GONZALEZ', value: 0, salesperson: 'william' });
+});
+
+test("Today's Booked Cases table renders every real row, HTML-escaped, and is omitted when there are none", () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
+  const { html } = buildEmail(agg, []);
+  assert.match(html, /Today's Booked Cases \(94\)/);
+  assert.match(html, />SUNSET TERRACE</);
+  assert.match(html, />Dr\. ALBERTO GONZALEZ</);
+
+  const emptyAgg = { ...agg, companyDailyBookedRows: [] };
+  const { html: emptyHtml } = buildEmail(emptyAgg, []);
+  assert.doesNotMatch(emptyHtml, /Today's Booked Cases/);
+});
+
+test("Today's Booked Cases table HTML-escapes customer names (not a trusted constant — real Evident data)", () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
+  const withMaliciousName = {
+    ...agg,
+    companyDailyBookedRows: [{ ref: '1', customerName: '<script>alert(1)</script>', value: 10, salesperson: '' }],
+  };
+  const { html } = buildEmail(withMaliciousName, []);
+  assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+});
+
+test('Booked (MTD) case count self-accumulates from logged same-month companyDailyBookedCount plus today', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-16' });
+  const history = [
+    { date: '2026-09-14', company_daily_booked_count: '10' },
+    { date: '2026-09-15', company_daily_booked_count: '5' },
+    // Different month — must not be included.
+    { date: '2026-08-30', company_daily_booked_count: '999' },
+    // NULL (predates the column) — contributes nothing, not a crash.
+    { date: '2026-09-13', company_daily_booked_count: null },
+  ];
+  const { html } = buildEmail(agg, history);
+  // 10 + 5 + 0 (NULL row) + 94 (today's real companyDailyBookedCount) = 109.
+  assert.match(html, /109 cases/);
+});
+
 test('"No data was returned" reports as zero, not a crash', () => {
   const agg = parseAndAggregate(
     [{ subject: "Daily Booked Cases - William's Doctors", html: fixture('daily-booked-william-nodata.html') }],

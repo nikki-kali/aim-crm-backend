@@ -57,6 +57,14 @@ const COMPANY_YTD_SNAPSHOT = {
   billed: 311452.46 + LEGACY_YTD_REVENUE_ADJUSTMENT,
 };
 
+// Real customer/clinic names from Evident's own data — never a hardcoded
+// constant, so this is the first place in this file that needs escaping
+// before interpolation (see reportApproval.js's escapeHtml for the
+// original real XSS this exact pattern caused elsewhere in this codebase).
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 function fmtMoney(n) {
   return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -106,6 +114,21 @@ function buildEmail(agg, historyRows = [], overrides = {}) {
   const companyMtdBooked = overrides.companyMtdBooked != null
     ? overrides.companyMtdBooked
     : (companyMtdBookedLive != null ? companyMtdBookedLive : selfAccumulatedMtdBooked);
+
+  // MTD Booked CASE COUNT (Ben Silberstein's requirement, 2026-09-18) — no
+  // company-wide report from Evident gives this directly ("MTD Booked
+  // Daily Update" is one row per customer, not per case, see
+  // parseEvident.js), so it's always self-accumulated from each day's real
+  // companyDailyBookedCount, same technique as the pre-9/16 Booked (MTD)
+  // value fallback above. Rows logged before v24's migration have a NULL
+  // company_daily_booked_count (column didn't exist yet), contributing
+  // nothing — the count under-states true MTD volume for the first few
+  // days after this ships, then self-heals as real days accumulate,
+  // exactly like every other self-accumulated figure in this file.
+  const mtdBookedCountFromHistory = historyRows
+    .filter((r) => r.date && r.date.slice(0, 7) === runMonth)
+    .reduce((sum, r) => sum + Number(r.company_daily_booked_count || 0), 0);
+  const companyMtdBookedCount = mtdBookedCountFromHistory + agg.companyDailyBookedCount;
 
   // Billed (MTD) now reads Evident's own company-wide "Daily MTD Total
   // Billed" figure instead of the James+William-only sum. A `prior` row
@@ -214,6 +237,24 @@ function buildEmail(agg, historyRows = [], overrides = {}) {
        </div>`
     : '';
 
+  // Per-case customer detail for Today's Booked (Ben Silberstein's
+  // requirement, 2026-09-18) — real rows straight from "Daily Booking
+  // Report - Nadine", company-wide, unbounded (matches this codebase's
+  // existing convention of never capping a real list — see
+  // salesRepDailyReport.js's Active Doctors List). Omitted entirely when
+  // there's nothing to show, rather than an empty table shell.
+  const bookedRowsTable = agg.companyDailyBookedRows.length === 0 ? '' : `
+    <div style="margin:18px 36px 0">
+      ${sectionLabel(`Today's Booked Cases (${agg.companyDailyBookedRows.length})`)}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
+        ${agg.companyDailyBookedRows.map((r) => `
+          <tr>
+            <td style="padding:7px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;color:${BRAND.ink}">${escapeHtml(r.customerName || '—')}</td>
+            <td style="padding:7px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;font-family:${FONT_DATA};color:${BRAND.slate};text-align:right;white-space:nowrap">${fmtMoney(r.value)}</td>
+          </tr>`).join('')}
+      </table>
+    </div>`;
+
   const chartNote = chartWeekCount < 2
     ? `<p style="margin:8px 0 0;font-size:11px;color:${BRAND.slate}">Only ${chartWeekCount === 0 ? 'no weeks' : 'one week'} showing so far. We only recently started receiving the company-wide Evident reports these figures come from. A new point will appear here each week as more real data logs.</p>`
     : '';
@@ -248,10 +289,14 @@ function buildEmail(agg, historyRows = [], overrides = {}) {
     ])}
   </div>
 
+  ${bookedRowsTable}
+
   <div style="padding:26px 36px 0">
     ${sectionLabel('This Month &amp; Year')}
     ${cardRow([
-      statCard('Booked (MTD)', fmtMoney(companyMtdBooked), overrides.companyMtdBooked != null ? [overrideNote] : []),
+      statCard('Booked (MTD)', fmtMoney(companyMtdBooked), overrides.companyMtdBooked != null
+        ? [overrideNote]
+        : [{ text: `${companyMtdBookedCount} case${companyMtdBookedCount === 1 ? '' : 's'}` }]),
       statCard('Billed (MTD)', fmtMoney(companyMtdBilled), overrides.companyMtdBilled != null ? [overrideNote] : [{ text: billedMtdDelta.text, cls: billedMtdDelta.cls }]),
     ])}
     <div style="height:10px"></div>
@@ -293,6 +338,7 @@ function buildEmail(agg, historyRows = [], overrides = {}) {
     william_wip_value: agg.wip.byRep.william || 0,
     ytd_billed_value: agg.booked.ytd.billed,
     company_daily_booked_value: agg.companyDailyBooked,
+    company_daily_booked_count: agg.companyDailyBookedCount,
     company_daily_billed_value: agg.companyDailyBilled,
   };
 

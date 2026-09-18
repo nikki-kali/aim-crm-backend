@@ -227,12 +227,18 @@ function parseAndAggregate(messages, { runDate } = {}) {
     }
 
     if (cls.type === 'companyDailyBooked') {
-      if (!table || table.rows.length === 0) { found.companyDailyBooked = 0; found.companyDailyBookedCount = 0; continue; }
+      if (!table || table.rows.length === 0) { found.companyDailyBooked = 0; found.companyDailyBookedCount = 0; found.companyDailyBookedRows = []; continue; }
       const { headers, rows } = table;
       const totalsRow = rowToObj(headers, rows[rows.length - 1]);
       const totalCol = findCol(headers, 'Sales Value (Total)');
       found.companyDailyBooked = toNum(totalsRow[totalCol]);
       found.companyDailyBookedCount = rows.length - 1;
+      // Per-case customer detail for the Leadership Report's Daily Booked
+      // section (Ben Silberstein's requirement, 2026-09-18) — same rows
+      // extractBookingRows gives evidentCrmSync.js, re-parsed here rather
+      // than shared since this file's convention is small self-contained
+      // extractors, not threading a parsed table through multiple callers.
+      found.companyDailyBookedRows = extractBookingRows(msg.html || '');
       continue;
     }
 
@@ -265,6 +271,12 @@ function parseAndAggregate(messages, { runDate } = {}) {
       const totalsRow = rowToObj(headers, rows[rows.length - 1]);
       const totalCol = findCol(headers, 'Sales Value (Total)');
       found.companyMtdBooked = toNum(totalsRow[totalCol]);
+      // Deliberately NOT deriving a case count from this table's row
+      // count — each row here is one CUSTOMER's month-to-date total, not
+      // one case (verified against the real email: ~150 rows for ~17
+      // days of MTD activity, far fewer than the real daily case volume
+      // would produce). The real case count is self-accumulated in
+      // buildReport.js from each day's companyDailyBookedCount instead.
       continue;
     }
 
@@ -329,6 +341,7 @@ function parseAndAggregate(messages, { runDate } = {}) {
     wip,
     companyDailyBooked: found.companyDailyBooked || 0,
     companyDailyBookedCount: found.companyDailyBookedCount || 0,
+    companyDailyBookedRows: found.companyDailyBookedRows || [],
     companyDailyBilled: found.companyDailyBilled || 0,
     companyMtdBilled: found.companyMtdBilled || 0,
     companyMtdBooked: found.companyMtdBooked || 0,
