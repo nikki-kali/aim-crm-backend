@@ -85,20 +85,20 @@ function buildWeeklyRevenueChartUrl(historyRows, agg) {
   };
 }
 
-// Two-bar Last Month vs. This Month comparison (user request, 2026-09-19,
-// replacing the weekly line chart above — kept intact, not deleted, in
-// case a weekly view is wanted again later). Both months' figures are
-// passed in already resolved by the caller (buildReport.js) rather than
-// computed here, same "chart.js stays a pure renderer" boundary as
-// buildWeeklyRevenueChartUrl above.
+// Two-point Last Month vs. This Month line comparison (user request,
+// 2026-09-19, replacing the weekly line chart above — kept intact, not
+// deleted, in case a weekly view is wanted again later). Both months'
+// figures are passed in already resolved by the caller (buildReport.js)
+// rather than computed here, same "chart.js stays a pure renderer"
+// boundary as buildWeeklyRevenueChartUrl above.
 function buildMonthComparisonChartUrl(lastMonth, thisMonth) {
   const config = {
-    type: 'bar',
+    type: 'line',
     data: {
       labels: [lastMonth.label, thisMonth.label],
       datasets: [
-        { label: 'Booked', data: [lastMonth.booked, thisMonth.booked], backgroundColor: '#06babe' },
-        { label: 'Billed', data: [lastMonth.billed, thisMonth.billed], backgroundColor: '#207290' },
+        { label: 'Booked', data: [lastMonth.booked, thisMonth.booked], borderColor: '#06babe', backgroundColor: '#06babe', fill: false, pointRadius: 6 },
+        { label: 'Billed', data: [lastMonth.billed, thisMonth.billed], borderColor: '#207290', backgroundColor: '#207290', fill: false, pointRadius: 6 },
       ],
     },
     options: { plugins: { legend: { display: true } } },

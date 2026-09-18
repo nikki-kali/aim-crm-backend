@@ -20,6 +20,15 @@ const BRAND = {
   gold: '#d9a441',
   success: '#059669',
   danger: '#b91c1c',
+  // Glassmorphism approximation (user request, 2026-09-19) — real
+  // backdrop-filter blur isn't reliable across email clients (Outlook and
+  // several mobile mail apps strip it), so the "glass" reads through
+  // layered translucency, a soft white edge highlight, and a colored
+  // shadow instead of actual blur. Confirmed this renders consistently by
+  // checking a real render, not assumed.
+  glassBg: 'rgba(255,255,255,.55)',
+  glassBorder: 'rgba(255,255,255,.75)',
+  glassShadow: '0 8px 24px rgba(32,114,144,.12)',
 };
 const FONT_DISPLAY = "'Cormorant Garamond',Georgia,'Times New Roman',serif";
 const FONT_BODY = "'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
@@ -236,7 +245,7 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
   // (#06babe) — teal-on-tealMist measured under 3:1 contrast, hard to
   // read; `deep` clears WCAG AA on every light background used here.
   const todayCard = (label, value, sub) => `
-    <div style="background-color:${BRAND.tealMist};background-image:linear-gradient(160deg,${BRAND.tealMist},${BRAND.blueMist});border:1px solid rgba(6,186,190,.28);border-radius:16px;padding:20px 20px">
+    <div style="background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;padding:20px 20px;box-shadow:${BRAND.glassShadow}">
       <p style="margin:0 0 6px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:${BRAND.deep}">${label}</p>
       <p style="margin:0;font-family:${FONT_DATA};font-size:28px;font-weight:500;color:${BRAND.deep};letter-spacing:-.01em">${value}</p>
       ${sub ? `<p style="margin:6px 0 0;font-size:12px;color:${BRAND.slate}">${sub}</p>` : ''}
@@ -247,7 +256,7 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
   // together (Billed (YTD) needs both) — kept as one card, not a
   // duplicate caption elsewhere, per the "one figure, one card" rule.
   const statCard = (label, value, lines = []) => `
-    <div style="background:#f7faf9;border:1px solid #e5e7eb;border-radius:14px;padding:16px 14px">
+    <div style="background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:14px;padding:16px 14px;box-shadow:${BRAND.glassShadow}">
       <p style="margin:0 0 6px;font-family:${FONT_DATA};font-size:9px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;color:${BRAND.slate}">${label}</p>
       <p style="margin:0;font-family:${FONT_DATA};font-size:19px;font-weight:500;color:${BRAND.ink}">${value}</p>
       ${lines.filter((l) => l && l.text).map((l) => `<p style="margin:5px 0 0;font-family:${FONT_DATA};font-size:10px;color:${l.cls ? deltaColor(l.cls) : BRAND.slate}">${l.text}</p>`).join('')}
@@ -258,7 +267,7 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
   // elsewhere) — roughly half the padding and a smaller value size, which
   // is most of where this email's overall length came from.
   const miniStatCard = (label, value, sub) => `
-    <div style="background:#f7faf9;border:1px solid #e5e7eb;border-radius:10px;padding:9px 10px">
+    <div style="background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:10px;padding:9px 10px;box-shadow:${BRAND.glassShadow}">
       <p style="margin:0 0 3px;font-family:${FONT_DATA};font-size:8px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:${BRAND.slate}">${label}</p>
       <p style="margin:0;font-family:${FONT_DATA};font-size:14px;font-weight:500;color:${BRAND.ink}">${value}${sub ? ` <span style="font-size:10px;font-weight:400;color:${BRAND.slate}">${sub}</span>` : ''}</p>
     </div>`;
@@ -309,7 +318,7 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
   })();
 
   const bookedRowsTable = bookedByCustomer.length === 0 ? '' : `
-    <div style="margin:24px 36px 0;padding:16px 18px;background:#f7faf9;border:1px solid #e5e7eb;border-radius:16px">
+    <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
       ${sectionLabel(`Today's Booked Cases (${agg.companyDailyBookedRows.length} cases, ${bookedByCustomer.length} customers)`)}
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed">
         <tr>
@@ -375,7 +384,7 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
     ])}`;
 
   const repSection = `
-    <div style="margin:24px 36px 0;padding:16px 18px;background:#f7faf9;border:1px solid #e5e7eb;border-radius:16px">
+    <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
       ${sectionLabel('By Sales Rep')}
       ${repBlock('James Delaney', {
         booked: dailyBookedByRep.james,
@@ -416,7 +425,7 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
       </div>`;
   };
   const goalsSection = repGoals.length === 0 || repGoals.every((r) => r.goals.length === 0) ? '' : `
-    <div style="margin:24px 36px 0;padding:16px 18px;background:#f7faf9;border:1px solid #e5e7eb;border-radius:16px">
+    <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
       ${sectionLabel('Goal Progress')}
       ${repGoals.filter((r) => r.goals.length > 0).map((r) => `
         <p style="margin:0 0 5px;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}">${escapeHtml(r.repName)}</p>
@@ -435,7 +444,7 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body style="margin:0;padding:0;background-color:${BRAND.deep};background-image:linear-gradient(160deg,${BRAND.skyBlue} 0%,${BRAND.deep} 100%);font-family:${FONT_BODY}">
-<div style="max-width:600px;margin:40px auto;background:#fff;border-radius:24px;overflow:hidden;box-shadow:0 6px 28px rgba(32,114,144,.16)">
+<div style="max-width:600px;margin:40px auto;background-color:rgba(255,255,255,.96);background-image:linear-gradient(175deg,rgba(255,255,255,.99) 0%,${BRAND.tealMist} 55%,${BRAND.blueMist} 100%);border:1px solid rgba(255,255,255,.6);border-radius:24px;overflow:hidden;box-shadow:0 10px 40px rgba(32,114,144,.22)">
 
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
     <tr>
@@ -470,7 +479,7 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
     ])}
   </div>
 
-  <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.tealMist};border:1px solid rgba(6,186,190,.2);border-radius:16px">
+  <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
     ${sectionLabel('Last Month vs. This Month')}
     <img src="${monthChartUrl}" alt="Last month vs. this month booked and billed revenue chart" style="max-width:100%;border-radius:8px;display:block" />
     ${chartNote}
