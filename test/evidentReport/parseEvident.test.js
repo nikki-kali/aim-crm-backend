@@ -213,6 +213,24 @@ test('flags missing reports instead of silently under-reporting', () => {
   assert.ok(agg.missing.includes('MTD Booked Daily Update'));
 });
 
+test('Last Month vs. This Month chart uses the real verified August baseline and real September MTD figures', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
+  const { html } = buildEmail(agg, []);
+
+  assert.match(html, /Last Month vs\. This Month/);
+  // "Last Month" bar: the one-time verified August 2026 baseline.
+  assert.match(html, /August%202026/);
+  // "This Month" bar: real September MTD, from Evident's own MTD Booked
+  // Daily Update / Daily MTD Total Billed reports in ALL_MESSAGES
+  // (6935 booked, 89442.46 billed).
+  assert.match(html, /September%202026%20\(MTD\)/);
+  assert.match(html, /157654\.32/); // August booked
+  assert.match(html, /147772\.4/); // August billed
+  assert.match(html, /6935/); // September MTD booked
+  assert.match(html, /89442\.46/); // September MTD billed
+  assert.doesNotMatch(html, /Weekly Booked vs\. Billed Revenue/);
+});
+
 test('email copy has no em dashes and no removed footer line', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
   const { html, subject } = buildEmail(agg, []);

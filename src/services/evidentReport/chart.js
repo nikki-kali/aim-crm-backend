@@ -85,4 +85,25 @@ function buildWeeklyRevenueChartUrl(historyRows, agg) {
   };
 }
 
-module.exports = { buildWeeklyRevenueChartUrl };
+// Two-bar Last Month vs. This Month comparison (user request, 2026-09-19,
+// replacing the weekly line chart above — kept intact, not deleted, in
+// case a weekly view is wanted again later). Both months' figures are
+// passed in already resolved by the caller (buildReport.js) rather than
+// computed here, same "chart.js stays a pure renderer" boundary as
+// buildWeeklyRevenueChartUrl above.
+function buildMonthComparisonChartUrl(lastMonth, thisMonth) {
+  const config = {
+    type: 'bar',
+    data: {
+      labels: [lastMonth.label, thisMonth.label],
+      datasets: [
+        { label: 'Booked', data: [lastMonth.booked, thisMonth.booked], backgroundColor: '#06babe' },
+        { label: 'Billed', data: [lastMonth.billed, thisMonth.billed], backgroundColor: '#207290' },
+      ],
+    },
+    options: { plugins: { legend: { display: true } } },
+  };
+  return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(config))}`;
+}
+
+module.exports = { buildWeeklyRevenueChartUrl, buildMonthComparisonChartUrl };

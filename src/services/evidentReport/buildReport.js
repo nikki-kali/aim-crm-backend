@@ -6,7 +6,7 @@
 // ../email.js, matching this codebase's existing convention of duplicating
 // brand hex/font values per template file (see CLAUDE.md's note on this).
 
-const { buildWeeklyRevenueChartUrl } = require('./chart');
+const { buildMonthComparisonChartUrl } = require('./chart');
 const { LEGACY_YTD_REVENUE_ADJUSTMENT } = require('../clientRevenue');
 
 const BRAND = {
@@ -55,6 +55,26 @@ const COMPANY_YTD_SNAPSHOT = {
   asOfLabel: 'Sep 16, 2026',
   booked: 363360.57,
   billed: 311452.46 + LEGACY_YTD_REVENUE_ADJUSTMENT,
+};
+
+// One-time verified baseline for the Last Month vs. This Month chart's
+// "Last Month" bar — real August 2026 totals (1,490 cases / $157,654.32
+// booked, $147,772.40 billed), sourced from a real "EviSmart Report
+// Totals" email 2026-09-18 that manually previewed Evident's MTD reports
+// with the month changed on-screen (nothing else gives a company-wide
+// August figure — Evident's live "MTD Booked Daily Update"/"Daily MTD
+// Total Billed" reports only ever show the CURRENT month). This is a
+// genuinely temporary exception, unlike COMPANY_YTD_SNAPSHOT above: once
+// this pipeline's own real daily logging (started 2026-09-15) has covered
+// a complete month, "last month" can always be read from real logged
+// history instead — starting with the Sep-vs-Oct comparison in November,
+// no hardcoded prior-month baseline should be needed again. Update this
+// constant by hand only for the one remaining transition (comparing a
+// month before real tracking existed against one after).
+const LAST_MONTH_SNAPSHOT = {
+  label: 'August 2026',
+  booked: 157654.32,
+  billed: 147772.40,
 };
 
 // Real customer/clinic names from Evident's own data — never a hardcoded
@@ -188,7 +208,19 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
     year: 'numeric',
   });
 
-  const { url: chartUrl, weekCount: chartWeekCount } = buildWeeklyRevenueChartUrl(historyRows, agg);
+  // Last Month vs. This Month Booked/Billed comparison (user request,
+  // 2026-09-19, replacing the weekly trend chart). "This Month" uses the
+  // same final companyMtdBooked/companyMtdBilled values the MTD cards
+  // above show — real, Evident-sourced MTD-to-date figures, not a partial
+  // sum limited by when this pipeline started logging (see the comments
+  // above on how those two are resolved). "Last Month" is the one-time
+  // verified LAST_MONTH_SNAPSHOT baseline (see its own comment for why
+  // this is a temporary exception, not an ongoing manual step).
+  const thisMonthLabel = new Date(`${agg.runDate}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const monthChartUrl = buildMonthComparisonChartUrl(
+    LAST_MONTH_SNAPSHOT,
+    { label: `${thisMonthLabel} (MTD)`, booked: companyMtdBooked, billed: companyMtdBilled }
+  );
 
   const deltaColor = (cls) => (cls === 'up' ? BRAND.success : cls === 'down' ? BRAND.danger : BRAND.slate);
 
@@ -392,9 +424,7 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
       `).join('')}
     </div>`;
 
-  const chartNote = chartWeekCount < 2
-    ? `<p style="margin:8px 0 0;font-size:11px;color:${BRAND.slate}">Only ${chartWeekCount === 0 ? 'no weeks' : 'one week'} showing so far. We only recently started receiving the company-wide Evident reports these figures come from. A new point will appear here each week as more real data logs.</p>`
-    : '';
+  const chartNote = `<p style="margin:8px 0 0;font-size:11px;color:${BRAND.slate}">"This Month" is real MTD-to-date, not a full month yet, so the two bars aren't a like-for-like comparison until the month ends.</p>`;
 
   const html = `<!DOCTYPE html>
 <html>
@@ -441,8 +471,8 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
   </div>
 
   <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.tealMist};border:1px solid rgba(6,186,190,.2);border-radius:16px">
-    ${sectionLabel('Weekly Booked vs. Billed Revenue')}
-    <img src="${chartUrl}" alt="Weekly booked vs. billed revenue chart" style="max-width:100%;border-radius:8px;display:block" />
+    ${sectionLabel('Last Month vs. This Month')}
+    <img src="${monthChartUrl}" alt="Last month vs. this month booked and billed revenue chart" style="max-width:100%;border-radius:8px;display:block" />
     ${chartNote}
   </div>
 
