@@ -133,7 +133,8 @@ test('By Sales Rep section (Report #2) renders real per-rep daily and MTD figure
   assert.match(html, /William Alexander/);
   // Real fixture: William has exactly 1 booked case (Dr. Alberto Gonzalez,
   // $0) and 1 billed case ($0) attributed to him; James has none of either.
-  assert.match(html, /1 \/ \$0\.00/);
+  // Rendered as a stat card: "1 case" label, "$0.00" value on its own line.
+  assert.match(html, /1 case[\s\S]{0,300}?\$0\.00/);
   // Real per-rep MTD columns straight from Evident's own totals row.
   assert.match(html, /\$1,458\.97/); // James MTD Billed
   assert.match(html, /\$497\.45/); // William MTD Billed

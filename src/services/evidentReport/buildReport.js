@@ -225,9 +225,14 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
   // (not just padding inside a shared cell) — a plain <table> can't put
   // margin between adjacent <td>s, so the gap is its own empty spacer
   // column, same trick used for the two-column "Today" row below.
+  // table-layout:fixed is load-bearing on mobile — without it, auto
+  // layout sizes each <td> by its card's own content/padding rather than
+  // the specified percentage, and a 2-card row can render wider than the
+  // viewport (the second card cut off at the screen edge, confirmed via a
+  // real 390px-wide render before this fix).
   const cardRow = (cards) => {
     const width = (100 / cards.length - 2).toFixed(2);
-    return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+    return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed"><tr>
       ${cards.map((c, i) => `${i > 0 ? `<td width="2%"></td>` : ''}<td width="${width}%" style="vertical-align:top">${c}</td>`).join('')}
     </tr></table>`;
   };
@@ -243,15 +248,22 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
   // Report - Nadine", company-wide, unbounded (matches this codebase's
   // existing convention of never capping a real list — see
   // salesRepDailyReport.js's Active Doctors List). Omitted entirely when
-  // there's nothing to show, rather than an empty table shell.
+  // there's nothing to show, rather than an empty table shell. Placed at
+  // the END of the email (see the template below) rather than right after
+  // the Today cards — the raw per-case list is reference detail, not the
+  // headline; leadership sees the summary/goals content first, with this
+  // available further down for anyone who wants it. Card-wrapped (matches
+  // every other section) and table-layout:fixed with explicit column
+  // widths so long customer names wrap onto their own line on a phone
+  // instead of colliding with the value column.
   const bookedRowsTable = agg.companyDailyBookedRows.length === 0 ? '' : `
-    <div style="margin:18px 36px 0">
+    <div style="margin:30px 36px 0;padding:20px 22px;background:#f7faf9;border:1px solid #e5e7eb;border-radius:16px">
       ${sectionLabel(`Today's Booked Cases (${agg.companyDailyBookedRows.length})`)}
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed">
         ${agg.companyDailyBookedRows.map((r) => `
           <tr>
-            <td style="padding:7px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;color:${BRAND.ink}">${escapeHtml(r.customerName || '-')}</td>
-            <td style="padding:7px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;font-family:${FONT_DATA};color:${BRAND.slate};text-align:right;white-space:nowrap">${fmtMoney(r.value)}</td>
+            <td width="70%" style="padding:7px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;color:${BRAND.ink};word-break:break-word">${escapeHtml(r.customerName || '-')}</td>
+            <td width="30%" style="padding:7px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;font-family:${FONT_DATA};color:${BRAND.slate};text-align:right;white-space:nowrap">${fmtMoney(r.value)}</td>
           </tr>`).join('')}
       </table>
     </div>`;
@@ -284,40 +296,42 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
   const dailyBookedByRep = groupRowsByRep(agg.companyDailyBookedRows, 'value');
   const dailyBilledByRep = groupRowsByRep(agg.companyDailyBilledRows, 'billedValue');
 
-  const repRow = (repLabel, daily) => `
-    <tr>
-      <td style="padding:9px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;font-weight:600;color:${BRAND.ink}">${repLabel}</td>
-      <td style="padding:9px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;font-family:${FONT_DATA};color:${BRAND.slate};text-align:right">${daily.booked.count} / ${fmtMoney(daily.booked.value)}</td>
-      <td style="padding:9px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;font-family:${FONT_DATA};color:${BRAND.slate};text-align:right">${daily.billed.count} / ${fmtMoney(daily.billed.value)}</td>
-      <td style="padding:9px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;font-family:${FONT_DATA};color:${BRAND.slate};text-align:right">${daily.mtdBooked == null ? '-' : fmtMoney(daily.mtdBooked)}</td>
-      <td style="padding:9px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;font-family:${FONT_DATA};color:${BRAND.slate};text-align:right">${daily.mtdBilled == null ? '-' : fmtMoney(daily.mtdBilled)}</td>
-    </tr>`;
+  // Stacked per-rep cards, not a wide 5-column table — a table with Rep +
+  // 4 numeric columns has no room to breathe on a phone (confirmed on a
+  // real 390px render: two figures collided into unreadable text like
+  // "$0.00$1,458.97"). Reuses statCard/cardRow, the same building blocks
+  // as every other section, so this also fixes the earlier inconsistency
+  // of this being the one section with no card treatment at all.
+  const repSubLabel = (text) => `<p style="margin:0 0 10px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}">${text}</p>`;
+  const repBlock = (repName, daily) => `
+    ${repSubLabel(escapeHtml(repName))}
+    ${cardRow([
+      statCard('Daily Booked', `${daily.booked.count} case${daily.booked.count === 1 ? '' : 's'}`, [{ text: fmtMoney(daily.booked.value) }]),
+      statCard('Daily Billed', `${daily.billed.count} case${daily.billed.count === 1 ? '' : 's'}`, [{ text: fmtMoney(daily.billed.value) }]),
+    ])}
+    <div style="height:10px"></div>
+    ${cardRow([
+      statCard('MTD Booked', daily.mtdBooked == null ? '-' : fmtMoney(daily.mtdBooked)),
+      statCard('MTD Billed', daily.mtdBilled == null ? '-' : fmtMoney(daily.mtdBilled)),
+    ])}`;
 
   const repSection = `
-    <div style="margin:30px 36px 0">
+    <div style="margin:30px 36px 0;padding:20px 22px;background:#f7faf9;border:1px solid #e5e7eb;border-radius:16px">
       ${sectionLabel('By Sales Rep')}
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
-        <tr>
-          <td style="padding:0 0 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}">Rep</td>
-          <td style="padding:0 0 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate};text-align:right">Daily Booked</td>
-          <td style="padding:0 0 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate};text-align:right">Daily Billed</td>
-          <td style="padding:0 0 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate};text-align:right">MTD Booked</td>
-          <td style="padding:0 0 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate};text-align:right">MTD Billed</td>
-        </tr>
-        ${repRow('James Delaney', {
-          booked: dailyBookedByRep.james,
-          billed: dailyBilledByRep.james,
-          mtdBooked: agg.companyMtdBookedByRep ? agg.companyMtdBookedByRep.james : null,
-          mtdBilled: agg.companyMtdBilledByRep ? agg.companyMtdBilledByRep.james : null,
-        })}
-        ${repRow('William Alexander', {
-          booked: dailyBookedByRep.william,
-          billed: dailyBilledByRep.william,
-          mtdBooked: agg.companyMtdBookedByRep ? agg.companyMtdBookedByRep.william : null,
-          mtdBilled: agg.companyMtdBilledByRep ? agg.companyMtdBilledByRep.william : null,
-        })}
-      </table>
-      <p style="margin:8px 0 0;font-size:10.5px;color:${BRAND.slate}">Daily columns show cases / value. "-" means today's MTD report didn't include a per-rep breakdown.</p>
+      ${repBlock('James Delaney', {
+        booked: dailyBookedByRep.james,
+        billed: dailyBilledByRep.james,
+        mtdBooked: agg.companyMtdBookedByRep ? agg.companyMtdBookedByRep.james : null,
+        mtdBilled: agg.companyMtdBilledByRep ? agg.companyMtdBilledByRep.james : null,
+      })}
+      <div style="height:20px"></div>
+      ${repBlock('William Alexander', {
+        booked: dailyBookedByRep.william,
+        billed: dailyBilledByRep.william,
+        mtdBooked: agg.companyMtdBookedByRep ? agg.companyMtdBookedByRep.william : null,
+        mtdBilled: agg.companyMtdBilledByRep ? agg.companyMtdBilledByRep.william : null,
+      })}
+      <p style="margin:16px 0 0;font-size:10.5px;color:${BRAND.slate}">"-" means today's MTD report didn't include a per-rep breakdown.</p>
     </div>`;
 
   // Report #3: goal progress (Ben Silberstein's requirement, 2026-09-19) —
@@ -385,8 +399,6 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
     ])}
   </div>
 
-  ${bookedRowsTable}
-
   <div style="padding:26px 36px 0">
     ${sectionLabel('This Month &amp; Year')}
     ${cardRow([
@@ -410,6 +422,8 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
   ${repSection}
 
   ${goalsSection}
+
+  ${bookedRowsTable}
 
   <div style="margin:32px 36px 0;padding-top:20px;border-top:1px solid ${HAIRLINE}">
     <p style="margin:0;font-size:11px;color:${BRAND.slate}">A PDF copy of this report is attached.</p>
