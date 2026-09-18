@@ -79,11 +79,17 @@ test('parseAndAggregate exposes companyDailyBookedRows for the Leadership Report
   assert.deepEqual(agg.companyDailyBookedRows[93], { ref: '5663', customerName: 'Dr. ALBERTO GONZALEZ', value: 0, salesperson: 'william' });
 });
 
-test("Today's Booked Cases table renders every real row, HTML-escaped, and is omitted when there are none", () => {
+test("Today's Booked Cases table aggregates by customer (matches Evident's real Report 13 format), HTML-escaped, and is omitted when there are none", () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
   const { html } = buildEmail(agg, []);
-  assert.match(html, /Today's Booked Cases \(94\)/);
+  // 94 real rows collapse to 47 unique customers (format confirmed
+  // 2026-09-18 against a real "EviSmart Report Totals" email showing
+  // Evident's own Report 13 aggregates the same way).
+  assert.match(html, /Today's Booked Cases \(94 cases, 47 customers\)/);
   assert.match(html, />SUNSET TERRACE</);
+  // SUNSET TERRACE has 9 real cases totaling $336.90 — the aggregated
+  // count/value, not any single row's own value.
+  assert.match(html, />SUNSET TERRACE<[\s\S]{0,300}?>9<[\s\S]{0,300}?\$336\.90/);
   assert.match(html, />Dr\. ALBERTO GONZALEZ</);
 
   const emptyAgg = { ...agg, companyDailyBookedRows: [] };
@@ -133,8 +139,8 @@ test('By Sales Rep section (Report #2) renders real per-rep daily and MTD figure
   assert.match(html, /William Alexander/);
   // Real fixture: William has exactly 1 booked case (Dr. Alberto Gonzalez,
   // $0) and 1 billed case ($0) attributed to him; James has none of either.
-  // Rendered as a stat card: "1 case" label, "$0.00" value on its own line.
-  assert.match(html, /1 case[\s\S]{0,300}?\$0\.00/);
+  // Rendered as a compact mini stat card: count, then value inline.
+  assert.match(html, />1 <span[\s\S]{0,100}?\$0\.00/);
   // Real per-rep MTD columns straight from Evident's own totals row.
   assert.match(html, /\$1,458\.97/); // James MTD Billed
   assert.match(html, /\$497\.45/); // William MTD Billed
@@ -145,7 +151,7 @@ test('By Sales Rep MTD columns show "-" (not a fabricated $0) when the report ha
   const agg = parseAndAggregate(messagesWithoutMtdBooked, { runDate: '2026-09-11' });
   assert.equal(agg.companyMtdBookedByRep, null);
   const { html } = buildEmail(agg, []);
-  assert.match(html, /"-" means today's MTD report didn't include a per-rep breakdown/);
+  assert.match(html, /"-" = no per-rep MTD breakdown today/);
 });
 
 test('Goal Progress section (Report #3) renders real goal data passed in by the caller and is omitted when there are none', () => {
