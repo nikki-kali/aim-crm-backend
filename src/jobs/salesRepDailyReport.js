@@ -16,13 +16,16 @@ function startSalesRepDailyReportScheduler() {
       // Gated behind SALES_REP_DAILY_REPORT_ENABLED, same pattern as
       // WEEKLY_REPORT_ENABLED/UNASSIGNED_LEADS_REPORT_ENABLED/
       // EVIDENT_REPORT_ENABLED — lets the code ship and be reviewed via
-      // the admin manual-send route before a real weekday 8am send to
-      // James/William goes live on its own.
+      // the admin manual-send route before this starts firing on its own
+      // every weekday morning.
       if (process.env.SALES_REP_DAILY_REPORT_ENABLED !== 'true') {
         console.log('[sales-rep-daily-report] scheduled run skipped — SALES_REP_DAILY_REPORT_ENABLED is not set to true')
         return
       }
-      console.log('[sales-rep-daily-report] Running scheduled daily run')
+      // Sends each rep's preview (with its own "Approve & Send" button) to
+      // APPROVER_EMAIL — never straight to the rep. See
+      // sendAllSalesRepDailyReports in services/salesRepDailyReport.js.
+      console.log('[sales-rep-daily-report] Running scheduled daily preview run')
       try {
         await sendAllSalesRepDailyReports()
       } catch (err) {

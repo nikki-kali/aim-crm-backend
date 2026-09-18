@@ -356,8 +356,12 @@ async function sendRepDailyReportForApproval(rep, dateStr = todayEasternDateStri
 }
 
 // Weekday-morning automated send (jobs/salesRepDailyReport.js) — James and
-// William only, cc'd to Yoel. Best-effort per rep so one bad email/DB
-// hiccup doesn't block the other rep's report.
+// William only. Sends each rep's preview to APPROVER_EMAIL with its own
+// "Approve & Send" button (sendRepDailyReportForApproval), never straight
+// to the rep — was sendRepDailyReport() (direct real send) until
+// 2026-09-18; that bypassed the click-to-approve system entirely, same
+// bug jobs/evidentReport.js had. Best-effort per rep so one bad email/DB
+// hiccup doesn't block the other rep's preview.
 async function sendAllSalesRepDailyReports() {
   const { rows: reps } = await db.query(
     `SELECT id, name, email FROM users WHERE email = ANY($1::text[])`,
@@ -366,7 +370,7 @@ async function sendAllSalesRepDailyReports() {
   const results = []
   for (const rep of reps) {
     try {
-      await sendRepDailyReport(rep)
+      await sendRepDailyReportForApproval(rep)
       results.push({ rep: rep.email, success: true })
     } catch (err) {
       console.error(`[sales-rep-daily-report] failed for ${rep.email}:`, err.message)
