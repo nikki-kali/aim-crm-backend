@@ -161,6 +161,27 @@ function extractBilledRows(html) {
     .filter((r) => r.ref);
 }
 
+// Reads the real per-rep breakdown Evident already puts in the totals row
+// of "MTD Booked Daily Update" / "Daily MTD Total Billed" — both have N/A
+// / Delaney, James / Alexander, WIlliam columns (real header, note the
+// mixed-case typo) alongside the grand total. Used by Report #2's
+// by-sales-rep MTD figures (Ben Silberstein's requirement, 2026-09-19)
+// instead of re-deriving them from the row-level company-wide detail, so
+// this exactly matches whatever total Evident itself considers each rep's
+// MTD share to be. Returns null if any column is missing (report's shape
+// changed) rather than silently returning zeros.
+function extractRepColumns(headers, totalsRow) {
+  const naCol = findCol(headers, 'N/A');
+  const jamesCol = findCol(headers, 'Delaney');
+  const williamCol = findCol(headers, 'Alexander');
+  if (!naCol || !jamesCol || !williamCol) return null;
+  return {
+    na: toNum(totalsRow[naCol]),
+    james: toNum(totalsRow[jamesCol]),
+    william: toNum(totalsRow[williamCol]),
+  };
+}
+
 const EXPECTED = [
   { type: 'dailyBooked', rep: 'james', label: "Daily Booked Cases - James' Doctors" },
   { type: 'dailyBooked', rep: 'william', label: "Daily Booked Cases - William's Doctors" },
@@ -243,20 +264,25 @@ function parseAndAggregate(messages, { runDate } = {}) {
     }
 
     if (cls.type === 'companyDailyBilled') {
-      if (!table || table.rows.length === 0) { found.companyDailyBilled = 0; continue; }
+      if (!table || table.rows.length === 0) { found.companyDailyBilled = 0; found.companyDailyBilledRows = []; continue; }
       const { headers, rows } = table;
       const totalsRow = rowToObj(headers, rows[rows.length - 1]);
       const billedCol = findCol(headers, 'Total Billed');
       found.companyDailyBilled = toNum(totalsRow[billedCol]);
+      // Per-case detail for Report #2's by-rep breakdown (Ben Silberstein's
+      // requirement, 2026-09-19) — same reasoning as companyDailyBookedRows
+      // above.
+      found.companyDailyBilledRows = extractBilledRows(msg.html || '');
       continue;
     }
 
     if (cls.type === 'companyMtdBilled') {
-      if (!table || table.rows.length === 0) { found.companyMtdBilled = 0; continue; }
+      if (!table || table.rows.length === 0) { found.companyMtdBilled = 0; found.companyMtdBilledByRep = null; continue; }
       const { headers, rows } = table;
       const totalsRow = rowToObj(headers, rows[rows.length - 1]);
       const billedCol = findCol(headers, 'Total Billed');
       found.companyMtdBilled = toNum(totalsRow[billedCol]);
+      found.companyMtdBilledByRep = extractRepColumns(headers, totalsRow);
       continue;
     }
 
@@ -266,11 +292,12 @@ function parseAndAggregate(messages, { runDate } = {}) {
     // report gave a true company-wide MTD Booked figure at all, so
     // buildReport.js fell back to self-accumulating from daily totals.
     if (cls.type === 'companyMtdBooked') {
-      if (!table || table.rows.length === 0) { found.companyMtdBooked = 0; continue; }
+      if (!table || table.rows.length === 0) { found.companyMtdBooked = 0; found.companyMtdBookedByRep = null; continue; }
       const { headers, rows } = table;
       const totalsRow = rowToObj(headers, rows[rows.length - 1]);
       const totalCol = findCol(headers, 'Sales Value (Total)');
       found.companyMtdBooked = toNum(totalsRow[totalCol]);
+      found.companyMtdBookedByRep = extractRepColumns(headers, totalsRow);
       // Deliberately NOT deriving a case count from this table's row
       // count — each row here is one CUSTOMER's month-to-date total, not
       // one case (verified against the real email: ~150 rows for ~17
@@ -343,10 +370,13 @@ function parseAndAggregate(messages, { runDate } = {}) {
     companyDailyBookedCount: found.companyDailyBookedCount || 0,
     companyDailyBookedRows: found.companyDailyBookedRows || [],
     companyDailyBilled: found.companyDailyBilled || 0,
+    companyDailyBilledRows: found.companyDailyBilledRows || [],
     companyMtdBilled: found.companyMtdBilled || 0,
+    companyMtdBilledByRep: found.companyMtdBilledByRep || null,
     companyMtdBooked: found.companyMtdBooked || 0,
+    companyMtdBookedByRep: found.companyMtdBookedByRep || null,
     missing,
   };
 }
 
-module.exports = { parseAndAggregate, parseTable, classify, toNum, findCol, rowToObj, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows };
+module.exports = { parseAndAggregate, parseTable, classify, toNum, findCol, rowToObj, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractRepColumns };

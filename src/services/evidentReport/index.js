@@ -5,8 +5,35 @@ const { getHistory, appendRow } = require('./log')
 const { renderPdf } = require('./pdf')
 const { sendEmail } = require('../email')
 const { APPROVER_EMAIL, createApprovalToken, buildApproveUrl, injectApprovalBanner } = require('../reportApproval')
+const db = require('../../config/db')
+const { computeProgress } = require('../goalProgress')
+const { DAILY_REPORT_REP_EMAILS } = require('../salesRepDailyReport')
 
 const RECIPIENTS = ['ben@aimdentallab.com', 'execassistant@aimdentallab.com', 'yoel@khdentallab.com']
+
+// Report #3's goal-progress section (Ben Silberstein's requirement,
+// 2026-09-19) — each rep's goals whose period covers today, with real
+// progress computed the same way the Goals UI does (shared computeProgress,
+// see goalProgress.js). A plain data-fetch kept OUT of buildReport.js on
+// purpose: that file stays a pure function of (agg, historyRows, ...) with
+// no DB access, so its existing tests never need a database. Same reason
+// overrides/repGoals are both passed in rather than queried inside it.
+async function fetchRepGoalsWithProgress() {
+  const { rows: reps } = await db.query(
+    `SELECT id, name, email FROM users WHERE email = ANY($1::text[]) ORDER BY name`,
+    [DAILY_REPORT_REP_EMAILS]
+  )
+  const result = []
+  for (const rep of reps) {
+    const { rows: goals } = await db.query(
+      `SELECT * FROM goals WHERE rep_id=$1 AND period_start <= CURRENT_DATE AND period_end >= CURRENT_DATE ORDER BY created_at`,
+      [rep.id]
+    )
+    const withProgress = await Promise.all(goals.map(computeProgress))
+    result.push({ repName: rep.name || rep.email, goals: withProgress })
+  }
+  return result
+}
 
 // Anchored to America/New_York (the cron's own timezone) rather than
 // falling back to parseEvident.js's UTC-derived default — the admin manual
@@ -46,7 +73,8 @@ async function runEvidentReport() {
     console.warn(`[evident-report] missing reports: ${aggregate.missing.join(', ')}`)
   }
 
-  const { subject, html, sheetRow } = buildEmail(aggregate, historyRows)
+  const repGoals = await fetchRepGoalsWithProgress()
+  const { subject, html, sheetRow } = buildEmail(aggregate, historyRows, {}, repGoals)
 
   // Best-effort: a PDF failure shouldn't block the report from sending at
   // all — it sends HTML-only instead, loudly logged, never silent.
@@ -122,7 +150,8 @@ async function sendEvidentReportForApproval() {
   const historyRows = await getHistory()
   const messages = await fetchEvidentEmails()
   const aggregate = parseAndAggregate(messages, { runDate })
-  const { subject, html } = buildEmail(aggregate, historyRows)
+  const repGoals = await fetchRepGoalsWithProgress()
+  const { subject, html } = buildEmail(aggregate, historyRows, {}, repGoals)
 
   const token = await createApprovalToken({ reportType: 'evident-report', reportDate: runDate })
   const approveUrl = buildApproveUrl(token)

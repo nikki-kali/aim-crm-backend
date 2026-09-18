@@ -90,7 +90,7 @@ function delta(curr, prev) {
 // automated figures, so tomorrow's day-over-day delta keeps comparing
 // like-sourced numbers rather than an override against an un-overridden
 // baseline.
-function buildEmail(agg, historyRows = [], overrides = {}) {
+function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
   const prior = historyRows
     .filter((r) => r.date && r.date < agg.runDate)
     .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
@@ -168,15 +168,16 @@ function buildEmail(agg, historyRows = [], overrides = {}) {
   // only once agg.runDate is actually after the baseline date — otherwise
   // today's activity is already folded into the baseline itself and
   // adding it again would double-count.
-  const ytdBookedAccrued = historyRows
-    .filter((r) => r.date && r.date > COMPANY_YTD_SNAPSHOT.asOfDate)
-    .reduce((sum, r) => sum + Number(r.company_daily_booked_value || 0), 0)
-    + (agg.runDate > COMPANY_YTD_SNAPSHOT.asOfDate ? agg.companyDailyBooked : 0);
+  // companyYtdBooked (COMPANY_YTD_SNAPSHOT.booked + accrual) is deliberately
+  // NOT derived/rendered here — Ben Silberstein's Report 1 spec
+  // (2026-09-19) asks for a single "YTD - Total sales" figure only,
+  // confirmed to mean billed. COMPANY_YTD_SNAPSHOT.booked itself is left
+  // in place above, verified real data kept for provenance in case Booked
+  // YTD needs to come back.
   const ytdBilledAccrued = historyRows
     .filter((r) => r.date && r.date > COMPANY_YTD_SNAPSHOT.asOfDate)
     .reduce((sum, r) => sum + Number(r.company_daily_billed_value || 0), 0)
     + (agg.runDate > COMPANY_YTD_SNAPSHOT.asOfDate ? agg.companyDailyBilled : 0);
-  const companyYtdBooked = COMPANY_YTD_SNAPSHOT.booked + ytdBookedAccrued;
   const companyYtdBilled = COMPANY_YTD_SNAPSHOT.billed + ytdBilledAccrued;
   const ytdNote = { text: `Baseline verified ${COMPANY_YTD_SNAPSHOT.asOfLabel} + daily activity since` };
 
@@ -249,10 +250,105 @@ function buildEmail(agg, historyRows = [], overrides = {}) {
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
         ${agg.companyDailyBookedRows.map((r) => `
           <tr>
-            <td style="padding:7px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;color:${BRAND.ink}">${escapeHtml(r.customerName || '—')}</td>
+            <td style="padding:7px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;color:${BRAND.ink}">${escapeHtml(r.customerName || '-')}</td>
             <td style="padding:7px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;font-family:${FONT_DATA};color:${BRAND.slate};text-align:right;white-space:nowrap">${fmtMoney(r.value)}</td>
           </tr>`).join('')}
       </table>
+    </div>`;
+
+  // Report #2: by-sales-rep breakdown (Ben Silberstein's requirement,
+  // 2026-09-19) — daily count+value grouped from the same row-level
+  // company-wide data Report 1's customer-detail table already uses
+  // (consistent source, not a second report type that could drift from
+  // Report 1's totals); MTD value-only read directly from Evident's own
+  // per-rep columns in "MTD Booked Daily Update"/"Daily MTD Total Billed"
+  // (see extractRepColumns in parseEvident.js) rather than re-derived, so
+  // it matches whatever Evident itself considers each rep's MTD share.
+  // Only James/William shown — "by sales rep" excludes the N/A bucket,
+  // which Report 1's company-wide totals already cover.
+  // valueField differs by row type: booking rows only have `value` (Sales
+  // Value Total); billed rows have both `value` and `billedValue` (Sales
+  // Value Total Billed) — the latter is the real dollar amount billed,
+  // which is what "Total Billed by sales rep" means, not the case's total
+  // value.
+  const groupRowsByRep = (rows, valueField = 'value') => {
+    const g = { james: { count: 0, value: 0 }, william: { count: 0, value: 0 } };
+    for (const r of rows) {
+      const key = r.salesperson === 'james' ? 'james' : r.salesperson === 'william' ? 'william' : null;
+      if (!key) continue;
+      g[key].count += 1;
+      g[key].value += r[valueField];
+    }
+    return g;
+  };
+  const dailyBookedByRep = groupRowsByRep(agg.companyDailyBookedRows, 'value');
+  const dailyBilledByRep = groupRowsByRep(agg.companyDailyBilledRows, 'billedValue');
+
+  const repRow = (repLabel, daily) => `
+    <tr>
+      <td style="padding:9px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;font-weight:600;color:${BRAND.ink}">${repLabel}</td>
+      <td style="padding:9px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;font-family:${FONT_DATA};color:${BRAND.slate};text-align:right">${daily.booked.count} / ${fmtMoney(daily.booked.value)}</td>
+      <td style="padding:9px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;font-family:${FONT_DATA};color:${BRAND.slate};text-align:right">${daily.billed.count} / ${fmtMoney(daily.billed.value)}</td>
+      <td style="padding:9px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;font-family:${FONT_DATA};color:${BRAND.slate};text-align:right">${daily.mtdBooked == null ? '-' : fmtMoney(daily.mtdBooked)}</td>
+      <td style="padding:9px 0;border-bottom:1px solid ${HAIRLINE};font-size:12.5px;font-family:${FONT_DATA};color:${BRAND.slate};text-align:right">${daily.mtdBilled == null ? '-' : fmtMoney(daily.mtdBilled)}</td>
+    </tr>`;
+
+  const repSection = `
+    <div style="margin:30px 36px 0">
+      ${sectionLabel('By Sales Rep')}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
+        <tr>
+          <td style="padding:0 0 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}">Rep</td>
+          <td style="padding:0 0 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate};text-align:right">Daily Booked</td>
+          <td style="padding:0 0 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate};text-align:right">Daily Billed</td>
+          <td style="padding:0 0 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate};text-align:right">MTD Booked</td>
+          <td style="padding:0 0 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate};text-align:right">MTD Billed</td>
+        </tr>
+        ${repRow('James Delaney', {
+          booked: dailyBookedByRep.james,
+          billed: dailyBilledByRep.james,
+          mtdBooked: agg.companyMtdBookedByRep ? agg.companyMtdBookedByRep.james : null,
+          mtdBilled: agg.companyMtdBilledByRep ? agg.companyMtdBilledByRep.james : null,
+        })}
+        ${repRow('William Alexander', {
+          booked: dailyBookedByRep.william,
+          billed: dailyBilledByRep.william,
+          mtdBooked: agg.companyMtdBookedByRep ? agg.companyMtdBookedByRep.william : null,
+          mtdBilled: agg.companyMtdBilledByRep ? agg.companyMtdBilledByRep.william : null,
+        })}
+      </table>
+      <p style="margin:8px 0 0;font-size:10.5px;color:${BRAND.slate}">Daily columns show cases / value. "-" means today's MTD report didn't include a per-rep breakdown.</p>
+    </div>`;
+
+  // Report #3: goal progress (Ben Silberstein's requirement, 2026-09-19) —
+  // repGoals is pre-fetched by the caller (evidentReport/index.js), not
+  // queried here, so this file stays a pure function of its arguments
+  // (see fetchRepGoalsWithProgress's own comment for why). Email-safe
+  // progress bar: a fixed-width outer cell with an inner cell sized by
+  // percentage, since flex/CSS width transitions aren't reliable across
+  // email clients but table cell widths are.
+  const goalBar = (goal) => {
+    const pct = Math.min(goal.progress_pct || 0, 100);
+    const isMoney = goal.metric === 'monthly_revenue';
+    const fmt = (n) => isMoney ? fmtMoney(n) : Number(n).toLocaleString();
+    return `
+      <div style="margin:0 0 14px">
+        <p style="margin:0 0 4px;font-size:12.5px;color:${BRAND.ink}">${escapeHtml(goal.title)}
+          <span style="float:right;font-family:${FONT_DATA};font-size:11px;color:${BRAND.slate}">${fmt(goal.current_value)} / ${fmt(goal.target)} (${pct}%)</span>
+        </p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tr>
+          <td style="background:${pct >= 100 ? BRAND.success : BRAND.teal};height:6px;border-radius:3px;width:${pct}%"></td>
+          <td style="background:#eef2f1;height:6px;border-radius:3px;width:${100 - pct}%"></td>
+        </tr></table>
+      </div>`;
+  };
+  const goalsSection = repGoals.length === 0 || repGoals.every((r) => r.goals.length === 0) ? '' : `
+    <div style="margin:30px 36px 0;padding:20px 22px;background:#f7faf9;border:1px solid #e5e7eb;border-radius:16px">
+      ${sectionLabel('Goal Progress')}
+      ${repGoals.filter((r) => r.goals.length > 0).map((r) => `
+        <p style="margin:0 0 8px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}">${escapeHtml(r.repName)}</p>
+        ${r.goals.map(goalBar).join('')}
+      `).join('')}
     </div>`;
 
   const chartNote = chartWeekCount < 2
@@ -301,8 +397,7 @@ function buildEmail(agg, historyRows = [], overrides = {}) {
     ])}
     <div style="height:10px"></div>
     ${cardRow([
-      statCard('Booked (YTD)', fmtMoney(companyYtdBooked), [ytdNote]),
-      statCard('Billed (YTD)', fmtMoney(companyYtdBilled), [ytdNote]),
+      statCard('YTD Total Sales (Billed)', fmtMoney(companyYtdBilled), [ytdNote]),
     ])}
   </div>
 
@@ -311,6 +406,10 @@ function buildEmail(agg, historyRows = [], overrides = {}) {
     <img src="${chartUrl}" alt="Weekly booked vs. billed revenue chart" style="max-width:100%;border-radius:8px;display:block" />
     ${chartNote}
   </div>
+
+  ${repSection}
+
+  ${goalsSection}
 
   <div style="margin:32px 36px 0;padding-top:20px;border-top:1px solid ${HAIRLINE}">
     <p style="margin:0;font-size:11px;color:${BRAND.slate}">A PDF copy of this report is attached.</p>

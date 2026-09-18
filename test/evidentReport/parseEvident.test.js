@@ -117,6 +117,75 @@ test('Booked (MTD) case count self-accumulates from logged same-month companyDai
   assert.match(html, /109 cases/);
 });
 
+test('parseAndAggregate exposes real per-rep MTD columns and Daily Billed rows for Report #2', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
+  assert.deepEqual(agg.companyMtdBookedByRep, { na: 6935, james: 0, william: 0 });
+  assert.deepEqual(agg.companyMtdBilledByRep, { na: 87486.04, james: 1458.97, william: 497.45 });
+  assert.equal(agg.companyDailyBilledRows.length, 34);
+});
+
+test('By Sales Rep section (Report #2) renders real per-rep daily and MTD figures', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
+  const { html } = buildEmail(agg, []);
+
+  assert.match(html, /By Sales Rep/);
+  assert.match(html, /James Delaney/);
+  assert.match(html, /William Alexander/);
+  // Real fixture: William has exactly 1 booked case (Dr. Alberto Gonzalez,
+  // $0) and 1 billed case ($0) attributed to him; James has none of either.
+  assert.match(html, /1 \/ \$0\.00/);
+  // Real per-rep MTD columns straight from Evident's own totals row.
+  assert.match(html, /\$1,458\.97/); // James MTD Billed
+  assert.match(html, /\$497\.45/); // William MTD Billed
+});
+
+test('By Sales Rep MTD columns show "-" (not a fabricated $0) when the report has no per-rep breakdown', () => {
+  const messagesWithoutMtdBooked = ALL_MESSAGES.filter((m) => m.subject !== 'MTD Booked Daily Update');
+  const agg = parseAndAggregate(messagesWithoutMtdBooked, { runDate: '2026-09-11' });
+  assert.equal(agg.companyMtdBookedByRep, null);
+  const { html } = buildEmail(agg, []);
+  assert.match(html, /"-" means today's MTD report didn't include a per-rep breakdown/);
+});
+
+test('Goal Progress section (Report #3) renders real goal data passed in by the caller and is omitted when there are none', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
+  const repGoals = [
+    {
+      repName: 'James Delaney',
+      goals: [
+        { title: '36 New Doctors by Dec 2026', metric: 'new_doctors', target: 36, current_value: 3, progress_pct: 8 },
+        { title: '$30K Monthly Sales - September 2026', metric: 'monthly_revenue', target: 30000, current_value: 12450, progress_pct: 42 },
+      ],
+    },
+    { repName: 'William Alexander', goals: [] },
+  ];
+  const { html } = buildEmail(agg, [], {}, repGoals);
+
+  assert.match(html, /Goal Progress/);
+  assert.match(html, /James Delaney/);
+  assert.match(html, /36 New Doctors by Dec 2026/);
+  assert.match(html, /3 \/ 36 \(8%\)/);
+  assert.match(html, /\$12,450\.00 \/ \$30,000\.00 \(42%\)/);
+  // William has zero active goals — his name should not appear in the
+  // goals section since there's nothing real to show for him.
+  const goalsSectionStart = html.indexOf('Goal Progress');
+  const goalsSectionHtml = html.slice(goalsSectionStart, goalsSectionStart + 2000);
+  assert.doesNotMatch(goalsSectionHtml, /William Alexander/);
+
+  const { html: noGoalsHtml } = buildEmail(agg, [], {}, []);
+  assert.doesNotMatch(noGoalsHtml, /Goal Progress/);
+});
+
+test('Goal Progress section HTML-escapes goal titles (not a trusted constant — admin-entered text)', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
+  const repGoals = [
+    { repName: 'James Delaney', goals: [{ title: '<script>alert(1)</script>', metric: 'new_doctors', target: 10, current_value: 1, progress_pct: 10 }] },
+  ];
+  const { html } = buildEmail(agg, [], {}, repGoals);
+  assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+});
+
 test('"No data was returned" reports as zero, not a crash', () => {
   const agg = parseAndAggregate(
     [{ subject: "Daily Booked Cases - William's Doctors", html: fixture('daily-booked-william-nodata.html') }],
@@ -205,7 +274,7 @@ test('Booked (MTD) falls back to accumulating from logged same-month days plus t
   assert.match(html, /\$8,865\.22/);
 });
 
-test('Booked/Billed (YTD) auto-accrue real daily figures logged after the verified baseline date', () => {
+test('Billed (YTD) auto-accrues real daily figures logged after the verified baseline date; Booked (YTD) is not rendered', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-18' });
   const history = [
     // Same date as the baseline itself — already reflected in the
@@ -216,9 +285,10 @@ test('Booked/Billed (YTD) auto-accrue real daily figures logged after the verifi
   ];
   const { html } = buildEmail(agg, history);
 
-  // 363360.57 (baseline) + 2000 (09-17 only) + 8065.22 (today's real
-  // companyDailyBooked from ALL_MESSAGES) = 373425.79.
-  assert.match(html, /\$373,425\.79/);
+  // Booked YTD is deliberately NOT rendered (Ben Silberstein's spec,
+  // 2026-09-19, asks for a single billed-only YTD figure) — verify it's
+  // genuinely gone, not just untested.
+  assert.doesNotMatch(html, /\$373,425\.79/);
   // 311452.46 (baseline) + 1243759 (LEGACY_YTD_REVENUE_ADJUSTMENT — real
   // pre-CRM YTD Billed revenue, see clientRevenue.js) + 700 (09-17 only) +
   // 1622.74 (today's real companyDailyBilled from ALL_MESSAGES) =
@@ -227,24 +297,21 @@ test('Booked/Billed (YTD) auto-accrue real daily figures logged after the verifi
   assert.match(html, /Baseline verified Sep 16, 2026 \+ daily activity since/);
 });
 
-test('Booked/Billed (YTD) show exactly the baseline, with no accrual, when run on the baseline date itself', () => {
+test('Billed (YTD) shows exactly the baseline, with no accrual, when run on the baseline date itself', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-16' });
   const { html } = buildEmail(agg, []);
 
-  assert.match(html, /\$363,360\.57/);
   // 311452.46 (baseline) + 1243759 (LEGACY_YTD_REVENUE_ADJUSTMENT) = 1555211.46.
   assert.match(html, /\$1,555,211\.46/);
 });
 
-test('Booked/Billed (YTD) accrual treats a NULL company_daily_billed_value as zero (pre-billed-tracking row)', () => {
+test('Billed (YTD) accrual treats a NULL company_daily_billed_value as zero (pre-billed-tracking row)', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-18' });
   const history = [
     { date: '2026-09-17', company_daily_booked_value: '5000', company_daily_billed_value: null },
   ];
   const { html } = buildEmail(agg, history);
 
-  // Booked: 363360.57 + 5000 + 8065.22 = 376425.79.
-  assert.match(html, /\$376,425\.79/);
   // Billed: 311452.46 + 1243759 (LEGACY_YTD_REVENUE_ADJUSTMENT) + 0 (NULL
   // row contributes nothing) + 1622.74 = 1556834.20.
   assert.match(html, /\$1,556,834\.20/);
