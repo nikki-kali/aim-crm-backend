@@ -13,6 +13,7 @@ const METRIC_LABELS = {
   proposals_sent: 'Proposals Sent',
   conversion_rate: '% Conversion Rate',
   new_doctors: 'New Doctors',
+  monthly_revenue: 'Revenue',
 }
 
 async function computeProgress(goal) {
@@ -54,6 +55,17 @@ async function computeProgress(goal) {
   } else if (metric === 'new_doctors') {
     const { rows: [r] } = await db.query(
       `SELECT COUNT(*) AS val FROM clients WHERE assigned_to=$1 AND created_at::date BETWEEN $2 AND $3`,
+      [rep_id, period_start, period_end]
+    )
+    current = Number(r.val)
+  } else if (metric === 'monthly_revenue') {
+    // Real case revenue only, never leads.estimated_value (see CLAUDE.md) —
+    // same cases-joined-to-clients-by-doctor_name pattern GET
+    // /reports/team-comparison already uses for a rep's sales_value.
+    const { rows: [r] } = await db.query(
+      `SELECT COALESCE(SUM(c.value), 0) AS val
+       FROM cases c JOIN clients cl ON cl.doctor_name = c.client_name
+       WHERE cl.assigned_to=$1 AND c.created_at::date BETWEEN $2 AND $3`,
       [rep_id, period_start, period_end]
     )
     current = Number(r.val)
