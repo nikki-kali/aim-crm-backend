@@ -75,7 +75,7 @@ async function runEvidentReport() {
   const repGoals = await fetchRepGoalsWithProgress()
   const report1 = buildReport1Email(aggregate, historyRows, {})
   const report2 = buildReport2Email(aggregate)
-  const report3 = buildReport3Email(aggregate, repGoals)
+  const report3 = buildReport3Email(aggregate, historyRows, repGoals)
   const { subject, sheetRow } = report1
 
   // Three separate emails, not one combined email (Ben Silberstein's
@@ -141,7 +141,7 @@ async function sendEvidentReportForApproval() {
   const reports = [
     buildReport1Email(aggregate, historyRows, {}),
     buildReport2Email(aggregate),
-    buildReport3Email(aggregate, repGoals),
+    buildReport3Email(aggregate, historyRows, repGoals),
   ]
 
   // One approval token/link shared by all 3 preview emails — clicking

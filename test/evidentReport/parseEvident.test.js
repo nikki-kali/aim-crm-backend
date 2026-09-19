@@ -166,13 +166,17 @@ test('Goal Progress section (Report #3) renders real goal data passed in by the 
     },
     { repName: 'William Alexander', goals: [] },
   ];
-  const { html } = buildReport3Email(agg, repGoals);
+  const { html } = buildReport3Email(agg, [], repGoals);
 
   assert.match(html, /Goal Progress/);
   assert.match(html, /James Delaney/);
   assert.match(html, /36 New Doctors by Dec 2026/);
   assert.match(html, /3 \/ 36 \(8%\)/);
   assert.match(html, /\$12,450\.00 \/ \$30,000\.00 \(42%\)/);
+  // Remaining-to-target (Ben Silberstein's formal spec, 2026-09-19):
+  // 36 - 3 = 33 doctors remaining; $30,000 - $12,450 = $17,550 remaining.
+  assert.match(html, /33 remaining to reach target/);
+  assert.match(html, /\$17,550\.00 remaining to reach target/);
   // William has zero active goals — his name should not appear in the
   // goals section since there's nothing real to show for him.
   const goalsSectionStart = html.indexOf('Goal Progress');
@@ -184,9 +188,19 @@ test('Goal Progress section (Report #3) renders real goal data passed in by the 
   // rather than omitting the section entirely — unlike the old combined
   // layout, this report has nothing else in it to give an empty section
   // context.
-  const { html: noGoalsHtml } = buildReport3Email(agg, []);
+  const { html: noGoalsHtml } = buildReport3Email(agg, [], []);
   assert.match(noGoalsHtml, /Goal Progress/);
   assert.match(noGoalsHtml, /No active goals for James or William this period\./);
+});
+
+test('Goal Progress "remaining to reach target" reads "Target reached" once a goal hits 100%', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
+  const repGoals = [
+    { repName: 'James Delaney', goals: [{ title: '36 New Doctors by Dec 2026', metric: 'new_doctors', target: 36, current_value: 40, progress_pct: 100 }] },
+  ];
+  const { html } = buildReport3Email(agg, [], repGoals);
+  assert.match(html, /Target reached/);
+  assert.doesNotMatch(html, /remaining to reach target/);
 });
 
 test('Goal Progress section HTML-escapes goal titles (not a trusted constant — admin-entered text)', () => {
@@ -194,7 +208,7 @@ test('Goal Progress section HTML-escapes goal titles (not a trusted constant —
   const repGoals = [
     { repName: 'James Delaney', goals: [{ title: '<script>alert(1)</script>', metric: 'new_doctors', target: 10, current_value: 1, progress_pct: 10 }] },
   ];
-  const { html } = buildReport3Email(agg, repGoals);
+  const { html } = buildReport3Email(agg, [], repGoals);
   assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
 });
@@ -219,11 +233,11 @@ test('flags missing reports instead of silently under-reporting', () => {
   assert.ok(agg.missing.includes('MTD Booked Daily Update'));
 });
 
-test('Booked & Billed by Month trend chart uses the verified Jun-Aug baselines and real September MTD figures', () => {
+test('Report #3\'s month-by-month trend chart uses the verified Jun-Aug baselines and real September MTD figures', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
-  const { html } = buildReport1Email(agg, []);
+  const { html } = buildReport3Email(agg, [], []);
 
-  assert.match(html, /Booked &amp; Billed by Month/);
+  assert.match(html, /September 2026 \(MTD\) vs\. Aug 2026/);
   // Verified pre-tracking months.
   assert.match(html, /Jun%202026/);
   assert.match(html, /Jul%202026/);
@@ -240,20 +254,27 @@ test('Booked & Billed by Month trend chart uses the verified Jun-Aug baselines a
   assert.match(html, /6935/); // September MTD booked
   assert.match(html, /89442\.46/); // September MTD billed
   assert.doesNotMatch(html, /Weekly Booked vs\. Billed Revenue/);
-  assert.doesNotMatch(html, /Last Month vs\. This Month/);
+
+  // Report #1 no longer carries the chart or a month-over-month
+  // comparison at all — moved entirely to Report #3 per Ben
+  // Silberstein's formal spec, 2026-09-19.
+  const { html: r1Html } = buildReport1Email(agg, []);
+  assert.doesNotMatch(r1Html, /Booked &amp; Billed by Month/);
+  assert.doesNotMatch(r1Html, /Pace vs\./);
 });
 
-test('Pace vs. Last Month card shows the gap to (or surplus over) August for both Booked and Billed MTD', () => {
+test('Report #3\'s "This Month vs. Last Month" KPI cards show value for both periods, the numerical change, and the % change', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
-  const { html } = buildReport1Email(agg, []);
+  const { html } = buildReport3Email(agg, [], []);
 
-  assert.match(html, /Pace vs\. Aug 2026/);
-  // September MTD booked (6935) is far below August's 157654.32 booked —
-  // still needs more, not a surplus.
-  assert.match(html, /more to surpass/);
-  // September MTD billed (89442.46) is also below August's 147772.40
-  // billed, so both cards should read "more to surpass", not "Surpassed".
-  assert.doesNotMatch(html, /Surpassed by/);
+  // Booked: September MTD (6935) vs. August full month (157654.32) — a
+  // real, large decline since MTD is only a few days in.
+  assert.match(html, /Aug 2026: \$157,654\.32/);
+  assert.match(html, /-\$150,719\.32 \(-95\.6%\)/);
+  // Billed: September MTD (89442.46) vs. August full month (147772.40).
+  assert.match(html, /Aug 2026: \$147,772\.40/);
+  assert.match(html, /-\$58,329\.94 \(-39\.5%\)/);
+  assert.match(html, /September 2026 \(MTD\) is real month-to-date, not a full month yet/);
 });
 
 test('email copy has no em dashes and no removed footer line, across all 3 separated reports', () => {
@@ -261,7 +282,7 @@ test('email copy has no em dashes and no removed footer line, across all 3 separ
   const reports = [
     buildReport1Email(agg, []),
     buildReport2Email(agg),
-    buildReport3Email(agg, []),
+    buildReport3Email(agg, [], []),
   ];
 
   for (const { html, subject } of reports) {
@@ -278,7 +299,7 @@ test('Report #1/#2/#3 are three separate emails with distinct subjects (Ben Silb
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
   const r1 = buildReport1Email(agg, []);
   const r2 = buildReport2Email(agg);
-  const r3 = buildReport3Email(agg, []);
+  const r3 = buildReport3Email(agg, [], []);
 
   assert.match(r1.subject, /^Daily Sales Report/);
   assert.match(r2.subject, /^Daily Sales by Sales Rep/);
@@ -288,7 +309,7 @@ test('Report #1/#2/#3 are three separate emails with distinct subjects (Ben Silb
   assert.doesNotMatch(r2.html, /Today's Booked Cases/);
   assert.doesNotMatch(r2.html, /Goal Progress/);
   assert.doesNotMatch(r3.html, /By Sales Rep/);
-  assert.doesNotMatch(r3.html, /Booked &amp; Billed by Month/);
+  assert.doesNotMatch(r1.html, /Booked &amp; Billed by Month/);
   assert.doesNotMatch(r1.html, /By Sales Rep/);
   assert.doesNotMatch(r1.html, /Goal Progress/);
 });

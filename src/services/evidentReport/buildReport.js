@@ -66,8 +66,9 @@ const COMPANY_YTD_SNAPSHOT = {
   billed: 311452.46 + LEGACY_YTD_REVENUE_ADJUSTMENT,
 };
 
-// One-time verified monthly baselines for the trend chart and the "Pace
-// vs. Last Month" card — real June-August 2026 totals, user-supplied
+// One-time verified monthly baselines for Report #3's trend chart and
+// "This Month vs. Last Month" KPI comparison — real June-August 2026
+// totals, user-supplied
 // 2026-09-19 from Evident's own EviSmart export (booked) and the custom
 // billing reports pulled the same day (billed). Booked/billed use the
 // "custom report" basis throughout, not the "financial ledger" basis
@@ -106,6 +107,75 @@ function delta(curr, prev) {
   const arrow = diff > 0 ? '▲' : '▼'; // ▲ / ▼
   const cls = diff > 0 ? 'up' : 'down';
   return { text: `${arrow} ${fmtMoney(Math.abs(diff))} vs. yesterday`, cls };
+}
+
+// Shared by Report #1 (Daily Sales Report) and Report #3 (Goal Progress
+// Report's This Month vs. Last Month KPI section) — both need the same
+// resolved company-wide MTD Booked/Billed figures, so this stays one
+// function rather than being duplicated (and drifting) across two report
+// builders. See the inline comments below for why each fallback exists;
+// unchanged from the logic this was extracted from.
+function computeCompanyMtd(agg, historyRows = [], overrides = {}) {
+  const prior = historyRows
+    .filter((r) => r.date && r.date < agg.runDate)
+    .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+
+  // Booked (MTD) prefers Evident's own company-wide "MTD Booked Daily
+  // Update" report (new as of 2026-09-16) when it arrived today. Before
+  // that report existed, there was no company-wide equivalent at all, so
+  // this falls back to self-accumulating from each day's own company-wide
+  // "Booked (Today)" figure, logged daily — summing every history row in
+  // the same calendar month as today, plus today's own value (not yet in
+  // historyRows at build time — appendRow() runs after this). Kept as a
+  // fallback rather than deleted, since the new report's daily arrival
+  // isn't proven yet — if it stops showing up on some future day, the
+  // report should self-heal to the old approximation, not a hard $0.
+  const runMonth = agg.runDate.slice(0, 7); // 'YYYY-MM'
+  const mtdBookedFromHistory = historyRows
+    .filter((r) => r.date && r.date.slice(0, 7) === runMonth)
+    .reduce((sum, r) => sum + Number(r.company_daily_booked_value || 0), 0);
+  const selfAccumulatedMtdBooked = mtdBookedFromHistory + agg.companyDailyBooked;
+  const companyMtdBookedLive = agg.missing.includes('MTD Booked Daily Update') ? null : agg.companyMtdBooked;
+  const companyMtdBooked = overrides.companyMtdBooked != null
+    ? overrides.companyMtdBooked
+    : (companyMtdBookedLive != null ? companyMtdBookedLive : selfAccumulatedMtdBooked);
+
+  // MTD Booked CASE COUNT (Ben Silberstein's requirement, 2026-09-18) — no
+  // company-wide report from Evident gives this directly ("MTD Booked
+  // Daily Update" is one row per customer, not per case, see
+  // parseEvident.js), so it's always self-accumulated from each day's real
+  // companyDailyBookedCount, same technique as the pre-9/16 Booked (MTD)
+  // value fallback above. Rows logged before v24's migration have a NULL
+  // company_daily_booked_count (column didn't exist yet), contributing
+  // nothing — the count under-states true MTD volume for the first few
+  // days after this ships, then self-heals as real days accumulate,
+  // exactly like every other self-accumulated figure in this file.
+  const mtdBookedCountFromHistory = historyRows
+    .filter((r) => r.date && r.date.slice(0, 7) === runMonth)
+    .reduce((sum, r) => sum + Number(r.company_daily_booked_count || 0), 0);
+  const companyMtdBookedCount = mtdBookedCountFromHistory + agg.companyDailyBookedCount;
+
+  // Billed (MTD) now reads Evident's own company-wide "Daily MTD Total
+  // Billed" figure instead of the James+William-only sum. A `prior` row
+  // whose company_daily_booked_value is NULL predates this change (the
+  // column is nullable with no default specifically so this check works —
+  // see the migration's own comment) — its booked_mtd_billed value is
+  // from the OLD, much-smaller data source, so comparing against it would
+  // render a fabricated multi-thousand-dollar "spike" on the very first
+  // day this ships. Same guard pattern already proven for ytd_billed_value.
+  // Also suppressed when today's own "Daily MTD Total Billed" report never
+  // arrived — agg.companyMtdBilled would be a placeholder 0 in that case,
+  // and computing a delta against it would render a confident, false
+  // "▼ $89,xxx.xx" rather than an honest absence of data. Suppressed too
+  // when a manual override is in play — the delta baseline (yesterday's
+  // automated figure) isn't comparable to today's manually-corrected one.
+  const companyMtdBilled = overrides.companyMtdBilled != null ? overrides.companyMtdBilled : agg.companyMtdBilled;
+  const billedMtdDelta = overrides.companyMtdBilled == null && prior && prior.company_daily_booked_value != null && !agg.missing.includes('Daily MTD Total Billed')
+    ? delta(agg.companyMtdBilled, Number(prior.booked_mtd_billed))
+    : { text: '', cls: '' };
+  const overrideNote = overrides.asOfLabel ? { text: `Verified via Evident dashboard, ${overrides.asOfLabel}` } : { text: '' };
+
+  return { companyMtdBooked, companyMtdBookedCount, companyMtdBilled, billedMtdDelta, overrideNote };
 }
 
 const deltaColor = (cls) => (cls === 'up' ? BRAND.success : cls === 'down' ? BRAND.danger : BRAND.slate);
@@ -166,11 +236,16 @@ const cardRow = (cards) => {
 // Email-safe progress bar for Report #3 (Goal Progress) — a fixed-width
 // outer cell with an inner cell sized by percentage, since flex/CSS width
 // transitions aren't reliable across email clients but table cell widths
-// are.
+// are. Shows target, actual-to-date, percentage achieved (already
+// (Actual / Target) * 100 via goalProgress.js's computeProgress, capped
+// at 100 for the bar/display), and the remaining amount needed to reach
+// target — all four required by Ben Silberstein's formal spec,
+// 2026-09-19.
 const goalBar = (goal) => {
   const pct = Math.min(goal.progress_pct || 0, 100);
   const isMoney = goal.metric === 'monthly_revenue';
   const fmt = (n) => isMoney ? fmtMoney(n) : Number(n).toLocaleString();
+  const remaining = Math.max(Number(goal.target) - Number(goal.current_value), 0);
   return `
     <div style="margin:0 0 9px">
       <p style="margin:0 0 3px;font-size:11.5px;color:${BRAND.ink}">${escapeHtml(goal.title)}
@@ -180,6 +255,7 @@ const goalBar = (goal) => {
         <td style="background:${pct >= 100 ? BRAND.success : BRAND.teal};height:5px;border-radius:3px;width:${pct}%"></td>
         <td style="background:#eef2f1;height:5px;border-radius:3px;width:${100 - pct}%"></td>
       </tr></table>
+      <p style="margin:3px 0 0;font-size:10px;color:${BRAND.slate}">${remaining <= 0 ? 'Target reached' : `${fmt(remaining)} remaining to reach target`}</p>
     </div>`;
 };
 
@@ -228,12 +304,13 @@ function dateLabelFor(runDate) {
   });
 }
 
-// Report #1: Daily Sales — Today/MTD/YTD figures, the month-by-month
-// trend chart, the Pace vs. Last Month card, and the customer-detail
-// table. Split out as its own email (Ben Silberstein's requirement,
-// 2026-09-19 — Report #1/#2/#3 must be three distinct emails, not
-// sections in one combined email; previously combined per an earlier,
-// since-superseded instruction). `overrides` (optional) lets a specific
+// Report #1: Leadership Sales Summary — Daily Booked (count + customer
+// detail), Daily Billed (value only), MTD Booked (count + value), MTD
+// Billed (value only), YTD Sales (value only), per Ben Silberstein's
+// formal spec (2026-09-19). The month-by-month trend chart and the
+// company-wide month-over-month comparison moved to Report #3 (its own
+// "This Month vs. Last Month" KPI section) as of that same spec — not
+// part of Report #1's defined metrics. `overrides` (optional) lets a specific
 // day's run substitute the live Evident-parsed Booked/Billed (MTD)
 // figures with numbers manually pulled from Evident's own dashboard —
 // needed because the automated nightly batch reflects a fixed overnight
@@ -246,65 +323,8 @@ function dateLabelFor(runDate) {
 // day-over-day delta keeps comparing like-sourced numbers rather than an
 // override against an un-overridden baseline.
 function buildReport1Email(agg, historyRows = [], overrides = {}) {
-  const prior = historyRows
-    .filter((r) => r.date && r.date < agg.runDate)
-    .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
-
-  // Booked (MTD) prefers Evident's own company-wide "MTD Booked Daily
-  // Update" report (new as of 2026-09-16) when it arrived today. Before
-  // that report existed, there was no company-wide equivalent at all, so
-  // this falls back to self-accumulating from each day's own company-wide
-  // "Booked (Today)" figure, logged daily — summing every history row in
-  // the same calendar month as today, plus today's own value (not yet in
-  // historyRows at build time — appendRow() runs after this). Kept as a
-  // fallback rather than deleted, since the new report's daily arrival
-  // isn't proven yet — if it stops showing up on some future day, the
-  // report should self-heal to the old approximation, not a hard $0.
-  const runMonth = agg.runDate.slice(0, 7); // 'YYYY-MM'
-  const mtdBookedFromHistory = historyRows
-    .filter((r) => r.date && r.date.slice(0, 7) === runMonth)
-    .reduce((sum, r) => sum + Number(r.company_daily_booked_value || 0), 0);
-  const selfAccumulatedMtdBooked = mtdBookedFromHistory + agg.companyDailyBooked;
-  const companyMtdBookedLive = agg.missing.includes('MTD Booked Daily Update') ? null : agg.companyMtdBooked;
-  const companyMtdBooked = overrides.companyMtdBooked != null
-    ? overrides.companyMtdBooked
-    : (companyMtdBookedLive != null ? companyMtdBookedLive : selfAccumulatedMtdBooked);
-
-  // MTD Booked CASE COUNT (Ben Silberstein's requirement, 2026-09-18) — no
-  // company-wide report from Evident gives this directly ("MTD Booked
-  // Daily Update" is one row per customer, not per case, see
-  // parseEvident.js), so it's always self-accumulated from each day's real
-  // companyDailyBookedCount, same technique as the pre-9/16 Booked (MTD)
-  // value fallback above. Rows logged before v24's migration have a NULL
-  // company_daily_booked_count (column didn't exist yet), contributing
-  // nothing — the count under-states true MTD volume for the first few
-  // days after this ships, then self-heals as real days accumulate,
-  // exactly like every other self-accumulated figure in this file.
-  const mtdBookedCountFromHistory = historyRows
-    .filter((r) => r.date && r.date.slice(0, 7) === runMonth)
-    .reduce((sum, r) => sum + Number(r.company_daily_booked_count || 0), 0);
-  const companyMtdBookedCount = mtdBookedCountFromHistory + agg.companyDailyBookedCount;
-
-  // Billed (MTD) now reads Evident's own company-wide "Daily MTD Total
-  // Billed" figure instead of the James+William-only sum. A `prior` row
-  // whose company_daily_booked_value is NULL predates this change (the
-  // column is nullable with no default specifically so this check works —
-  // see the migration's own comment) — its booked_mtd_billed value is
-  // from the OLD, much-smaller data source, so comparing against it would
-  // render a fabricated multi-thousand-dollar "spike" on the very first
-  // day this ships. Same guard pattern already proven for ytd_billed_value.
-  // Also suppressed when today's own "Daily MTD Total Billed" report never
-  // arrived — agg.companyMtdBilled would be a placeholder 0 in that case
-  // (see the missing-reports banner below), and computing a delta against
-  // it would render a confident, false "▼ $89,xxx.xx" rather than an
-  // honest absence of data. Suppressed too when a manual override is in
-  // play — the delta baseline (yesterday's automated figure) isn't
-  // comparable to today's manually-corrected one.
-  const companyMtdBilled = overrides.companyMtdBilled != null ? overrides.companyMtdBilled : agg.companyMtdBilled;
-  const billedMtdDelta = overrides.companyMtdBilled == null && prior && prior.company_daily_booked_value != null && !agg.missing.includes('Daily MTD Total Billed')
-    ? delta(agg.companyMtdBilled, Number(prior.booked_mtd_billed))
-    : { text: '', cls: '' };
-  const overrideNote = overrides.asOfLabel ? { text: `Verified via Evident dashboard, ${overrides.asOfLabel}` } : { text: '' };
+  const { companyMtdBooked, companyMtdBookedCount, companyMtdBilled, billedMtdDelta, overrideNote } =
+    computeCompanyMtd(agg, historyRows, overrides);
 
   // Booked/Billed (YTD) auto-accrue on top of the verified
   // COMPANY_YTD_SNAPSHOT baseline: every real company-wide daily
@@ -337,20 +357,6 @@ function buildReport1Email(agg, historyRows = [], overrides = {}) {
   const ytdNote = { text: `Baseline verified ${COMPANY_YTD_SNAPSHOT.asOfLabel} + daily activity since` };
 
   const dateLabel = dateLabelFor(agg.runDate);
-
-  // Month-by-month Booked/Billed trend (user request, 2026-09-19,
-  // superseding the two-point Last Month vs. This Month chart) — the
-  // verified MONTH_HISTORY baselines (Jun-Aug) plus the current live MTD
-  // month, using the same final companyMtdBooked/companyMtdBilled values
-  // the MTD cards above show (real, Evident-sourced MTD-to-date figures,
-  // see the comments above on how those two are resolved).
-  const thisMonthLabel = new Date(`${agg.runDate}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-  const lastMonth = MONTH_HISTORY[MONTH_HISTORY.length - 1];
-  const trendMonths = [
-    ...MONTH_HISTORY,
-    { label: `${thisMonthLabel} (MTD)`, booked: companyMtdBooked, billed: companyMtdBilled },
-  ];
-  const monthChartUrl = buildMonthTrendChartUrl(trendMonths);
 
   const missingBanner = agg.missing.length
     ? `<div style="margin:30px 36px 0;padding:16px 19px;background:#fefaf1;border:1px solid #fde68a;border-left:3px solid #b45309;border-radius:4px 12px 12px 4px">
@@ -399,33 +405,6 @@ function buildReport1Email(agg, historyRows = [], overrides = {}) {
       </table>
     </div>`;
 
-  const chartNote = `<p style="margin:8px 0 0;font-size:11px;color:${BRAND.slate}">${thisMonthLabel} is real MTD-to-date, not a full month yet, so it isn't a like-for-like comparison against a completed month until the month ends.</p>`;
-
-  // "Pace vs. Last Month" card (user request, 2026-09-19) — how much more
-  // this month's MTD figure needs to reach last month's full-month total,
-  // or by how much it has already surpassed it. Comparing a partial month
-  // to a completed one is intentional (it's the pace question, not a
-  // like-for-like one) — the chart above and its note already carry that
-  // caveat, so this card doesn't repeat it.
-  const paceCard = (label, current, lastMonthValue) => {
-    const gap = current - lastMonthValue;
-    const surpassed = gap >= 0;
-    return statCard(label, fmtMoney(current), [
-      { text: `${lastMonth.label}: ${fmtMoney(lastMonthValue)}` },
-      surpassed
-        ? { text: `Surpassed by ${fmtMoney(gap)}`, cls: 'up' }
-        : { text: `${fmtMoney(Math.abs(gap))} more to surpass` },
-    ]);
-  };
-  const paceSection = `
-    <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
-      ${sectionLabel(`Pace vs. ${lastMonth.label}`)}
-      ${cardRow([
-        paceCard('Booked (MTD)', companyMtdBooked, lastMonth.booked),
-        paceCard('Billed (MTD)', companyMtdBilled, lastMonth.billed),
-      ])}
-    </div>`;
-
   const body = `
   ${missingBanner}
 
@@ -450,14 +429,6 @@ function buildReport1Email(agg, historyRows = [], overrides = {}) {
       statCard('YTD Total Sales (Billed)', fmtMoney(companyYtdBilled), [ytdNote]),
     ])}
   </div>
-
-  <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
-    ${sectionLabel('Booked &amp; Billed by Month')}
-    <img src="${monthChartUrl}" alt="Month-by-month booked and billed revenue trend chart" style="max-width:100%;border-radius:8px;display:block" />
-    ${chartNote}
-  </div>
-
-  ${paceSection}
 
   ${bookedRowsTable}`;
 
@@ -571,18 +542,64 @@ function buildReport2Email(agg) {
   };
 }
 
-// Report #3: Goal Progress — repGoals is pre-fetched by the caller
-// (evidentReport/index.js's fetchRepGoalsWithProgress), not queried here,
-// so this file stays a pure function of its arguments. Its own separate
-// email (Ben Silberstein's requirement, 2026-09-19). When there are no
-// goals for the period, the body says so explicitly rather than sending
-// a blank-looking email — unlike the old combined layout, this report has
-// nothing else in it to give the empty state context.
-function buildReport3Email(agg, repGoals = []) {
+// Report #3: KPI and Goal Tracking (Ben Silberstein's formal spec,
+// 2026-09-19) — two sections: (1) a company-wide "This Month vs. Last
+// Month" KPI comparison (value for both periods, numerical change, %
+// change, clearly labeled periods), which absorbs the month-by-month
+// trend chart and the old Pace vs. Last Month card that used to live in
+// Report #1 (neither is part of Report #1's defined metrics); (2) each
+// rep's goal progress. `historyRows` is now required (not just
+// `repGoals`) so this report can resolve the same live company MTD
+// Booked/Billed figures Report #1 shows, via the shared computeCompanyMtd
+// helper — kept in sync with Report #1 rather than re-derived.
+function buildReport3Email(agg, historyRows = [], repGoals = []) {
   const dateLabel = dateLabelFor(agg.runDate);
-  const hasGoals = repGoals.length > 0 && repGoals.some((r) => r.goals.length > 0);
+  const { companyMtdBooked, companyMtdBilled } = computeCompanyMtd(agg, historyRows, {});
 
-  const body = hasGoals ? `
+  // One-time verified MONTH_HISTORY baseline (see its own comment) — the
+  // most recent entry is "last month" for the comparison below. Current
+  // month is real, live MTD-to-date data, clearly labeled as MTD since
+  // it's a partial month being compared against a completed one.
+  const lastMonth = MONTH_HISTORY[MONTH_HISTORY.length - 1];
+  const thisMonthLabel = new Date(`${agg.runDate}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const thisPeriodLabel = `${thisMonthLabel} (MTD)`;
+  const trendMonths = [
+    ...MONTH_HISTORY,
+    { label: thisPeriodLabel, booked: companyMtdBooked, billed: companyMtdBilled },
+  ];
+  const monthChartUrl = buildMonthTrendChartUrl(trendMonths);
+
+  // Percentage change is undefined (not zero, not infinite) when the
+  // prior period was itself zero — rendered as "N/A" rather than a
+  // fabricated +/-Infinity or a misleading 0%.
+  const pctChange = (curr, prev) => (prev === 0 ? null : ((curr - prev) / prev) * 100);
+
+  const momCard = (label, current, previous) => {
+    const change = current - previous;
+    const pct = pctChange(current, previous);
+    const cls = change > 0 ? 'up' : change < 0 ? 'down' : '';
+    const pctText = pct == null ? 'N/A' : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
+    return statCard(label, fmtMoney(current), [
+      { text: `${lastMonth.label}: ${fmtMoney(previous)}` },
+      { text: `${change >= 0 ? '+' : '-'}${fmtMoney(Math.abs(change))} (${pctText})`, cls },
+    ]);
+  };
+
+  const kpiSection = `
+  <div style="padding:22px 36px 0">
+    ${sectionLabel(`${thisPeriodLabel} vs. ${lastMonth.label}`)}
+    <div style="margin:0 0 14px;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
+      <img src="${monthChartUrl}" alt="Month-by-month booked and billed revenue trend chart" style="max-width:100%;border-radius:8px;display:block" />
+      <p style="margin:8px 0 0;font-size:11px;color:${BRAND.slate}">${thisPeriodLabel} is real month-to-date, not a full month yet, so it isn't a like-for-like comparison against a completed month until the month ends.</p>
+    </div>
+    ${cardRow([
+      momCard('Booked', companyMtdBooked, lastMonth.booked),
+      momCard('Billed', companyMtdBilled, lastMonth.billed),
+    ])}
+  </div>`;
+
+  const hasGoals = repGoals.length > 0 && repGoals.some((r) => r.goals.length > 0);
+  const goalsSection = hasGoals ? `
   <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
     ${sectionLabel('Goal Progress')}
     ${repGoals.filter((r) => r.goals.length > 0).map((r) => `
@@ -594,6 +611,8 @@ function buildReport3Email(agg, repGoals = []) {
     ${sectionLabel('Goal Progress')}
     <p style="margin:0;font-size:13px;color:${BRAND.slate}">No active goals for James or William this period.</p>
   </div>`;
+
+  const body = `${kpiSection}\n\n  ${goalsSection}`;
 
   return {
     subject: `Goal Progress Report - ${dateLabel}`,
