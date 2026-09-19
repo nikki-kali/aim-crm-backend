@@ -306,8 +306,9 @@ function dateLabelFor(runDate) {
 
 // Report #1: Leadership Sales Summary — Daily Booked (count + customer
 // detail), Daily Billed (value only), MTD Booked (count + value), MTD
-// Billed (value only), YTD Sales (value only), per Ben Silberstein's
-// formal spec (2026-09-19). The month-by-month trend chart and the
+// Billed (value only), YTD Sales Value Total (booked value, not billed —
+// per Ben Silberstein's 2026-09-19 correction to his own formal spec).
+// The month-by-month trend chart and the
 // company-wide month-over-month comparison moved to Report #3 (its own
 // "This Month vs. Last Month" KPI section) as of that same spec — not
 // part of Report #1's defined metrics. `overrides` (optional) lets a specific
@@ -326,34 +327,35 @@ function buildReport1Email(agg, historyRows = [], overrides = {}) {
   const { companyMtdBooked, companyMtdBookedCount, companyMtdBilled, billedMtdDelta, overrideNote } =
     computeCompanyMtd(agg, historyRows, overrides);
 
-  // Booked/Billed (YTD) auto-accrue on top of the verified
-  // COMPANY_YTD_SNAPSHOT baseline: every real company-wide daily
-  // booked/billed figure logged for a date AFTER the baseline's asOfDate
-  // gets added on. This is the same self-accumulation technique already
-  // proven for the old Booked (MTD) fallback above, just anchored to a
-  // real verified starting point instead of $0 — the only way to keep a
-  // live-feeling YTD figure honest when Evident provides no company-wide
-  // YTD report at all. A history row's company_daily_booked_value or
-  // company_daily_billed_value being NULL means that row predates this
-  // tracking (or predates the billed column specifically) and
-  // contributes nothing — same nullable-no-default guard pattern as
-  // everywhere else in this file, never a fabricated number in the gap.
-  // Today's own agg figures aren't yet in historyRows at build time
-  // (appendRow() runs after this), so they're added in separately, and
-  // only once agg.runDate is actually after the baseline date — otherwise
-  // today's activity is already folded into the baseline itself and
-  // adding it again would double-count.
-  // companyYtdBooked (COMPANY_YTD_SNAPSHOT.booked + accrual) is deliberately
-  // NOT derived/rendered here — Ben Silberstein's Report 1 spec
-  // (2026-09-19) asks for a single "YTD - Total sales" figure only,
-  // confirmed to mean billed. COMPANY_YTD_SNAPSHOT.booked itself is left
-  // in place above, verified real data kept for provenance in case Booked
-  // YTD needs to come back.
-  const ytdBilledAccrued = historyRows
+  // YTD Sales Value Total auto-accrues on top of the verified
+  // COMPANY_YTD_SNAPSHOT.booked baseline: every real company-wide daily
+  // BOOKED figure logged for a date AFTER the baseline's asOfDate gets
+  // added on — same self-accumulation technique already proven for the
+  // MTD Booked fallback above, just anchored to a real verified starting
+  // point instead of $0. A history row's company_daily_booked_value being
+  // NULL means that row predates this tracking and contributes nothing —
+  // same nullable-no-default guard pattern as everywhere else in this
+  // file, never a fabricated number in the gap. Today's own agg figure
+  // isn't yet in historyRows at build time (appendRow() runs after this),
+  // so it's added in separately, only once agg.runDate is actually after
+  // the baseline date.
+  //
+  // Switched from YTD Billed to YTD Booked (Ben Silberstein, 2026-09-19 —
+  // "total sales value," meaning Evident's own "Sales Value Total" field:
+  // the value of everything booked this year, whether or not it's been
+  // billed yet, not just what's been invoiced so far). LEGACY_YTD_REVENUE_
+  // ADJUSTMENT is deliberately NOT added here (unlike the old billed
+  // figure) — that $1,243,759 is real historical BILLED revenue from
+  // AIM/Kings Highway's pre-CRM system, which has no "booked" equivalent;
+  // adding it to a booked total would conflate two different real
+  // quantities. COMPANY_YTD_SNAPSHOT.billed itself is left in place above,
+  // verified real data kept for provenance in case YTD Billed needs to
+  // come back.
+  const ytdBookedAccrued = historyRows
     .filter((r) => r.date && r.date > COMPANY_YTD_SNAPSHOT.asOfDate)
-    .reduce((sum, r) => sum + Number(r.company_daily_billed_value || 0), 0)
-    + (agg.runDate > COMPANY_YTD_SNAPSHOT.asOfDate ? agg.companyDailyBilled : 0);
-  const companyYtdBilled = COMPANY_YTD_SNAPSHOT.billed + ytdBilledAccrued;
+    .reduce((sum, r) => sum + Number(r.company_daily_booked_value || 0), 0)
+    + (agg.runDate > COMPANY_YTD_SNAPSHOT.asOfDate ? agg.companyDailyBooked : 0);
+  const companyYtdBooked = COMPANY_YTD_SNAPSHOT.booked + ytdBookedAccrued;
   const ytdNote = { text: `Baseline verified ${COMPANY_YTD_SNAPSHOT.asOfLabel} + daily activity since` };
 
   const dateLabel = dateLabelFor(agg.runDate);
@@ -426,7 +428,7 @@ function buildReport1Email(agg, historyRows = [], overrides = {}) {
     ])}
     <div style="height:8px"></div>
     ${cardRow([
-      statCard('YTD Total Sales (Billed)', fmtMoney(companyYtdBilled), [ytdNote]),
+      statCard('YTD Sales Value Total', fmtMoney(companyYtdBooked), [ytdNote]),
     ])}
   </div>
 

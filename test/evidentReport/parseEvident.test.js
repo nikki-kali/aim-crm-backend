@@ -370,7 +370,7 @@ test('Booked (MTD) falls back to accumulating from logged same-month days plus t
   assert.match(html, /\$8,865\.22/);
 });
 
-test('Billed (YTD) auto-accrues real daily figures logged after the verified baseline date; Booked (YTD) is not rendered', () => {
+test('YTD Sales Value Total (booked) auto-accrues real daily figures logged after the verified baseline date', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-18' });
   const history = [
     // Same date as the baseline itself — already reflected in the
@@ -381,36 +381,34 @@ test('Billed (YTD) auto-accrues real daily figures logged after the verified bas
   ];
   const { html } = buildReport1Email(agg, history);
 
-  // Booked YTD is deliberately NOT rendered (Ben Silberstein's spec,
-  // 2026-09-19, asks for a single billed-only YTD figure) — verify it's
-  // genuinely gone, not just untested.
-  assert.doesNotMatch(html, /\$373,425\.79/);
-  // 311452.46 (baseline) + 1243759 (LEGACY_YTD_REVENUE_ADJUSTMENT — real
-  // pre-CRM YTD Billed revenue, see clientRevenue.js) + 700 (09-17 only) +
-  // 1622.74 (today's real companyDailyBilled from ALL_MESSAGES) =
-  // 1557534.20.
-  assert.match(html, /\$1,557,534\.20/);
+  // 363360.57 (booked baseline) + 2000 (09-17 only) + 8065.22 (today's
+  // real companyDailyBooked from ALL_MESSAGES) = 373425.79. No
+  // LEGACY_YTD_REVENUE_ADJUSTMENT here — that $1,243,759 is real
+  // historical BILLED revenue with no booked equivalent (Ben
+  // Silberstein's correction, 2026-09-19: YTD in Report #1 means total
+  // sales value/booked, not billed).
+  assert.match(html, /\$373,425\.79/);
   assert.match(html, /Baseline verified Sep 16, 2026 \+ daily activity since/);
 });
 
-test('Billed (YTD) shows exactly the baseline, with no accrual, when run on the baseline date itself', () => {
+test('YTD Sales Value Total shows exactly the booked baseline, with no accrual, when run on the baseline date itself', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-16' });
   const { html } = buildReport1Email(agg, []);
 
-  // 311452.46 (baseline) + 1243759 (LEGACY_YTD_REVENUE_ADJUSTMENT) = 1555211.46.
-  assert.match(html, /\$1,555,211\.46/);
+  // 363360.57 (booked baseline), no LEGACY_YTD_REVENUE_ADJUSTMENT (billed-only).
+  assert.match(html, /\$363,360\.57/);
 });
 
-test('Billed (YTD) accrual treats a NULL company_daily_billed_value as zero (pre-billed-tracking row)', () => {
+test('YTD Sales Value Total accrual treats a NULL company_daily_booked_value as zero (pre-tracking row)', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-18' });
   const history = [
-    { date: '2026-09-17', company_daily_booked_value: '5000', company_daily_billed_value: null },
+    { date: '2026-09-17', company_daily_booked_value: null, company_daily_billed_value: '700' },
   ];
   const { html } = buildReport1Email(agg, history);
 
-  // Billed: 311452.46 + 1243759 (LEGACY_YTD_REVENUE_ADJUSTMENT) + 0 (NULL
-  // row contributes nothing) + 1622.74 = 1556834.20.
-  assert.match(html, /\$1,556,834\.20/);
+  // 363360.57 (baseline) + 0 (NULL row contributes nothing) + 8065.22
+  // (today's real companyDailyBooked) = 371425.79.
+  assert.match(html, /\$371,425\.79/);
 });
 
 test('Booked (MTD) prefers the real MTD Booked Daily Update figure over the self-accumulated fallback when it arrives', () => {
