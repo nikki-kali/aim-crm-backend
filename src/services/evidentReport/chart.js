@@ -106,4 +106,26 @@ function buildMonthComparisonChartUrl(lastMonth, thisMonth) {
   return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(config))}`;
 }
 
-module.exports = { buildWeeklyRevenueChartUrl, buildMonthComparisonChartUrl };
+// Multi-point month-by-month Booked/Billed trend line (user request,
+// 2026-09-19, superseding the two-point buildMonthComparisonChartUrl above
+// as the report's chart — that function is kept intact, not deleted, in
+// case a strict two-month comparison is wanted again later). `months` is
+// an ordered array of { label, booked, billed } already resolved by the
+// caller (buildReport.js) — same "chart.js stays a pure renderer" boundary
+// as every other function in this file.
+function buildMonthTrendChartUrl(months) {
+  const config = {
+    type: 'line',
+    data: {
+      labels: months.map((m) => m.label),
+      datasets: [
+        { label: 'Booked', data: months.map((m) => m.booked), borderColor: '#06babe', backgroundColor: '#06babe', fill: false, pointRadius: 5 },
+        { label: 'Billed', data: months.map((m) => m.billed), borderColor: '#207290', backgroundColor: '#207290', fill: false, pointRadius: 5 },
+      ],
+    },
+    options: { plugins: { legend: { display: true } } },
+  };
+  return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(config))}`;
+}
+
+module.exports = { buildWeeklyRevenueChartUrl, buildMonthComparisonChartUrl, buildMonthTrendChartUrl };

@@ -6,7 +6,7 @@
 // ../email.js, matching this codebase's existing convention of duplicating
 // brand hex/font values per template file (see CLAUDE.md's note on this).
 
-const { buildMonthComparisonChartUrl } = require('./chart');
+const { buildMonthTrendChartUrl } = require('./chart');
 const { LEGACY_YTD_REVENUE_ADJUSTMENT } = require('../clientRevenue');
 
 const BRAND = {
@@ -66,25 +66,26 @@ const COMPANY_YTD_SNAPSHOT = {
   billed: 311452.46 + LEGACY_YTD_REVENUE_ADJUSTMENT,
 };
 
-// One-time verified baseline for the Last Month vs. This Month chart's
-// "Last Month" bar — real August 2026 totals (1,490 cases / $157,654.32
-// booked, $147,772.40 billed), sourced from a real "EviSmart Report
-// Totals" email 2026-09-18 that manually previewed Evident's MTD reports
-// with the month changed on-screen (nothing else gives a company-wide
-// August figure — Evident's live "MTD Booked Daily Update"/"Daily MTD
-// Total Billed" reports only ever show the CURRENT month). This is a
-// genuinely temporary exception, unlike COMPANY_YTD_SNAPSHOT above: once
-// this pipeline's own real daily logging (started 2026-09-15) has covered
-// a complete month, "last month" can always be read from real logged
-// history instead — starting with the Sep-vs-Oct comparison in November,
-// no hardcoded prior-month baseline should be needed again. Update this
-// constant by hand only for the one remaining transition (comparing a
-// month before real tracking existed against one after).
-const LAST_MONTH_SNAPSHOT = {
-  label: 'August 2026',
-  booked: 157654.32,
-  billed: 147772.40,
-};
+// One-time verified monthly baselines for the trend chart and the "Pace
+// vs. Last Month" card — real June-August 2026 totals, user-supplied
+// 2026-09-19 from Evident's own EviSmart export (booked) and the custom
+// billing reports pulled the same day (billed). Booked/billed use the
+// "custom report" basis throughout, not the "financial ledger" basis
+// (the user's own figures showed these differ slightly, e.g.
+// $334,230.11 vs. $332,634.11 YTD as of 2026-09-18) — per the user's
+// explicit instruction to use one basis consistently, every figure in
+// this file (COMPANY_YTD_SNAPSHOT included) is the custom-report basis.
+// Same genuinely-temporary-exception status as the single-month baseline
+// this replaces: once this pipeline's own real daily logging (started
+// 2026-09-15) covers a complete month, that month can be read from real
+// logged history instead of hardcoded here — starting with October 2026.
+// Update this array by hand only to extend it with another pre-tracking
+// month, never to alter an already-verified month's figures.
+const MONTH_HISTORY = [
+  { label: 'Jun 2026', booked: 12059.06, billed: 0 },
+  { label: 'Jul 2026', booked: 99668.90, billed: 66311.90 },
+  { label: 'Aug 2026', booked: 157654.32, billed: 147772.40 },
+];
 
 // Real customer/clinic names from Evident's own data — never a hardcoded
 // constant, so this is the first place in this file that needs escaping
@@ -217,19 +218,19 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
     year: 'numeric',
   });
 
-  // Last Month vs. This Month Booked/Billed comparison (user request,
-  // 2026-09-19, replacing the weekly trend chart). "This Month" uses the
-  // same final companyMtdBooked/companyMtdBilled values the MTD cards
-  // above show — real, Evident-sourced MTD-to-date figures, not a partial
-  // sum limited by when this pipeline started logging (see the comments
-  // above on how those two are resolved). "Last Month" is the one-time
-  // verified LAST_MONTH_SNAPSHOT baseline (see its own comment for why
-  // this is a temporary exception, not an ongoing manual step).
+  // Month-by-month Booked/Billed trend (user request, 2026-09-19,
+  // superseding the two-point Last Month vs. This Month chart) — the
+  // verified MONTH_HISTORY baselines (Jun-Aug) plus the current live MTD
+  // month, using the same final companyMtdBooked/companyMtdBilled values
+  // the MTD cards above show (real, Evident-sourced MTD-to-date figures,
+  // see the comments above on how those two are resolved).
   const thisMonthLabel = new Date(`${agg.runDate}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-  const monthChartUrl = buildMonthComparisonChartUrl(
-    LAST_MONTH_SNAPSHOT,
-    { label: `${thisMonthLabel} (MTD)`, booked: companyMtdBooked, billed: companyMtdBilled }
-  );
+  const lastMonth = MONTH_HISTORY[MONTH_HISTORY.length - 1];
+  const trendMonths = [
+    ...MONTH_HISTORY,
+    { label: `${thisMonthLabel} (MTD)`, booked: companyMtdBooked, billed: companyMtdBilled },
+  ];
+  const monthChartUrl = buildMonthTrendChartUrl(trendMonths);
 
   const deltaColor = (cls) => (cls === 'up' ? BRAND.success : cls === 'down' ? BRAND.danger : BRAND.slate);
 
@@ -433,7 +434,32 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
       `).join('')}
     </div>`;
 
-  const chartNote = `<p style="margin:8px 0 0;font-size:11px;color:${BRAND.slate}">"This Month" is real MTD-to-date, not a full month yet, so the two bars aren't a like-for-like comparison until the month ends.</p>`;
+  const chartNote = `<p style="margin:8px 0 0;font-size:11px;color:${BRAND.slate}">${thisMonthLabel} is real MTD-to-date, not a full month yet, so it isn't a like-for-like comparison against a completed month until the month ends.</p>`;
+
+  // "Pace vs. Last Month" card (user request, 2026-09-19) — how much more
+  // this month's MTD figure needs to reach last month's full-month total,
+  // or by how much it has already surpassed it. Comparing a partial month
+  // to a completed one is intentional (it's the pace question, not a
+  // like-for-like one) — the chart above and its note already carry that
+  // caveat, so this card doesn't repeat it.
+  const paceCard = (label, current, lastMonthValue) => {
+    const gap = current - lastMonthValue;
+    const surpassed = gap >= 0;
+    return statCard(label, fmtMoney(current), [
+      { text: `${lastMonth.label}: ${fmtMoney(lastMonthValue)}` },
+      surpassed
+        ? { text: `Surpassed by ${fmtMoney(gap)}`, cls: 'up' }
+        : { text: `${fmtMoney(Math.abs(gap))} more to surpass` },
+    ]);
+  };
+  const paceSection = `
+    <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
+      ${sectionLabel(`Pace vs. ${lastMonth.label}`)}
+      ${cardRow([
+        paceCard('Booked (MTD)', companyMtdBooked, lastMonth.booked),
+        paceCard('Billed (MTD)', companyMtdBilled, lastMonth.billed),
+      ])}
+    </div>`;
 
   const html = `<!DOCTYPE html>
 <html>
@@ -480,10 +506,12 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
   </div>
 
   <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
-    ${sectionLabel('Last Month vs. This Month')}
-    <img src="${monthChartUrl}" alt="Last month vs. this month booked and billed revenue chart" style="max-width:100%;border-radius:8px;display:block" />
+    ${sectionLabel('Booked &amp; Billed by Month')}
+    <img src="${monthChartUrl}" alt="Month-by-month booked and billed revenue trend chart" style="max-width:100%;border-radius:8px;display:block" />
     ${chartNote}
   </div>
+
+  ${paceSection}
 
   ${repSection}
 
