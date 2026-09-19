@@ -192,9 +192,9 @@ const sectionLabel = (text) => `<p style="margin:0 0 14px;font-family:${FONT_DAT
 // (#06babe) — teal-on-tealMist measured under 3:1 contrast, hard to
 // read; `deep` clears WCAG AA on every light background used here.
 const todayCard = (label, value, sub) => `
-  <div style="background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;padding:20px 20px;box-shadow:${BRAND.glassShadow}">
+  <div style="background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;padding:18px 14px;box-shadow:${BRAND.glassShadow}">
     <p style="margin:0 0 6px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:${BRAND.deep}">${label}</p>
-    <p style="margin:0;font-family:${FONT_DATA};font-size:28px;font-weight:500;color:${BRAND.deep};letter-spacing:-.01em">${value}</p>
+    <p style="margin:0;font-family:${FONT_DATA};font-size:19px;font-weight:500;color:${BRAND.deep};letter-spacing:-.02em;white-space:nowrap">${value}</p>
     ${sub ? `<p style="margin:6px 0 0;font-size:12px;color:${BRAND.slate}">${sub}</p>` : ''}
   </div>`;
 
@@ -248,9 +248,8 @@ const goalBar = (goal) => {
   const remaining = Math.max(Number(goal.target) - Number(goal.current_value), 0);
   return `
     <div style="margin:0 0 9px">
-      <p style="margin:0 0 3px;font-size:11.5px;color:${BRAND.ink}">${escapeHtml(goal.title)}
-        <span style="float:right;font-family:${FONT_DATA};font-size:10px;color:${BRAND.slate}">${fmt(goal.current_value)} / ${fmt(goal.target)} (${pct}%)</span>
-      </p>
+      <p style="margin:0;font-size:11.5px;color:${BRAND.ink}">${escapeHtml(goal.title)}</p>
+      <p style="margin:1px 0 4px;font-family:${FONT_DATA};font-size:10px;color:${BRAND.slate}">${fmt(goal.current_value)} / ${fmt(goal.target)} (${pct}%)</p>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tr>
         <td style="background:${pct >= 100 ? BRAND.success : BRAND.teal};height:5px;border-radius:3px;width:${pct}%"></td>
         <td style="background:#eef2f1;height:5px;border-radius:3px;width:${100 - pct}%"></td>
@@ -499,14 +498,17 @@ function buildReport2Email(agg) {
   // "$0.00$1,458.97"). Reuses statCard/cardRow, the same building blocks
   // as every other section.
   const repSubLabel = (text) => `<p style="margin:0 0 6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}">${text}</p>`;
-  // Single 4-column row of mini cards per rep, not two 2-card rows — half
-  // the section's previous height, and the card is small/short enough
-  // (5-char labels, short values) that 4-up still holds up at 390px.
+  // Two rows of two cards per rep (Daily on top, MTD below), not one
+  // 4-up row: a real 390px render showed 4-up cards wrapping labels to 3
+  // lines at uneven heights and "$1,458.97" overflowing its card.
   const repBlock = (repName, daily) => `
     ${repSubLabel(escapeHtml(repName))}
     ${cardRow([
       miniStatCard('Total Daily Booked', `${daily.booked.count}`, fmtMoney(daily.booked.value)),
       miniStatCard('Total Daily Billed', `${daily.billed.count}`, fmtMoney(daily.billed.value)),
+    ])}
+    <div style="height:8px"></div>
+    ${cardRow([
       miniStatCard('MTD Booked', daily.mtdBooked == null ? '-' : fmtMoney(daily.mtdBooked)),
       miniStatCard('MTD Billed', daily.mtdBilled == null ? '-' : fmtMoney(daily.mtdBilled)),
     ])}`;
@@ -564,6 +566,7 @@ function buildReport3Email(agg, historyRows = [], repGoals = []) {
   // it's a partial month being compared against a completed one.
   const lastMonth = MONTH_HISTORY[MONTH_HISTORY.length - 1];
   const thisMonthLabel = new Date(`${agg.runDate}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const thisMonthShort = new Date(`${agg.runDate}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
   const thisPeriodLabel = `${thisMonthLabel} (MTD)`;
   // Chart starts at July 2026 (user request, 2026-09-19); June stays in
   // MONTH_HISTORY as verified data but is not plotted.
@@ -597,8 +600,8 @@ function buildReport3Email(agg, historyRows = [], repGoals = []) {
       <p style="margin:8px 0 0;font-size:11px;color:${BRAND.slate}">${thisPeriodLabel} is real month-to-date, not a full month yet, so it isn't a like-for-like comparison against a completed month until the month ends.</p>
     </div>
     ${cardRow([
-      momCard(`Booked - ${thisMonthLabel}`, companyMtdBooked, lastMonth.booked),
-      momCard(`Billed - ${thisMonthLabel}`, companyMtdBilled, lastMonth.billed),
+      momCard(`Booked - ${thisMonthShort}`, companyMtdBooked, lastMonth.booked),
+      momCard(`Billed - ${thisMonthShort}`, companyMtdBilled, lastMonth.billed),
     ])}
   </div>`;
 
