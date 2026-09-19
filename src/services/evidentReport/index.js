@@ -155,7 +155,7 @@ async function sendEvidentReportForApproval() {
   const approveUrl = buildApproveUrl(token)
 
   for (const [i, report] of reports.entries()) {
-    const bannered = injectApprovalBanner(report.html, { reportLabel: `AIM Leadership Report ${i + 1} of 3`, approveUrl })
+    const bannered = injectApprovalBanner(report.html, { reportLabel: `${report.subject.split(' - ')[0]} (${i + 1} of 3)`, approveUrl })
     await sendEmail({
       to: [APPROVER_EMAIL],
       subject: `Approve? — ${report.subject}`,

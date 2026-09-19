@@ -270,7 +270,7 @@ test('email copy has no em dashes and no removed footer line, across all 3 separ
     assert.ok(!html.includes('Generated automatically from Evident Labs'), 'old footer line should be gone');
     assert.ok(!html.includes('A PDF copy of this report is attached.'), 'PDF attachment was removed (user request, 2026-09-19) — footer should not reference it');
     assert.ok(!html.includes('Kings Highway'), 'Kings Highway should not appear anywhere in the email — removed from both the rep/brand breakdown and the header subtitle');
-    assert.ok(subject.startsWith('AIM Leadership Report'));
+    assert.match(subject, /^(Daily Sales Report|Daily Sales by Sales Rep|Goal Progress Report) - /);
   }
 });
 
@@ -280,9 +280,9 @@ test('Report #1/#2/#3 are three separate emails with distinct subjects (Ben Silb
   const r2 = buildReport2Email(agg);
   const r3 = buildReport3Email(agg, []);
 
-  assert.match(r1.subject, /AIM Leadership Report #1: Daily Sales/);
-  assert.match(r2.subject, /AIM Leadership Report #2: By Sales Rep/);
-  assert.match(r3.subject, /AIM Leadership Report #3: Goal Progress/);
+  assert.match(r1.subject, /^Daily Sales Report/);
+  assert.match(r2.subject, /^Daily Sales by Sales Rep/);
+  assert.match(r3.subject, /^Goal Progress Report/);
 
   // Each report's own content stays out of the other two's emails.
   assert.doesNotMatch(r2.html, /Today's Booked Cases/);

@@ -461,7 +461,7 @@ function buildReport1Email(agg, historyRows = [], overrides = {}) {
 
   ${bookedRowsTable}`;
 
-  const html = emailShell('AIM Leadership Report #1: Daily Sales', dateLabel, body);
+  const html = emailShell('Daily Sales Report', dateLabel, body);
 
   const sheetRow = {
     date: agg.runDate,
@@ -484,7 +484,7 @@ function buildReport1Email(agg, historyRows = [], overrides = {}) {
   };
 
   return {
-    subject: `AIM Leadership Report #1: Daily Sales - ${dateLabel}`,
+    subject: `Daily Sales Report - ${dateLabel}`,
     html,
     sheetRow,
   };
@@ -566,8 +566,8 @@ function buildReport2Email(agg) {
   </div>`;
 
   return {
-    subject: `AIM Leadership Report #2: By Sales Rep - ${dateLabel}`,
-    html: emailShell('AIM Leadership Report #2: By Sales Rep', dateLabel, body),
+    subject: `Daily Sales by Sales Rep - ${dateLabel}`,
+    html: emailShell('Daily Sales by Sales Rep', dateLabel, body),
   };
 }
 
@@ -596,8 +596,8 @@ function buildReport3Email(agg, repGoals = []) {
   </div>`;
 
   return {
-    subject: `AIM Leadership Report #3: Goal Progress - ${dateLabel}`,
-    html: emailShell('AIM Leadership Report #3: Goal Progress', dateLabel, body),
+    subject: `Goal Progress Report - ${dateLabel}`,
+    html: emailShell('Goal Progress Report', dateLabel, body),
   };
 }
 
