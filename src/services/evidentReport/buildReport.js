@@ -595,20 +595,20 @@ function buildReport3Email(agg, historyRows = [], repGoals = []) {
       <p style="margin:8px 0 0;font-size:11px;color:${BRAND.slate}">${thisPeriodLabel} is real month-to-date, not a full month yet, so it isn't a like-for-like comparison against a completed month until the month ends.</p>
     </div>
     ${cardRow([
-      momCard('Booked', companyMtdBooked, lastMonth.booked),
-      momCard('Billed', companyMtdBilled, lastMonth.billed),
+      momCard(`Booked - ${thisMonthLabel}`, companyMtdBooked, lastMonth.booked),
+      momCard(`Billed - ${thisMonthLabel}`, companyMtdBilled, lastMonth.billed),
     ])}
   </div>`;
 
   const hasGoals = repGoals.length > 0 && repGoals.some((r) => r.goals.length > 0);
+  const repCard = (r) => `
+  <div style="margin:14px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
+    <p style="margin:0 0 10px;font-size:13px;font-weight:600;color:${BRAND.ink}">${escapeHtml(r.repName)}</p>
+    ${r.goals.map(goalBar).join('')}
+  </div>`;
   const goalsSection = hasGoals ? `
-  <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
-    ${sectionLabel('Goal Progress')}
-    ${repGoals.filter((r) => r.goals.length > 0).map((r) => `
-      <p style="margin:0 0 5px;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}">${escapeHtml(r.repName)}</p>
-      ${r.goals.map(goalBar).join('')}
-    `).join('')}
-  </div>` : `
+  <div style="padding:24px 36px 0">${sectionLabel('Goal Progress')}</div>
+  ${repGoals.filter((r) => r.goals.length > 0).map(repCard).join('')}` : `
   <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
     ${sectionLabel('Goal Progress')}
     <p style="margin:0;font-size:13px;color:${BRAND.slate}">No active goals for James or William this period.</p>
