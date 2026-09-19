@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { parseAndAggregate, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows } = require('../../src/services/evidentReport/parseEvident');
-const { buildEmail } = require('../../src/services/evidentReport/buildReport');
+const { buildReport1Email, buildReport2Email, buildReport3Email } = require('../../src/services/evidentReport/buildReport');
 
 function fixture(name) {
   return fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf-8');
@@ -81,7 +81,7 @@ test('parseAndAggregate exposes companyDailyBookedRows for the Leadership Report
 
 test("Today's Booked Cases table aggregates by customer (matches Evident's real Report 13 format), HTML-escaped, and is omitted when there are none", () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
-  const { html } = buildEmail(agg, []);
+  const { html } = buildReport1Email(agg, []);
   // 94 real rows collapse to 47 unique customers (format confirmed
   // 2026-09-18 against a real "EviSmart Report Totals" email showing
   // Evident's own Report 13 aggregates the same way).
@@ -93,7 +93,7 @@ test("Today's Booked Cases table aggregates by customer (matches Evident's real 
   assert.match(html, />Dr\. ALBERTO GONZALEZ</);
 
   const emptyAgg = { ...agg, companyDailyBookedRows: [] };
-  const { html: emptyHtml } = buildEmail(emptyAgg, []);
+  const { html: emptyHtml } = buildReport1Email(emptyAgg, []);
   assert.doesNotMatch(emptyHtml, /Today's Booked Cases/);
 });
 
@@ -103,7 +103,7 @@ test("Today's Booked Cases table HTML-escapes customer names (not a trusted cons
     ...agg,
     companyDailyBookedRows: [{ ref: '1', customerName: '<script>alert(1)</script>', value: 10, salesperson: '' }],
   };
-  const { html } = buildEmail(withMaliciousName, []);
+  const { html } = buildReport1Email(withMaliciousName, []);
   assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
 });
@@ -118,7 +118,7 @@ test('Booked (MTD) case count self-accumulates from logged same-month companyDai
     // NULL (predates the column) — contributes nothing, not a crash.
     { date: '2026-09-13', company_daily_booked_count: null },
   ];
-  const { html } = buildEmail(agg, history);
+  const { html } = buildReport1Email(agg, history);
   // 10 + 5 + 0 (NULL row) + 94 (today's real companyDailyBookedCount) = 109.
   assert.match(html, /109 cases/);
 });
@@ -132,7 +132,7 @@ test('parseAndAggregate exposes real per-rep MTD columns and Daily Billed rows f
 
 test('By Sales Rep section (Report #2) renders real per-rep daily and MTD figures', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
-  const { html } = buildEmail(agg, []);
+  const { html } = buildReport2Email(agg);
 
   assert.match(html, /By Sales Rep/);
   assert.match(html, /James Delaney/);
@@ -150,7 +150,7 @@ test('By Sales Rep MTD columns show "-" (not a fabricated $0) when the report ha
   const messagesWithoutMtdBooked = ALL_MESSAGES.filter((m) => m.subject !== 'MTD Booked Daily Update');
   const agg = parseAndAggregate(messagesWithoutMtdBooked, { runDate: '2026-09-11' });
   assert.equal(agg.companyMtdBookedByRep, null);
-  const { html } = buildEmail(agg, []);
+  const { html } = buildReport2Email(agg);
   assert.match(html, /"-" = no per-rep MTD breakdown today/);
 });
 
@@ -166,7 +166,7 @@ test('Goal Progress section (Report #3) renders real goal data passed in by the 
     },
     { repName: 'William Alexander', goals: [] },
   ];
-  const { html } = buildEmail(agg, [], {}, repGoals);
+  const { html } = buildReport3Email(agg, repGoals);
 
   assert.match(html, /Goal Progress/);
   assert.match(html, /James Delaney/);
@@ -179,8 +179,14 @@ test('Goal Progress section (Report #3) renders real goal data passed in by the 
   const goalsSectionHtml = html.slice(goalsSectionStart, goalsSectionStart + 2000);
   assert.doesNotMatch(goalsSectionHtml, /William Alexander/);
 
-  const { html: noGoalsHtml } = buildEmail(agg, [], {}, []);
-  assert.doesNotMatch(noGoalsHtml, /Goal Progress/);
+  // Report #3 is its own email now, so an empty goals list still sends a
+  // real "Goal Progress" section (with an explicit no-goals message)
+  // rather than omitting the section entirely — unlike the old combined
+  // layout, this report has nothing else in it to give an empty section
+  // context.
+  const { html: noGoalsHtml } = buildReport3Email(agg, []);
+  assert.match(noGoalsHtml, /Goal Progress/);
+  assert.match(noGoalsHtml, /No active goals for James or William this period\./);
 });
 
 test('Goal Progress section HTML-escapes goal titles (not a trusted constant — admin-entered text)', () => {
@@ -188,7 +194,7 @@ test('Goal Progress section HTML-escapes goal titles (not a trusted constant —
   const repGoals = [
     { repName: 'James Delaney', goals: [{ title: '<script>alert(1)</script>', metric: 'new_doctors', target: 10, current_value: 1, progress_pct: 10 }] },
   ];
-  const { html } = buildEmail(agg, [], {}, repGoals);
+  const { html } = buildReport3Email(agg, repGoals);
   assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
 });
@@ -215,7 +221,7 @@ test('flags missing reports instead of silently under-reporting', () => {
 
 test('Booked & Billed by Month trend chart uses the verified Jun-Aug baselines and real September MTD figures', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
-  const { html } = buildEmail(agg, []);
+  const { html } = buildReport1Email(agg, []);
 
   assert.match(html, /Booked &amp; Billed by Month/);
   // Verified pre-tracking months.
@@ -239,7 +245,7 @@ test('Booked & Billed by Month trend chart uses the verified Jun-Aug baselines a
 
 test('Pace vs. Last Month card shows the gap to (or surplus over) August for both Booked and Billed MTD', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
-  const { html } = buildEmail(agg, []);
+  const { html } = buildReport1Email(agg, []);
 
   assert.match(html, /Pace vs\. Aug 2026/);
   // September MTD booked (6935) is far below August's 157654.32 booked —
@@ -250,16 +256,41 @@ test('Pace vs. Last Month card shows the gap to (or surplus over) August for bot
   assert.doesNotMatch(html, /Surpassed by/);
 });
 
-test('email copy has no em dashes and no removed footer line', () => {
+test('email copy has no em dashes and no removed footer line, across all 3 separated reports', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
-  const { html, subject } = buildEmail(agg, []);
+  const reports = [
+    buildReport1Email(agg, []),
+    buildReport2Email(agg),
+    buildReport3Email(agg, []),
+  ];
 
-  assert.ok(!html.includes('—'), 'html should not contain an em dash character');
-  assert.ok(!html.includes('&mdash;'), 'html should not contain an em dash entity');
-  assert.ok(!html.includes('Generated automatically from Evident Labs'), 'old footer line should be gone');
-  assert.ok(html.includes('A PDF copy of this report is attached.'));
-  assert.ok(!html.includes('Kings Highway'), 'Kings Highway should not appear anywhere in the email — removed from both the rep/brand breakdown and the header subtitle');
-  assert.ok(subject.startsWith('AIM Leadership Report'));
+  for (const { html, subject } of reports) {
+    assert.ok(!html.includes('—'), 'html should not contain an em dash character');
+    assert.ok(!html.includes('&mdash;'), 'html should not contain an em dash entity');
+    assert.ok(!html.includes('Generated automatically from Evident Labs'), 'old footer line should be gone');
+    assert.ok(!html.includes('A PDF copy of this report is attached.'), 'PDF attachment was removed (user request, 2026-09-19) — footer should not reference it');
+    assert.ok(!html.includes('Kings Highway'), 'Kings Highway should not appear anywhere in the email — removed from both the rep/brand breakdown and the header subtitle');
+    assert.ok(subject.startsWith('AIM Leadership Report'));
+  }
+});
+
+test('Report #1/#2/#3 are three separate emails with distinct subjects (Ben Silberstein\'s requirement, 2026-09-19)', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
+  const r1 = buildReport1Email(agg, []);
+  const r2 = buildReport2Email(agg);
+  const r3 = buildReport3Email(agg, []);
+
+  assert.match(r1.subject, /AIM Leadership Report #1: Daily Sales/);
+  assert.match(r2.subject, /AIM Leadership Report #2: By Sales Rep/);
+  assert.match(r3.subject, /AIM Leadership Report #3: Goal Progress/);
+
+  // Each report's own content stays out of the other two's emails.
+  assert.doesNotMatch(r2.html, /Today's Booked Cases/);
+  assert.doesNotMatch(r2.html, /Goal Progress/);
+  assert.doesNotMatch(r3.html, /By Sales Rep/);
+  assert.doesNotMatch(r3.html, /Booked &amp; Billed by Month/);
+  assert.doesNotMatch(r1.html, /By Sales Rep/);
+  assert.doesNotMatch(r1.html, /Goal Progress/);
 });
 
 test('Billed (MTD) delta shows against a logged prior day (guard allows it once company-wide tracking exists)', () => {
@@ -268,7 +299,7 @@ test('Billed (MTD) delta shows against a logged prior day (guard allows it once 
     date: '2026-09-10', booked_mtd_value: '1702.87', booked_mtd_billed: '89242.46',
     wip_value: '46209.54', ytd_billed_value: '7519.13', company_daily_booked_value: '100',
   }];
-  const { html } = buildEmail(agg, history);
+  const { html } = buildReport1Email(agg, history);
 
   assert.match(html, /▲ \$200\.00 vs\. yesterday/);
 });
@@ -279,7 +310,7 @@ test('Billed (MTD) shows no delta when the prior row predates company-wide track
     date: '2026-09-10', booked_mtd_value: '1702.87', booked_mtd_billed: '1124.46',
     wip_value: '46209.54', ytd_billed_value: '0', company_daily_booked_value: null,
   }];
-  const { html } = buildEmail(agg, history);
+  const { html } = buildReport1Email(agg, history);
 
   assert.ok(!html.includes('vs. yesterday'), 'no delta anywhere — both the Billed (MTD) guard and the existing Billed (YTD) zero-guard should suppress their deltas on a pre-transition prior row');
 });
@@ -294,7 +325,7 @@ test("Billed (MTD) suppresses its delta when today's own MTD Total Billed report
     date: '2026-09-10', booked_mtd_value: '1702.87', booked_mtd_billed: '89242.46',
     wip_value: '46209.54', ytd_billed_value: '7519.13', company_daily_booked_value: '100',
   }];
-  const { html } = buildEmail(agg, history);
+  const { html } = buildReport1Email(agg, history);
 
   // Without the guard, this would render a confident "▼ $89,242.46 vs.
   // yesterday" — a fabricated comparison against an absent-data 0, not a
@@ -311,7 +342,7 @@ test('Booked (MTD) falls back to accumulating from logged same-month days plus t
     { date: '2026-09-15', company_daily_booked_value: '300' },
     { date: '2026-08-30', company_daily_booked_value: '9999' },
   ];
-  const { html } = buildEmail(agg, history);
+  const { html } = buildReport1Email(agg, history);
 
   // 500 + 300 (same-month history) + 8065.22 (today's real companyDailyBooked) = 8865.22.
   // The 2026-08-30 row must NOT be included (different month).
@@ -327,7 +358,7 @@ test('Billed (YTD) auto-accrues real daily figures logged after the verified bas
     // After the baseline — a real day of accrual.
     { date: '2026-09-17', company_daily_booked_value: '2000', company_daily_billed_value: '700' },
   ];
-  const { html } = buildEmail(agg, history);
+  const { html } = buildReport1Email(agg, history);
 
   // Booked YTD is deliberately NOT rendered (Ben Silberstein's spec,
   // 2026-09-19, asks for a single billed-only YTD figure) — verify it's
@@ -343,7 +374,7 @@ test('Billed (YTD) auto-accrues real daily figures logged after the verified bas
 
 test('Billed (YTD) shows exactly the baseline, with no accrual, when run on the baseline date itself', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-16' });
-  const { html } = buildEmail(agg, []);
+  const { html } = buildReport1Email(agg, []);
 
   // 311452.46 (baseline) + 1243759 (LEGACY_YTD_REVENUE_ADJUSTMENT) = 1555211.46.
   assert.match(html, /\$1,555,211\.46/);
@@ -354,7 +385,7 @@ test('Billed (YTD) accrual treats a NULL company_daily_billed_value as zero (pre
   const history = [
     { date: '2026-09-17', company_daily_booked_value: '5000', company_daily_billed_value: null },
   ];
-  const { html } = buildEmail(agg, history);
+  const { html } = buildReport1Email(agg, history);
 
   // Billed: 311452.46 + 1243759 (LEGACY_YTD_REVENUE_ADJUSTMENT) + 0 (NULL
   // row contributes nothing) + 1622.74 = 1556834.20.
@@ -368,7 +399,7 @@ test('Booked (MTD) prefers the real MTD Booked Daily Update figure over the self
     { date: '2026-09-14', company_daily_booked_value: '500' },
     { date: '2026-09-15', company_daily_booked_value: '300' },
   ];
-  const { html } = buildEmail(agg, history);
+  const { html } = buildReport1Email(agg, history);
 
   // The fixture's real MTD Booked Daily Update total (6935) wins over the
   // self-accumulated 500+300+8065.22=8865.22 fallback figure.

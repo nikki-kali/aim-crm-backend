@@ -486,7 +486,7 @@ router.post('/sales-rep-daily-report/send', auth, requireAdmin, async (req, res,
 })
 
 // POST /api/reports/evident-report/send — admin-only manual trigger, runs
-// the full pipeline once (fetch → parse → build → PDF → send → log) and
+// the full pipeline once (fetch → parse → build → send → log) and
 // reports which stage it reached. No `test`/redirect flag like the other
 // manual-send routes have — unlike a per-rep report, there's no
 // alternate target to redirect this to; it always sends to the real
@@ -507,7 +507,7 @@ router.post('/evident-report/send', auth, requireAdmin, async (req, res, next) =
 router.post('/evident-report/send-for-approval', auth, requireAdmin, async (req, res, next) => {
   try {
     const result = await sendEvidentReportForApproval()
-    res.json({ success: true, message: `Preview sent to ${APPROVER_EMAIL} for approval.`, subject: result.subject })
+    res.json({ success: true, message: `3 report previews sent to ${APPROVER_EMAIL} for approval.`, subjects: result.subjects })
   } catch (err) { next(err) }
 })
 
@@ -566,7 +566,7 @@ const confirmPage = (label, detail, token) => `<!DOCTYPE html>
 // loads, unlike the actual send it's describing.
 async function describeClaimForConfirmation(claim) {
   if (claim.report_type === 'evident-report') {
-    return { label: 'the AIM Leadership Report', detail: `This will send the Leadership Report for ${claim.report_date} to leadership now.` }
+    return { label: 'the AIM Leadership Reports', detail: `This will send the 3 Leadership Reports (Daily Sales, By Sales Rep, Goal Progress) for ${claim.report_date} to leadership now.` }
   }
   if (claim.report_type === 'sales-rep-daily-report') {
     const { rows } = await db.query(`SELECT name, email FROM users WHERE id=$1`, [claim.rep_id])
@@ -623,8 +623,8 @@ router.post('/approve', rateLimiter({ windowMs: 10 * 60 * 1000, max: 20 }), asyn
     if (!claim) return res.status(410).send(resultPage('Link expired or already used', EXPIRED_MESSAGE, false))
 
     if (claim.report_type === 'evident-report') {
-      const result = await runEvidentReport()
-      return res.send(resultPage('Sent!', `The Leadership Report ("${result.subject}") has been sent to leadership.`, true))
+      await runEvidentReport()
+      return res.send(resultPage('Sent!', 'The 3 Leadership Reports (Daily Sales, By Sales Rep, Goal Progress) have been sent to leadership.', true))
     }
 
     if (claim.report_type === 'sales-rep-daily-report') {

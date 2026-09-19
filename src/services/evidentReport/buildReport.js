@@ -45,7 +45,7 @@ const HAIRLINE = '#dcebe9';
 // views and were verified against each report's own totals row
 // (363360.57 = 354353.54 + 4499.79 + 4507.24; 311452.46 = 302654.92 +
 // 4382.79 + 4414.75 — the N/A + per-rep split summing to the stated total
-// in both PDFs), as of asOfDate. From asOfDate forward, buildEmail() below
+// in both PDFs), as of asOfDate. From asOfDate forward, buildReport1Email()
 // auto-accrues every real logged company-wide daily booked/billed figure
 // on top of this baseline — so the YTD tiles stay live without ever
 // re-deriving a number Evident doesn't provide. Update the baseline by
@@ -108,19 +108,144 @@ function delta(curr, prev) {
   return { text: `${arrow} ${fmtMoney(Math.abs(diff))} vs. yesterday`, cls };
 }
 
-// `overrides` (optional) lets a specific day's run substitute the live
-// Evident-parsed Booked/Billed (MTD) figures with numbers manually pulled
-// from Evident's own dashboard — needed because the automated nightly
-// batch reflects a fixed overnight cutoff, so same-day billing entered
-// later in the business day doesn't show up until the FOLLOWING night's
-// batch (seen 2026-09-17: automated Daily MTD Total Billed showed
-// $89,442.46 while a same-day 5:40pm dashboard pull already showed
-// $100,941.55 — not a parsing bug, just a same-day timing lag). Only
-// affects what's DISPLAYED today; sheetRow below always persists the raw
-// automated figures, so tomorrow's day-over-day delta keeps comparing
-// like-sourced numbers rather than an override against an un-overridden
-// baseline.
-function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
+const deltaColor = (cls) => (cls === 'up' ? BRAND.success : cls === 'down' ? BRAND.danger : BRAND.slate);
+
+const sectionLabel = (text) => `<p style="margin:0 0 14px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${BRAND.slate}">${text}</p>`;
+
+// Each figure gets its own bordered card — two figures sharing one card
+// reads as one combined number at a glance, which is exactly the
+// confusion this replaces. "Today" cards get the more prominent
+// teal-tinted treatment (the headline news); "This Month & Year" cards
+// are deliberately quieter (neutral background, smaller type) so the
+// hierarchy reads today > month/year without saying so explicitly.
+// Figure colors are `deep` (#207290), not the brighter `teal`
+// (#06babe) — teal-on-tealMist measured under 3:1 contrast, hard to
+// read; `deep` clears WCAG AA on every light background used here.
+const todayCard = (label, value, sub) => `
+  <div style="background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;padding:20px 20px;box-shadow:${BRAND.glassShadow}">
+    <p style="margin:0 0 6px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:${BRAND.deep}">${label}</p>
+    <p style="margin:0;font-family:${FONT_DATA};font-size:28px;font-weight:500;color:${BRAND.deep};letter-spacing:-.01em">${value}</p>
+    ${sub ? `<p style="margin:6px 0 0;font-size:12px;color:${BRAND.slate}">${sub}</p>` : ''}
+  </div>`;
+
+// `lines` is an array of { text, cls? } sub-lines rendered below the
+// value, e.g. a real day-over-day delta AND a fixed scope footnote
+// together (Billed (YTD) needs both) — kept as one card, not a
+// duplicate caption elsewhere, per the "one figure, one card" rule.
+const statCard = (label, value, lines = []) => `
+  <div style="background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:14px;padding:16px 14px;box-shadow:${BRAND.glassShadow}">
+    <p style="margin:0 0 6px;font-family:${FONT_DATA};font-size:9px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;color:${BRAND.slate}">${label}</p>
+    <p style="margin:0;font-family:${FONT_DATA};font-size:19px;font-weight:500;color:${BRAND.ink}">${value}</p>
+    ${lines.filter((l) => l && l.text).map((l) => `<p style="margin:5px 0 0;font-family:${FONT_DATA};font-size:10px;color:${l.cls ? deltaColor(l.cls) : BRAND.slate}">${l.text}</p>`).join('')}
+  </div>`;
+
+// Compact variant for repeated/secondary data (By Sales Rep's 8 small
+// numbers don't need the same visual weight as the 4-5 headline figures
+// elsewhere) — roughly half the padding and a smaller value size.
+const miniStatCard = (label, value, sub) => `
+  <div style="background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:10px;padding:9px 10px;box-shadow:${BRAND.glassShadow}">
+    <p style="margin:0 0 3px;font-family:${FONT_DATA};font-size:8px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:${BRAND.slate}">${label}</p>
+    <p style="margin:0;font-family:${FONT_DATA};font-size:14px;font-weight:500;color:${BRAND.ink}">${value}${sub ? ` <span style="font-size:10px;font-weight:400;color:${BRAND.slate}">${sub}</span>` : ''}</p>
+  </div>`;
+
+// Row of separate cards with real gutters between them (not just padding
+// inside a shared cell) — a plain <table> can't put margin between
+// adjacent <td>s, so the gap is its own empty spacer column.
+// table-layout:fixed is load-bearing on mobile — without it, auto layout
+// sizes each <td> by its card's own content/padding rather than the
+// specified percentage, and a 2-card row can render wider than the
+// viewport (the second card cut off at the screen edge, confirmed via a
+// real 390px-wide render before this fix).
+const cardRow = (cards) => {
+  const width = (100 / cards.length - 2).toFixed(2);
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed"><tr>
+    ${cards.map((c, i) => `${i > 0 ? `<td width="2%"></td>` : ''}<td width="${width}%" style="vertical-align:top">${c}</td>`).join('')}
+  </tr></table>`;
+};
+
+// Email-safe progress bar for Report #3 (Goal Progress) — a fixed-width
+// outer cell with an inner cell sized by percentage, since flex/CSS width
+// transitions aren't reliable across email clients but table cell widths
+// are.
+const goalBar = (goal) => {
+  const pct = Math.min(goal.progress_pct || 0, 100);
+  const isMoney = goal.metric === 'monthly_revenue';
+  const fmt = (n) => isMoney ? fmtMoney(n) : Number(n).toLocaleString();
+  return `
+    <div style="margin:0 0 9px">
+      <p style="margin:0 0 3px;font-size:11.5px;color:${BRAND.ink}">${escapeHtml(goal.title)}
+        <span style="float:right;font-family:${FONT_DATA};font-size:10px;color:${BRAND.slate}">${fmt(goal.current_value)} / ${fmt(goal.target)} (${pct}%)</span>
+      </p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tr>
+        <td style="background:${pct >= 100 ? BRAND.success : BRAND.teal};height:5px;border-radius:3px;width:${pct}%"></td>
+        <td style="background:#eef2f1;height:5px;border-radius:3px;width:${100 - pct}%"></td>
+      </tr></table>
+    </div>`;
+};
+
+// Shared email chrome (header/footer) for all three separated reports
+// (Ben Silberstein's requirement, 2026-09-19 — Report #1/#2/#3 must be
+// three distinct emails, not sections in one combined email). `title` is
+// the header's own line (distinguishes which of the 3 reports this is at
+// a glance, since all three otherwise share identical branding); `body`
+// is that report's own section markup.
+function emailShell(title, dateLabel, body) {
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body style="margin:0;padding:0;background-color:${BRAND.deep};background-image:linear-gradient(160deg,${BRAND.skyBlue} 0%,${BRAND.deep} 100%);font-family:${FONT_BODY}">
+<div style="max-width:600px;margin:40px auto;background-color:rgba(255,255,255,.96);background-image:linear-gradient(175deg,rgba(255,255,255,.99) 0%,${BRAND.tealMist} 55%,${BRAND.blueMist} 100%);border:1px solid rgba(255,255,255,.6);border-radius:24px;overflow:hidden;box-shadow:0 10px 40px rgba(32,114,144,.22)">
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+      <td bgcolor="${BRAND.teal}" style="background-color:${BRAND.teal};background-image:linear-gradient(135deg,${BRAND.teal},${BRAND.deep});padding:34px 36px 28px">
+        <h1 style="color:#fff;margin:0;font-family:${FONT_DISPLAY};font-size:30px;font-weight:700;letter-spacing:-.01em">${title}</h1>
+        <p style="color:rgba(255,255,255,.72);margin:12px 0 0;font-size:13px">${dateLabel} &nbsp;·&nbsp; AIM Dental Laboratory</p>
+      </td>
+    </tr>
+  </table>
+
+  ${body}
+
+  <div style="margin-top:28px;background:${BRAND.tealMist};padding:16px 36px;font-size:11.5px;color:${BRAND.slate};border-top:1px solid ${HAIRLINE}">
+    Aim Dental Laboratory CRM &nbsp;·&nbsp; Leadership Report
+  </div>
+</div>
+</body></html>`.trim();
+}
+
+function dateLabelFor(runDate) {
+  return new Date(`${runDate}T00:00:00Z`).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+// Report #1: Daily Sales — Today/MTD/YTD figures, the month-by-month
+// trend chart, the Pace vs. Last Month card, and the customer-detail
+// table. Split out as its own email (Ben Silberstein's requirement,
+// 2026-09-19 — Report #1/#2/#3 must be three distinct emails, not
+// sections in one combined email; previously combined per an earlier,
+// since-superseded instruction). `overrides` (optional) lets a specific
+// day's run substitute the live Evident-parsed Booked/Billed (MTD)
+// figures with numbers manually pulled from Evident's own dashboard —
+// needed because the automated nightly batch reflects a fixed overnight
+// cutoff, so same-day billing entered later in the business day doesn't
+// show up until the FOLLOWING night's batch (seen 2026-09-17: automated
+// Daily MTD Total Billed showed $89,442.46 while a same-day 5:40pm
+// dashboard pull already showed $100,941.55 — not a parsing bug, just a
+// same-day timing lag). Only affects what's DISPLAYED today; sheetRow
+// below always persists the raw automated figures, so tomorrow's
+// day-over-day delta keeps comparing like-sourced numbers rather than an
+// override against an un-overridden baseline.
+function buildReport1Email(agg, historyRows = [], overrides = {}) {
   const prior = historyRows
     .filter((r) => r.date && r.date < agg.runDate)
     .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
@@ -211,12 +336,7 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
   const companyYtdBilled = COMPANY_YTD_SNAPSHOT.billed + ytdBilledAccrued;
   const ytdNote = { text: `Baseline verified ${COMPANY_YTD_SNAPSHOT.asOfLabel} + daily activity since` };
 
-  const dateLabel = new Date(`${agg.runDate}T00:00:00Z`).toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  });
+  const dateLabel = dateLabelFor(agg.runDate);
 
   // Month-by-month Booked/Billed trend (user request, 2026-09-19,
   // superseding the two-point Last Month vs. This Month chart) — the
@@ -231,63 +351,6 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
     { label: `${thisMonthLabel} (MTD)`, booked: companyMtdBooked, billed: companyMtdBilled },
   ];
   const monthChartUrl = buildMonthTrendChartUrl(trendMonths);
-
-  const deltaColor = (cls) => (cls === 'up' ? BRAND.success : cls === 'down' ? BRAND.danger : BRAND.slate);
-
-  const sectionLabel = (text) => `<p style="margin:0 0 14px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${BRAND.slate}">${text}</p>`;
-
-  // Each figure gets its own bordered card — two figures sharing one card
-  // reads as one combined number at a glance, which is exactly the
-  // confusion this replaces. "Today" cards get the more prominent
-  // teal-tinted treatment (the headline news); "This Month & Year" cards
-  // are deliberately quieter (neutral background, smaller type) so the
-  // hierarchy reads today > month/year without saying so explicitly.
-  // Figure colors are `deep` (#207290), not the brighter `teal`
-  // (#06babe) — teal-on-tealMist measured under 3:1 contrast, hard to
-  // read; `deep` clears WCAG AA on every light background used here.
-  const todayCard = (label, value, sub) => `
-    <div style="background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;padding:20px 20px;box-shadow:${BRAND.glassShadow}">
-      <p style="margin:0 0 6px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:${BRAND.deep}">${label}</p>
-      <p style="margin:0;font-family:${FONT_DATA};font-size:28px;font-weight:500;color:${BRAND.deep};letter-spacing:-.01em">${value}</p>
-      ${sub ? `<p style="margin:6px 0 0;font-size:12px;color:${BRAND.slate}">${sub}</p>` : ''}
-    </div>`;
-
-  // `lines` is an array of { text, cls? } sub-lines rendered below the
-  // value, e.g. a real day-over-day delta AND a fixed scope footnote
-  // together (Billed (YTD) needs both) — kept as one card, not a
-  // duplicate caption elsewhere, per the "one figure, one card" rule.
-  const statCard = (label, value, lines = []) => `
-    <div style="background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:14px;padding:16px 14px;box-shadow:${BRAND.glassShadow}">
-      <p style="margin:0 0 6px;font-family:${FONT_DATA};font-size:9px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;color:${BRAND.slate}">${label}</p>
-      <p style="margin:0;font-family:${FONT_DATA};font-size:19px;font-weight:500;color:${BRAND.ink}">${value}</p>
-      ${lines.filter((l) => l && l.text).map((l) => `<p style="margin:5px 0 0;font-family:${FONT_DATA};font-size:10px;color:${l.cls ? deltaColor(l.cls) : BRAND.slate}">${l.text}</p>`).join('')}
-    </div>`;
-
-  // Compact variant for repeated/secondary data (By Sales Rep's 8 small
-  // numbers don't need the same visual weight as the 4-5 headline figures
-  // elsewhere) — roughly half the padding and a smaller value size, which
-  // is most of where this email's overall length came from.
-  const miniStatCard = (label, value, sub) => `
-    <div style="background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:10px;padding:9px 10px;box-shadow:${BRAND.glassShadow}">
-      <p style="margin:0 0 3px;font-family:${FONT_DATA};font-size:8px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:${BRAND.slate}">${label}</p>
-      <p style="margin:0;font-family:${FONT_DATA};font-size:14px;font-weight:500;color:${BRAND.ink}">${value}${sub ? ` <span style="font-size:10px;font-weight:400;color:${BRAND.slate}">${sub}</span>` : ''}</p>
-    </div>`;
-
-  // Three-column row of separate cards with real gutters between them
-  // (not just padding inside a shared cell) — a plain <table> can't put
-  // margin between adjacent <td>s, so the gap is its own empty spacer
-  // column, same trick used for the two-column "Today" row below.
-  // table-layout:fixed is load-bearing on mobile — without it, auto
-  // layout sizes each <td> by its card's own content/padding rather than
-  // the specified percentage, and a 2-card row can render wider than the
-  // viewport (the second card cut off at the screen edge, confirmed via a
-  // real 390px-wide render before this fix).
-  const cardRow = (cards) => {
-    const width = (100 / cards.length - 2).toFixed(2);
-    return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed"><tr>
-      ${cards.map((c, i) => `${i > 0 ? `<td width="2%"></td>` : ''}<td width="${width}%" style="vertical-align:top">${c}</td>`).join('')}
-    </tr></table>`;
-  };
 
   const missingBanner = agg.missing.length
     ? `<div style="margin:30px 36px 0;padding:16px 19px;background:#fefaf1;border:1px solid #fde68a;border-left:3px solid #b45309;border-radius:4px 12px 12px 4px">
@@ -336,104 +399,6 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
       </table>
     </div>`;
 
-  // Report #2: by-sales-rep breakdown (Ben Silberstein's requirement,
-  // 2026-09-19) — daily count+value grouped from the same row-level
-  // company-wide data Report 1's customer-detail table already uses
-  // (consistent source, not a second report type that could drift from
-  // Report 1's totals); MTD value-only read directly from Evident's own
-  // per-rep columns in "MTD Booked Daily Update"/"Daily MTD Total Billed"
-  // (see extractRepColumns in parseEvident.js) rather than re-derived, so
-  // it matches whatever Evident itself considers each rep's MTD share.
-  // Only James/William shown — "by sales rep" excludes the N/A bucket,
-  // which Report 1's company-wide totals already cover.
-  // valueField differs by row type: booking rows only have `value` (Sales
-  // Value Total); billed rows have both `value` and `billedValue` (Sales
-  // Value Total Billed) — the latter is the real dollar amount billed,
-  // which is what "Total Billed by sales rep" means, not the case's total
-  // value.
-  const groupRowsByRep = (rows, valueField = 'value') => {
-    const g = { james: { count: 0, value: 0 }, william: { count: 0, value: 0 } };
-    for (const r of rows) {
-      const key = r.salesperson === 'james' ? 'james' : r.salesperson === 'william' ? 'william' : null;
-      if (!key) continue;
-      g[key].count += 1;
-      g[key].value += r[valueField];
-    }
-    return g;
-  };
-  const dailyBookedByRep = groupRowsByRep(agg.companyDailyBookedRows, 'value');
-  const dailyBilledByRep = groupRowsByRep(agg.companyDailyBilledRows, 'billedValue');
-
-  // Stacked per-rep cards, not a wide 5-column table — a table with Rep +
-  // 4 numeric columns has no room to breathe on a phone (confirmed on a
-  // real 390px render: two figures collided into unreadable text like
-  // "$0.00$1,458.97"). Reuses statCard/cardRow, the same building blocks
-  // as every other section, so this also fixes the earlier inconsistency
-  // of this being the one section with no card treatment at all.
-  const repSubLabel = (text) => `<p style="margin:0 0 6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}">${text}</p>`;
-  // Single 4-column row of mini cards per rep, not two 2-card rows — half
-  // the section's previous height, and the card is small/short enough
-  // (5-char labels, short values) that 4-up still holds up at 390px, kept
-  // to only 2 gutters wide overall.
-  const repBlock = (repName, daily) => `
-    ${repSubLabel(escapeHtml(repName))}
-    ${cardRow([
-      miniStatCard('Booked', `${daily.booked.count}`, fmtMoney(daily.booked.value)),
-      miniStatCard('Billed', `${daily.billed.count}`, fmtMoney(daily.billed.value)),
-      miniStatCard('MTD Bkd', daily.mtdBooked == null ? '-' : fmtMoney(daily.mtdBooked)),
-      miniStatCard('MTD Bld', daily.mtdBilled == null ? '-' : fmtMoney(daily.mtdBilled)),
-    ])}`;
-
-  const repSection = `
-    <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
-      ${sectionLabel('By Sales Rep')}
-      ${repBlock('James Delaney', {
-        booked: dailyBookedByRep.james,
-        billed: dailyBilledByRep.james,
-        mtdBooked: agg.companyMtdBookedByRep ? agg.companyMtdBookedByRep.james : null,
-        mtdBilled: agg.companyMtdBilledByRep ? agg.companyMtdBilledByRep.james : null,
-      })}
-      <div style="height:12px"></div>
-      ${repBlock('William Alexander', {
-        booked: dailyBookedByRep.william,
-        billed: dailyBilledByRep.william,
-        mtdBooked: agg.companyMtdBookedByRep ? agg.companyMtdBookedByRep.william : null,
-        mtdBilled: agg.companyMtdBilledByRep ? agg.companyMtdBilledByRep.william : null,
-      })}
-      <p style="margin:10px 0 0;font-size:9.5px;color:${BRAND.slate}">Booked/Billed = today's cases and value. "-" = no per-rep MTD breakdown today.</p>
-    </div>`;
-
-  // Report #3: goal progress (Ben Silberstein's requirement, 2026-09-19) —
-  // repGoals is pre-fetched by the caller (evidentReport/index.js), not
-  // queried here, so this file stays a pure function of its arguments
-  // (see fetchRepGoalsWithProgress's own comment for why). Email-safe
-  // progress bar: a fixed-width outer cell with an inner cell sized by
-  // percentage, since flex/CSS width transitions aren't reliable across
-  // email clients but table cell widths are.
-  const goalBar = (goal) => {
-    const pct = Math.min(goal.progress_pct || 0, 100);
-    const isMoney = goal.metric === 'monthly_revenue';
-    const fmt = (n) => isMoney ? fmtMoney(n) : Number(n).toLocaleString();
-    return `
-      <div style="margin:0 0 9px">
-        <p style="margin:0 0 3px;font-size:11.5px;color:${BRAND.ink}">${escapeHtml(goal.title)}
-          <span style="float:right;font-family:${FONT_DATA};font-size:10px;color:${BRAND.slate}">${fmt(goal.current_value)} / ${fmt(goal.target)} (${pct}%)</span>
-        </p>
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tr>
-          <td style="background:${pct >= 100 ? BRAND.success : BRAND.teal};height:5px;border-radius:3px;width:${pct}%"></td>
-          <td style="background:#eef2f1;height:5px;border-radius:3px;width:${100 - pct}%"></td>
-        </tr></table>
-      </div>`;
-  };
-  const goalsSection = repGoals.length === 0 || repGoals.every((r) => r.goals.length === 0) ? '' : `
-    <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
-      ${sectionLabel('Goal Progress')}
-      ${repGoals.filter((r) => r.goals.length > 0).map((r) => `
-        <p style="margin:0 0 5px;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}">${escapeHtml(r.repName)}</p>
-        ${r.goals.map(goalBar).join('')}
-      `).join('')}
-    </div>`;
-
   const chartNote = `<p style="margin:8px 0 0;font-size:11px;color:${BRAND.slate}">${thisMonthLabel} is real MTD-to-date, not a full month yet, so it isn't a like-for-like comparison against a completed month until the month ends.</p>`;
 
   // "Pace vs. Last Month" card (user request, 2026-09-19) — how much more
@@ -461,26 +426,7 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
       ])}
     </div>`;
 
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-</head>
-<body style="margin:0;padding:0;background-color:${BRAND.deep};background-image:linear-gradient(160deg,${BRAND.skyBlue} 0%,${BRAND.deep} 100%);font-family:${FONT_BODY}">
-<div style="max-width:600px;margin:40px auto;background-color:rgba(255,255,255,.96);background-image:linear-gradient(175deg,rgba(255,255,255,.99) 0%,${BRAND.tealMist} 55%,${BRAND.blueMist} 100%);border:1px solid rgba(255,255,255,.6);border-radius:24px;overflow:hidden;box-shadow:0 10px 40px rgba(32,114,144,.22)">
-
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-    <tr>
-      <td bgcolor="${BRAND.teal}" style="background-color:${BRAND.teal};background-image:linear-gradient(135deg,${BRAND.teal},${BRAND.deep});padding:34px 36px 28px">
-        <h1 style="color:#fff;margin:0;font-family:${FONT_DISPLAY};font-size:30px;font-weight:700;letter-spacing:-.01em">AIM Leadership Report</h1>
-        <p style="color:rgba(255,255,255,.72);margin:12px 0 0;font-size:13px">${dateLabel} &nbsp;·&nbsp; AIM Dental Laboratory</p>
-      </td>
-    </tr>
-  </table>
-
+  const body = `
   ${missingBanner}
 
   <div style="padding:22px 36px 0">
@@ -513,21 +459,9 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
 
   ${paceSection}
 
-  ${repSection}
+  ${bookedRowsTable}`;
 
-  ${goalsSection}
-
-  ${bookedRowsTable}
-
-  <div style="margin:24px 36px 0;padding-top:16px;border-top:1px solid ${HAIRLINE}">
-    <p style="margin:0;font-size:11px;color:${BRAND.slate}">A PDF copy of this report is attached.</p>
-  </div>
-
-  <div style="margin-top:28px;background:${BRAND.tealMist};padding:16px 36px;font-size:11.5px;color:${BRAND.slate};border-top:1px solid ${HAIRLINE}">
-    Aim Dental Laboratory CRM &nbsp;·&nbsp; Leadership Report
-  </div>
-</div>
-</body></html>`.trim();
+  const html = emailShell('AIM Leadership Report #1: Daily Sales', dateLabel, body);
 
   const sheetRow = {
     date: agg.runDate,
@@ -550,10 +484,121 @@ function buildEmail(agg, historyRows = [], overrides = {}, repGoals = []) {
   };
 
   return {
-    subject: `AIM Leadership Report - ${dateLabel}`,
+    subject: `AIM Leadership Report #1: Daily Sales - ${dateLabel}`,
     html,
     sheetRow,
   };
 }
 
-module.exports = { buildEmail };
+// Report #2: By Sales Rep — daily count+value grouped from the same
+// row-level company-wide data Report #1's customer-detail table uses
+// (consistent source, not a second report type that could drift from
+// Report #1's totals); MTD value-only read directly from Evident's own
+// per-rep columns in "MTD Booked Daily Update"/"Daily MTD Total Billed"
+// (see extractRepColumns in parseEvident.js) rather than re-derived, so
+// it matches whatever Evident itself considers each rep's MTD share. Only
+// James/William shown — "by sales rep" excludes the N/A bucket, which
+// Report #1's company-wide totals already cover. valueField differs by
+// row type: booking rows only have `value` (Sales Value Total); billed
+// rows have both `value` and `billedValue` (Sales Value Total Billed) —
+// the latter is the real dollar amount billed, which is what "Total
+// Billed by sales rep" means, not the case's total value. Its own
+// separate email (Ben Silberstein's requirement, 2026-09-19).
+function buildReport2Email(agg) {
+  const dateLabel = dateLabelFor(agg.runDate);
+
+  const groupRowsByRep = (rows, valueField = 'value') => {
+    const g = { james: { count: 0, value: 0 }, william: { count: 0, value: 0 } };
+    for (const r of rows) {
+      const key = r.salesperson === 'james' ? 'james' : r.salesperson === 'william' ? 'william' : null;
+      if (!key) continue;
+      g[key].count += 1;
+      g[key].value += r[valueField];
+    }
+    return g;
+  };
+  const dailyBookedByRep = groupRowsByRep(agg.companyDailyBookedRows, 'value');
+  const dailyBilledByRep = groupRowsByRep(agg.companyDailyBilledRows, 'billedValue');
+
+  // Stacked per-rep cards, not a wide 5-column table — a table with Rep +
+  // 4 numeric columns has no room to breathe on a phone (confirmed on a
+  // real 390px render: two figures collided into unreadable text like
+  // "$0.00$1,458.97"). Reuses statCard/cardRow, the same building blocks
+  // as every other section.
+  const repSubLabel = (text) => `<p style="margin:0 0 6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}">${text}</p>`;
+  // Single 4-column row of mini cards per rep, not two 2-card rows — half
+  // the section's previous height, and the card is small/short enough
+  // (5-char labels, short values) that 4-up still holds up at 390px.
+  const repBlock = (repName, daily) => `
+    ${repSubLabel(escapeHtml(repName))}
+    ${cardRow([
+      miniStatCard('Booked', `${daily.booked.count}`, fmtMoney(daily.booked.value)),
+      miniStatCard('Billed', `${daily.billed.count}`, fmtMoney(daily.billed.value)),
+      miniStatCard('MTD Bkd', daily.mtdBooked == null ? '-' : fmtMoney(daily.mtdBooked)),
+      miniStatCard('MTD Bld', daily.mtdBilled == null ? '-' : fmtMoney(daily.mtdBilled)),
+    ])}`;
+
+  const missingBanner = agg.missing.length
+    ? `<div style="margin:30px 36px 0;padding:16px 19px;background:#fefaf1;border:1px solid #fde68a;border-left:3px solid #b45309;border-radius:4px 12px 12px 4px">
+         <p style="margin:0;font-size:13.5px;line-height:1.55;color:${BRAND.ink}">Heads up: today's figures are missing ${agg.missing.length} of the ${agg.expectedCount} expected Evident reports (${agg.missing.join(', ')}). Numbers below may be understated.</p>
+       </div>`
+    : '';
+
+  const body = `
+  ${missingBanner}
+
+  <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
+    ${sectionLabel('By Sales Rep')}
+    ${repBlock('James Delaney', {
+      booked: dailyBookedByRep.james,
+      billed: dailyBilledByRep.james,
+      mtdBooked: agg.companyMtdBookedByRep ? agg.companyMtdBookedByRep.james : null,
+      mtdBilled: agg.companyMtdBilledByRep ? agg.companyMtdBilledByRep.james : null,
+    })}
+    <div style="height:12px"></div>
+    ${repBlock('William Alexander', {
+      booked: dailyBookedByRep.william,
+      billed: dailyBilledByRep.william,
+      mtdBooked: agg.companyMtdBookedByRep ? agg.companyMtdBookedByRep.william : null,
+      mtdBilled: agg.companyMtdBilledByRep ? agg.companyMtdBilledByRep.william : null,
+    })}
+    <p style="margin:10px 0 0;font-size:9.5px;color:${BRAND.slate}">Booked/Billed = today's cases and value. "-" = no per-rep MTD breakdown today.</p>
+  </div>`;
+
+  return {
+    subject: `AIM Leadership Report #2: By Sales Rep - ${dateLabel}`,
+    html: emailShell('AIM Leadership Report #2: By Sales Rep', dateLabel, body),
+  };
+}
+
+// Report #3: Goal Progress — repGoals is pre-fetched by the caller
+// (evidentReport/index.js's fetchRepGoalsWithProgress), not queried here,
+// so this file stays a pure function of its arguments. Its own separate
+// email (Ben Silberstein's requirement, 2026-09-19). When there are no
+// goals for the period, the body says so explicitly rather than sending
+// a blank-looking email — unlike the old combined layout, this report has
+// nothing else in it to give the empty state context.
+function buildReport3Email(agg, repGoals = []) {
+  const dateLabel = dateLabelFor(agg.runDate);
+  const hasGoals = repGoals.length > 0 && repGoals.some((r) => r.goals.length > 0);
+
+  const body = hasGoals ? `
+  <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
+    ${sectionLabel('Goal Progress')}
+    ${repGoals.filter((r) => r.goals.length > 0).map((r) => `
+      <p style="margin:0 0 5px;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}">${escapeHtml(r.repName)}</p>
+      ${r.goals.map(goalBar).join('')}
+    `).join('')}
+  </div>` : `
+  <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
+    ${sectionLabel('Goal Progress')}
+    <p style="margin:0;font-size:13px;color:${BRAND.slate}">No active goals for James or William this period.</p>
+  </div>`;
+
+  return {
+    subject: `AIM Leadership Report #3: Goal Progress - ${dateLabel}`,
+    html: emailShell('AIM Leadership Report #3: Goal Progress', dateLabel, body),
+  };
+}
+
+module.exports = { buildReport1Email, buildReport2Email, buildReport3Email };

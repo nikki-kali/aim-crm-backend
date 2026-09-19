@@ -1,8 +1,7 @@
 const { fetchEvidentEmails } = require('./gmailFetch')
 const { parseAndAggregate } = require('./parseEvident')
-const { buildEmail } = require('./buildReport')
+const { buildReport1Email, buildReport2Email, buildReport3Email } = require('./buildReport')
 const { getHistory, appendRow } = require('./log')
-const { renderPdf } = require('./pdf')
 const { sendEmail } = require('../email')
 const { APPROVER_EMAIL, createApprovalToken, buildApproveUrl, injectApprovalBanner } = require('../reportApproval')
 const db = require('../../config/db')
@@ -74,35 +73,23 @@ async function runEvidentReport() {
   }
 
   const repGoals = await fetchRepGoalsWithProgress()
-  const { subject, html, sheetRow } = buildEmail(aggregate, historyRows, {}, repGoals)
+  const report1 = buildReport1Email(aggregate, historyRows, {})
+  const report2 = buildReport2Email(aggregate)
+  const report3 = buildReport3Email(aggregate, repGoals)
+  const { subject, sheetRow } = report1
 
-  // Best-effort: a PDF failure shouldn't block the report from sending at
-  // all — it sends HTML-only instead, loudly logged, never silent.
-  let pdfBuffer = null
-  try {
-    console.log('[evident-report] rendering PDF...')
-    pdfBuffer = await renderPdf(html)
-  } catch (err) {
-    console.error('[evident-report] PDF render failed, sending HTML-only:', err)
+  // Three separate emails, not one combined email (Ben Silberstein's
+  // requirement, 2026-09-19 — supersedes the earlier "all in one report"
+  // instruction). Sent back to back to the same recipients/bcc.
+  console.log(`[evident-report] sending 3 reports to ${RECIPIENTS.join(', ')}...`)
+  for (const report of [report1, report2, report3]) {
+    await sendEmail({
+      to: RECIPIENTS,
+      bcc: ['media@aimdentallab.com'],
+      subject: report.subject,
+      html: report.html,
+    })
   }
-
-  const finalHtml = pdfBuffer
-    ? html
-    : html.replace(
-        'A PDF copy of this report is attached.',
-        'PDF attachment unavailable for this run. Figures above are unaffected.'
-      )
-
-  console.log(`[evident-report] sending to ${RECIPIENTS.join(', ')}...`)
-  await sendEmail({
-    to: RECIPIENTS,
-    bcc: ['media@aimdentallab.com'],
-    subject,
-    html: finalHtml,
-    ...(pdfBuffer
-      ? { attachments: [{ filename: `evident-report-${aggregate.runDate}.pdf`, content: pdfBuffer, contentType: 'application/pdf' }] }
-      : {}),
-  })
 
   // The log-write gate excludes the two YTD Booked Cases reports and the
   // new MTD Booked Daily Update report — none of their arrival cadence is
@@ -151,18 +138,31 @@ async function sendEvidentReportForApproval() {
   const messages = await fetchEvidentEmails()
   const aggregate = parseAndAggregate(messages, { runDate })
   const repGoals = await fetchRepGoalsWithProgress()
-  const { subject, html } = buildEmail(aggregate, historyRows, {}, repGoals)
+  const reports = [
+    buildReport1Email(aggregate, historyRows, {}),
+    buildReport2Email(aggregate),
+    buildReport3Email(aggregate, repGoals),
+  ]
 
+  // One approval token/link shared by all 3 preview emails — clicking
+  // "Approve & Send" on ANY of them triggers the same real action
+  // (runEvidentReport() re-fetching live data and sending all 3 real
+  // emails), so a single click is all that's needed even though the
+  // approver receives 3 separate previews (one per report, matching
+  // exactly what leadership will get — Ben Silberstein's requirement,
+  // 2026-09-19).
   const token = await createApprovalToken({ reportType: 'evident-report', reportDate: runDate })
   const approveUrl = buildApproveUrl(token)
-  const bannered = injectApprovalBanner(html, { reportLabel: 'AIM Leadership Report', approveUrl })
 
-  await sendEmail({
-    to: [APPROVER_EMAIL],
-    subject: `Approve? — ${subject}`,
-    html: bannered,
-  })
-  return { subject, approveUrl }
+  for (const [i, report] of reports.entries()) {
+    const bannered = injectApprovalBanner(report.html, { reportLabel: `AIM Leadership Report ${i + 1} of 3`, approveUrl })
+    await sendEmail({
+      to: [APPROVER_EMAIL],
+      subject: `Approve? — ${report.subject}`,
+      html: bannered,
+    })
+  }
+  return { subjects: reports.map((r) => r.subject), approveUrl }
 }
 
 module.exports = { runEvidentReport, sendEvidentReportForApproval }
