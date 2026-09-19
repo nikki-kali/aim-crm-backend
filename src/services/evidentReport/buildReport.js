@@ -344,18 +344,18 @@ function buildReport1Email(agg, historyRows = [], overrides = {}) {
   // "total sales value," meaning Evident's own "Sales Value Total" field:
   // the value of everything booked this year, whether or not it's been
   // billed yet, not just what's been invoiced so far). LEGACY_YTD_REVENUE_
-  // ADJUSTMENT is deliberately NOT added here (unlike the old billed
-  // figure) — that $1,243,759 is real historical BILLED revenue from
-  // AIM/Kings Highway's pre-CRM system, which has no "booked" equivalent;
-  // adding it to a booked total would conflate two different real
-  // quantities. COMPANY_YTD_SNAPSHOT.billed itself is left in place above,
-  // verified real data kept for provenance in case YTD Billed needs to
-  // come back.
+  // ADJUSTMENT (see clientRevenue.js) is always added on top, per the
+  // user's explicit instruction (2026-09-19) to include it as a default —
+  // that $1,243,759 is real historical revenue from AIM/Kings Highway's
+  // previous system (before this CRM/Evident tracking existed), and
+  // should always be reflected in the company's real YTD sales total
+  // regardless of which underlying metric (booked or billed) that total
+  // is built from.
   const ytdBookedAccrued = historyRows
     .filter((r) => r.date && r.date > COMPANY_YTD_SNAPSHOT.asOfDate)
     .reduce((sum, r) => sum + Number(r.company_daily_booked_value || 0), 0)
     + (agg.runDate > COMPANY_YTD_SNAPSHOT.asOfDate ? agg.companyDailyBooked : 0);
-  const companyYtdBooked = COMPANY_YTD_SNAPSHOT.booked + ytdBookedAccrued;
+  const companyYtdBooked = COMPANY_YTD_SNAPSHOT.booked + ytdBookedAccrued + LEGACY_YTD_REVENUE_ADJUSTMENT;
   const ytdNote = { text: `Baseline verified ${COMPANY_YTD_SNAPSHOT.asOfLabel} + daily activity since` };
 
   const dateLabel = dateLabelFor(agg.runDate);

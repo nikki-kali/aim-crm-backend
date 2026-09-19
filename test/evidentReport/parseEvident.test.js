@@ -382,21 +382,19 @@ test('YTD Sales Value Total (booked) auto-accrues real daily figures logged afte
   const { html } = buildReport1Email(agg, history);
 
   // 363360.57 (booked baseline) + 2000 (09-17 only) + 8065.22 (today's
-  // real companyDailyBooked from ALL_MESSAGES) = 373425.79. No
-  // LEGACY_YTD_REVENUE_ADJUSTMENT here — that $1,243,759 is real
-  // historical BILLED revenue with no booked equivalent (Ben
-  // Silberstein's correction, 2026-09-19: YTD in Report #1 means total
-  // sales value/booked, not billed).
-  assert.match(html, /\$373,425\.79/);
+  // real companyDailyBooked from ALL_MESSAGES) + 1243759
+  // (LEGACY_YTD_REVENUE_ADJUSTMENT, always added by default per the
+  // user's explicit 2026-09-19 instruction) = 1617184.79.
+  assert.match(html, /\$1,617,184\.79/);
   assert.match(html, /Baseline verified Sep 16, 2026 \+ daily activity since/);
 });
 
-test('YTD Sales Value Total shows exactly the booked baseline, with no accrual, when run on the baseline date itself', () => {
+test('YTD Sales Value Total shows exactly the booked baseline plus the legacy adjustment, with no daily accrual, when run on the baseline date itself', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-16' });
   const { html } = buildReport1Email(agg, []);
 
-  // 363360.57 (booked baseline), no LEGACY_YTD_REVENUE_ADJUSTMENT (billed-only).
-  assert.match(html, /\$363,360\.57/);
+  // 363360.57 (booked baseline) + 1243759 (LEGACY_YTD_REVENUE_ADJUSTMENT) = 1607119.57.
+  assert.match(html, /\$1,607,119\.57/);
 });
 
 test('YTD Sales Value Total accrual treats a NULL company_daily_booked_value as zero (pre-tracking row)', () => {
@@ -407,8 +405,9 @@ test('YTD Sales Value Total accrual treats a NULL company_daily_booked_value as 
   const { html } = buildReport1Email(agg, history);
 
   // 363360.57 (baseline) + 0 (NULL row contributes nothing) + 8065.22
-  // (today's real companyDailyBooked) = 371425.79.
-  assert.match(html, /\$371,425\.79/);
+  // (today's real companyDailyBooked) + 1243759
+  // (LEGACY_YTD_REVENUE_ADJUSTMENT) = 1615184.79.
+  assert.match(html, /\$1,615,184\.79/);
 });
 
 test('Booked (MTD) prefers the real MTD Booked Daily Update figure over the self-accumulated fallback when it arrives', () => {
