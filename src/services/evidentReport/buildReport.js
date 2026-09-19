@@ -505,10 +505,10 @@ function buildReport2Email(agg) {
   const repBlock = (repName, daily) => `
     ${repSubLabel(escapeHtml(repName))}
     ${cardRow([
-      miniStatCard('Booked', `${daily.booked.count}`, fmtMoney(daily.booked.value)),
-      miniStatCard('Billed', `${daily.billed.count}`, fmtMoney(daily.billed.value)),
-      miniStatCard('MTD Bkd', daily.mtdBooked == null ? '-' : fmtMoney(daily.mtdBooked)),
-      miniStatCard('MTD Bld', daily.mtdBilled == null ? '-' : fmtMoney(daily.mtdBilled)),
+      miniStatCard('Total Daily Booked', `${daily.booked.count}`, fmtMoney(daily.booked.value)),
+      miniStatCard('Total Daily Billed', `${daily.billed.count}`, fmtMoney(daily.billed.value)),
+      miniStatCard('MTD Booked', daily.mtdBooked == null ? '-' : fmtMoney(daily.mtdBooked)),
+      miniStatCard('MTD Billed', daily.mtdBilled == null ? '-' : fmtMoney(daily.mtdBilled)),
     ])}`;
 
   const missingBanner = agg.missing.length
@@ -535,7 +535,7 @@ function buildReport2Email(agg) {
       mtdBooked: agg.companyMtdBookedByRep ? agg.companyMtdBookedByRep.william : null,
       mtdBilled: agg.companyMtdBilledByRep ? agg.companyMtdBilledByRep.william : null,
     })}
-    <p style="margin:10px 0 0;font-size:9.5px;color:${BRAND.slate}">Booked/Billed = today's cases and value. "-" = no per-rep MTD breakdown today.</p>
+    <p style="margin:10px 0 0;font-size:9.5px;color:${BRAND.slate}">Total Daily Booked/Billed = the day's case count and value. "-" = no per-rep MTD breakdown today.</p>
   </div>`;
 
   return {
@@ -565,8 +565,10 @@ function buildReport3Email(agg, historyRows = [], repGoals = []) {
   const lastMonth = MONTH_HISTORY[MONTH_HISTORY.length - 1];
   const thisMonthLabel = new Date(`${agg.runDate}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
   const thisPeriodLabel = `${thisMonthLabel} (MTD)`;
+  // Chart starts at July 2026 (user request, 2026-09-19); June stays in
+  // MONTH_HISTORY as verified data but is not plotted.
   const trendMonths = [
-    ...MONTH_HISTORY,
+    ...MONTH_HISTORY.slice(1),
     { label: thisPeriodLabel, booked: companyMtdBooked, billed: companyMtdBilled },
   ];
   const monthChartUrl = buildMonthTrendChartUrl(trendMonths);

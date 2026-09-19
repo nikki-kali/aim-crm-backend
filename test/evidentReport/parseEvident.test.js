@@ -239,10 +239,10 @@ test('Report #3\'s month-by-month trend chart uses the verified Jun-Aug baseline
 
   assert.match(html, /September 2026 \(MTD\) vs\. Aug 2026/);
   // Verified pre-tracking months.
-  assert.match(html, /Jun%202026/);
+  assert.doesNotMatch(html, /Jun%202026/); // chart starts in July
   assert.match(html, /Jul%202026/);
   assert.match(html, /Aug%202026/);
-  assert.match(html, /12059\.06/); // June booked
+  assert.doesNotMatch(html, /12059\.06/); // June not plotted
   assert.match(html, /99668\.9/); // July booked
   assert.match(html, /66311\.9/); // July billed
   assert.match(html, /157654\.32/); // August booked
