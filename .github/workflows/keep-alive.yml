@@ -1,0 +1,30 @@
+name: Keep Render service awake
+
+# aim-crm-backend runs on Render's free web-service plan, which spins down
+# after ~15 minutes of no inbound HTTP traffic. This service's daily report
+# crons (evidentCrmSync 7am ET, evidentReport/salesRepDailyReport 8am ET,
+# plus jobs/scheduler.js's own 5-minute workflow-engine tick) all run
+# in-process via node-cron — a schedule that fires while the service is
+# asleep is silently skipped, not retried. Confirmed happened for real:
+# no Evident CRM sync activity for Monday 2026-09-21, a real business day,
+# because nothing had hit the site since the prior week's deploys.
+#
+# This workflow pings the app's own /health route every 10 minutes
+# (comfortably inside the 15-minute spin-down window) so the process never
+# sleeps, keeping every in-process cron reliable without upgrading to a
+# paid Render plan (the tradeoff explicitly chosen over that, 2026-09-22).
+#
+# GitHub disables scheduled workflows on a repo with no commits for 60
+# days — not a near-term concern here given how actively this repo is
+# worked in, but worth knowing if this job is ever found not running.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health
+        run: curl -fsS --max-time 20 https://aim-crm-backend.onrender.com/health
