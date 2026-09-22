@@ -15,6 +15,15 @@ const BACKEND_URL = process.env.RENDER_EXTERNAL_URL || 'https://aim-crm-backend.
 // keeps working exactly as before.
 const VALID_BRANDS = ['Aim Dental', 'Kings Highway']
 
+// This endpoint is public and unauthenticated, and every field below is
+// interpolated straight into HTML emails sent to real staff/customer
+// inboxes — without this, a POST body like `name: "<img src=x onerror=...>"`
+// renders as-is in the notification email.
+const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => HTML_ESCAPES[c])
+}
+
 // This route is called from the marketing website's browser JS, which lives
 // on a different origin than FRONTEND_URL (the CRM app) — app.js's global
 // CORS policy only allows the CRM's origin. Rather than loosen that policy
@@ -28,13 +37,13 @@ function webLeadEmail({ formType, name, practice, email, phone, caseType, messag
   const b = pickupBrand(brand)
   const rows = [
     ['Form', formType === 'scanner-program' ? 'Scanner Placement Program' : 'Contact / Start a Case'],
-    ['Name', name],
-    ['Practice', practice || '—'],
-    ['Email', email],
-    ['Phone', phone || '—'],
-    caseType && ['Reason', caseType],
-    monthlyVolume && ['Est. monthly volume', monthlyVolume],
-    message && ['Message', message],
+    ['Name', escapeHtml(name)],
+    ['Practice', escapeHtml(practice) || '—'],
+    ['Email', escapeHtml(email)],
+    ['Phone', escapeHtml(phone) || '—'],
+    caseType && ['Reason', escapeHtml(caseType)],
+    monthlyVolume && ['Est. monthly volume', escapeHtml(monthlyVolume)],
+    message && ['Message', escapeHtml(message)],
   ].filter(Boolean)
 
   const rowsHtml = rows
@@ -55,7 +64,7 @@ function webLeadEmail({ formType, name, practice, email, phone, caseType, messag
     isRecurring && recurringDays?.length
       ? `
       <div style="margin:20px 32px 0;padding:12px 16px;background:#fff7ed;border:1px solid #fdba74;border-radius:8px;font-size:13px;color:#9a3412">
-        <strong>Recurring pickup requested</strong> — ${recurringDays.join(', ')}${pickupWindow ? `, ${pickupWindow}` : ''}. Call the delivery service to set up the standing schedule.
+        <strong>Recurring pickup requested</strong> — ${recurringDays.map(escapeHtml).join(', ')}${pickupWindow ? `, ${escapeHtml(pickupWindow)}` : ''}. Call the delivery service to set up the standing schedule.
       </div>`
       : ''
 
@@ -246,12 +255,12 @@ router.post(
             to: email,
             subject: `${pickupBrand(leadBrand).name} — pickup request received`,
             html: pickupRequestedEmail({
-              doctorName: name.trim(),
-              pickupAddress,
-              pickupDate,
-              pickupWindow,
-              caseCount,
-              instructions,
+              doctorName: escapeHtml(name.trim()),
+              pickupAddress: escapeHtml(pickupAddress),
+              pickupDate: escapeHtml(pickupDate),
+              pickupWindow: escapeHtml(pickupWindow),
+              caseCount: escapeHtml(caseCount),
+              instructions: escapeHtml(instructions),
               brand: leadBrand,
             }),
           })
