@@ -191,9 +191,9 @@ router.post(
         formType === 'scanner-program'
           ? undefined
           : isKHPickup
-            ? ['ben@khdentallab.com', 'execassistant@aimdentallab.com', 'digital@khdentallab.com', 'customer@khdentallab.com', 'shipping@khdentallab.com']
+            ? ['ben@khdentallab.com', 'execassistant@aimdentallab.com', 'digital@khdentallab.com', 'customer@khdentallab.com', 'shipping@khdentallab.com', 'stephenm@khdentallab.com']
             : isPickup
-              ? ['customer@aimdentallab.com', 'media@aimdentallab.com', 'execassistant@aimdentallab.com', 'ben@aimdentallab.com', 'shipping@khdentallab.com']
+              ? ['customer@aimdentallab.com', 'media@aimdentallab.com', 'execassistant@aimdentallab.com', 'ben@aimdentallab.com', 'shipping@khdentallab.com', 'stephenm@aimdentallab.com']
               : ['customer@aimdentallab.com', 'digital@aimdentallab.com']
 
       // Email notification is best-effort — a lead that's saved but doesn't
