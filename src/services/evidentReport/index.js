@@ -34,22 +34,36 @@ async function fetchRepGoalsWithProgress() {
   return result
 }
 
-// Anchored to America/New_York (the cron's own timezone) rather than
-// falling back to parseEvident.js's UTC-derived default — the admin manual
-// -send route has no guarantee it's invoked during the same UTC calendar
-// day as ET, and writing "tomorrow's" date would collide with the next
-// morning's real cron run on evident_report_log.date's UNIQUE constraint.
-// 'en-CA' reliably formats as YYYY-MM-DD (verified against this Node
-// version before relying on it here).
-function todayEasternDateString() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+// Returns the last COMPLETED business day before now, in America/New_York
+// (the cron's own timezone) — NOT literally "today" (user correction,
+// 2026-09-22: a report generated/sent Tuesday still reported "Tuesday,
+// September 22" even though the data behind it is "last night's Evident
+// emails," i.e. Monday's activity; the report must be dated to the
+// business day its data actually reflects). Every weekday cron run of
+// this report reflects the PRIOR business day's activity — Evident's own
+// batch arrives overnight for the day that just ended — so a Tuesday 8am
+// run needs Monday's date, and a Monday 8am run needs Friday's (skipping
+// the weekend), matching the same "use the last business day" rule
+// already applied 2026-09-19 for a non-business-day admin trigger. Pure
+// calendar-day arithmetic on Date.UTC, same technique as chart.js's
+// mondayOfWeek, so this doesn't depend on the server process's own local
+// timezone. 'en-CA' reliably formats as YYYY-MM-DD (verified against this
+// Node version before relying on it here).
+function lastBusinessDayEasternDateString() {
+  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+  const d = new Date(`${todayStr}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() - 1)
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) {
+    d.setUTCDate(d.getUTCDate() - 1)
+  }
+  return d.toISOString().slice(0, 10)
 }
 
 // Runs the full pipeline once: fetch → parse → build → render → send →
 // log. Used both by jobs/evidentReport.js's daily cron and the admin
 // manual test-send route (routes/reports.js's POST /evident-report/send).
 async function runEvidentReport() {
-  const runDate = todayEasternDateString()
+  const runDate = lastBusinessDayEasternDateString()
 
   // Pre-flight duplicate check, before fetching Gmail or sending anything.
   // evident_report_log.date is UNIQUE, so a same-day re-run was already
@@ -133,7 +147,7 @@ async function runEvidentReport() {
 // the way runEvidentReport does — sending a fresh preview is harmless and
 // repeatable; only the real send (on approval) is duplicate-guarded.
 async function sendEvidentReportForApproval() {
-  const runDate = todayEasternDateString()
+  const runDate = lastBusinessDayEasternDateString()
   const historyRows = await getHistory()
   const messages = await fetchEvidentEmails()
   const aggregate = parseAndAggregate(messages, { runDate })
