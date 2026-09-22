@@ -24,7 +24,7 @@ const VALID_BRANDS = ['Aim Dental', 'Kings Highway']
 router.use(cors())
 router.use(express.json({ limit: '256kb' }))
 
-function webLeadEmail({ formType, name, practice, email, phone, caseType, message, monthlyVolume, leadId, isPickup, brand }) {
+function webLeadEmail({ formType, name, practice, email, phone, caseType, message, monthlyVolume, leadId, isPickup, brand, isRecurring, recurringDays, pickupWindow }) {
   const b = pickupBrand(brand)
   const rows = [
     ['Form', formType === 'scanner-program' ? 'Scanner Placement Program' : 'Contact / Start a Case'],
@@ -46,6 +46,18 @@ function webLeadEmail({ formType, name, practice, email, phone, caseType, messag
       </tr>`
     )
     .join('')
+
+  // Called out as its own banner (not just another table row) so it can't
+  // get missed — a recurring request needs a human to actually call the
+  // delivery service and set up the standing arrangement; nothing about
+  // this system does that automatically.
+  const recurringBannerHtml =
+    isRecurring && recurringDays?.length
+      ? `
+      <div style="margin:20px 32px 0;padding:12px 16px;background:#fff7ed;border:1px solid #fdba74;border-radius:8px;font-size:13px;color:#9a3412">
+        <strong>Recurring pickup requested</strong> — ${recurringDays.join(', ')}${pickupWindow ? `, ${pickupWindow}` : ''}. Call the delivery service to set up the standing schedule.
+      </div>`
+      : ''
 
   // One-click stage-2/3 links — the CRM dashboard has the same "Dispatch"/
   // "Received" buttons, but isn't in regular staff use yet, so these links
@@ -72,6 +84,7 @@ function webLeadEmail({ formType, name, practice, email, phone, caseType, messag
       <div style="background:${b.color};padding:20px 32px">
         <span style="color:#fff;font-weight:700;font-size:16px">${isPickup ? 'Case Pickup Request' : 'New website lead'}</span>
       </div>
+      ${recurringBannerHtml}
       <div style="padding:32px">
         <table style="width:100%;border-collapse:collapse;font-size:14px">${rowsHtml}</table>
         ${actionLinksHtml}
@@ -96,6 +109,7 @@ router.post(
       const {
         name, practice, email, phone, caseType, message, monthlyVolume, company, topic, brand,
         pickupAddress, pickupDate, pickupWindow, caseCount, instructions, verificationToken,
+        isRecurring, recurringDays,
       } = req.body
 
       // Honeypot: real visitors never see or fill this field. Pretend success
@@ -204,14 +218,15 @@ router.post(
           to: recipient,
           cc,
           subject:
-            formType === 'scanner-program'
+            (isPickup && isRecurring ? 'RECURRING — ' : '') +
+            (formType === 'scanner-program'
               ? `Scanner Program request — ${name.trim()}`
               : isKHPickup
                 ? 'New Case Pickup Request - Kings Highway Dental Laboratory'
-                : `New website contact — ${name.trim()}`,
+                : `New website contact — ${name.trim()}`),
           html: webLeadEmail({
             formType, name: name.trim(), practice, email, phone, caseType, message, monthlyVolume,
-            leadId: rows[0].id, isPickup, brand: leadBrand,
+            leadId: rows[0].id, isPickup, brand: leadBrand, isRecurring, recurringDays, pickupWindow,
           }),
         })
       } catch (emailErr) {
