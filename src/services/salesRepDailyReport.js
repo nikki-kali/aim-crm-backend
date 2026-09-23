@@ -109,12 +109,26 @@ async function fetchRepBookedDoctorNamesThisWeek(repEmail, dateStr) {
 
 const DEFAULT_WEEKLY_NEW_DOCTOR_TARGET = 5
 
-// 'en-CA' reliably formats as YYYY-MM-DD. Each report file in this
-// codebase owns its own small ET-date helper (see evidentReport/index.js's
-// todayEasternDateString()) rather than sharing one, matching how
-// mediaCleanup.js/socialTokenRefresh.js each own their own cron setup too.
-function todayEasternDateString() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+// Returns the last COMPLETED business day before now, in America/New_York
+// — NOT literally "today" (user correction, 2026-09-23, same real bug
+// already fixed in evidentReport/index.js: this report arrives in the
+// inbox each morning covering the PRIOR day's real activity — doctors who
+// submitted "this week" — so a report generated/sent Wednesday morning
+// needs Tuesday's date, not Wednesday's). Steps back one calendar day,
+// then skips weekends, matching evidentReport/index.js's
+// lastBusinessDayEasternDateString() logic — duplicated here rather than
+// shared, matching this codebase's convention of each report file owning
+// its own small ET-date helper (see mediaCleanup.js/socialTokenRefresh.js
+// each owning their own cron setup too). 'en-CA' reliably formats as
+// YYYY-MM-DD.
+function lastBusinessDayEasternDateString() {
+  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+  const d = new Date(`${todayStr}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() - 1)
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) {
+    d.setUTCDate(d.getUTCDate() - 1)
+  }
+  return d.toISOString().slice(0, 10)
 }
 
 // Monday of the week containing dateStr (both 'YYYY-MM-DD'), computed
@@ -318,7 +332,7 @@ async function buildDailyReportHtml(repName, repEmail, dateStr, status, goal, { 
 // convention as every other report in this codebase. Always bcc'd to
 // media@aimdentallab.com, per standing rule (matches every other
 // leadership-facing/sales-rep report email in this codebase).
-async function sendRepDailyReport(rep, { to, cc = REPORT_CC, test = false, dateStr = todayEasternDateString() } = {}) {
+async function sendRepDailyReport(rep, { to, cc = REPORT_CC, test = false, dateStr = lastBusinessDayEasternDateString() } = {}) {
   const status = await computeDailyDoctorStatus(rep.id, dateStr)
   const goal = await computeWeeklyNewDoctorGoal(rep.id, dateStr, rep.email)
   const { html, dateLabel } = await buildDailyReportHtml(rep.name || rep.email, rep.email, dateStr, status, goal, { test })
@@ -341,7 +355,7 @@ async function sendRepDailyReport(rep, { to, cc = REPORT_CC, test = false, dateS
 // (a fresh preview is harmless and repeatable); sendRepDailyReport itself
 // has none either, so a double-approval-click is what the token's
 // single-use consumption in routes/reports.js guards against instead.
-async function sendRepDailyReportForApproval(rep, dateStr = todayEasternDateString()) {
+async function sendRepDailyReportForApproval(rep, dateStr = lastBusinessDayEasternDateString()) {
   const status = await computeDailyDoctorStatus(rep.id, dateStr)
   const goal = await computeWeeklyNewDoctorGoal(rep.id, dateStr, rep.email)
   const { html, dateLabel } = await buildDailyReportHtml(rep.name || rep.email, rep.email, dateStr, status, goal, {})
