@@ -1,6 +1,6 @@
 const { fetchEvidentEmails } = require('./gmailFetch')
 const { parseAndAggregate } = require('./parseEvident')
-const { buildReport1Email, buildReport2Email, buildReport3Email } = require('./buildReport')
+const { buildCombinedLeadershipEmail } = require('./buildReport')
 const { getHistory, appendRow } = require('./log')
 const { sendEmail } = require('../email')
 const { APPROVER_EMAIL, createApprovalToken, buildApproveUrl, injectApprovalBanner } = require('../reportApproval')
@@ -87,23 +87,20 @@ async function runEvidentReport() {
   }
 
   const repGoals = await fetchRepGoalsWithProgress()
-  const report1 = buildReport1Email(aggregate, historyRows, {})
-  const report2 = buildReport2Email(aggregate)
-  const report3 = buildReport3Email(aggregate, historyRows, repGoals)
-  const { subject, sheetRow } = report1
+  const { subject, html, sheetRow } = buildCombinedLeadershipEmail(aggregate, historyRows, repGoals, {})
 
-  // Three separate emails, not one combined email (Ben Silberstein's
-  // requirement, 2026-09-19 — supersedes the earlier "all in one report"
-  // instruction). Sent back to back to the same recipients/bcc.
-  console.log(`[evident-report] sending 3 reports to ${RECIPIENTS.join(', ')}...`)
-  for (const report of [report1, report2, report3]) {
-    await sendEmail({
-      to: RECIPIENTS,
-      bcc: ['media@aimdentallab.com'],
-      subject: report.subject,
-      html: report.html,
-    })
-  }
+  // One combined email (leadership request, 2026-09-23 — supersedes Ben
+  // Silberstein's 2026-09-19 "must be 3 distinct emails" instruction;
+  // buildCombinedLeadershipEmail merges the same 3 reports' own content
+  // under one subject/header, so nothing about each report's own data or
+  // metrics changed, only how many emails they arrive in).
+  console.log(`[evident-report] sending combined report to ${RECIPIENTS.join(', ')}...`)
+  await sendEmail({
+    to: RECIPIENTS,
+    bcc: ['media@aimdentallab.com'],
+    subject,
+    html,
+  })
 
   // The log-write gate excludes the two YTD Booked Cases reports and the
   // new MTD Booked Daily Update report — none of their arrival cadence is
@@ -152,31 +149,18 @@ async function sendEvidentReportForApproval() {
   const messages = await fetchEvidentEmails()
   const aggregate = parseAndAggregate(messages, { runDate })
   const repGoals = await fetchRepGoalsWithProgress()
-  const reports = [
-    buildReport1Email(aggregate, historyRows, {}),
-    buildReport2Email(aggregate),
-    buildReport3Email(aggregate, historyRows, repGoals),
-  ]
+  const { subject, html } = buildCombinedLeadershipEmail(aggregate, historyRows, repGoals, {})
 
-  // One approval token/link shared by all 3 preview emails — clicking
-  // "Approve & Send" on ANY of them triggers the same real action
-  // (runEvidentReport() re-fetching live data and sending all 3 real
-  // emails), so a single click is all that's needed even though the
-  // approver receives 3 separate previews (one per report, matching
-  // exactly what leadership will get — Ben Silberstein's requirement,
-  // 2026-09-19).
   const token = await createApprovalToken({ reportType: 'evident-report', reportDate: runDate })
   const approveUrl = buildApproveUrl(token)
+  const bannered = injectApprovalBanner(html, { reportLabel: 'AIM Leadership Report', approveUrl })
 
-  for (const [i, report] of reports.entries()) {
-    const bannered = injectApprovalBanner(report.html, { reportLabel: `${report.subject.split(' - ')[0]} (${i + 1} of 3)`, approveUrl })
-    await sendEmail({
-      to: [APPROVER_EMAIL],
-      subject: `Approve? — ${report.subject}`,
-      html: bannered,
-    })
-  }
-  return { subjects: reports.map((r) => r.subject), approveUrl }
+  await sendEmail({
+    to: [APPROVER_EMAIL],
+    subject: `Approve? — ${subject}`,
+    html: bannered,
+  })
+  return { subject, approveUrl }
 }
 
 module.exports = { runEvidentReport, sendEvidentReportForApproval }

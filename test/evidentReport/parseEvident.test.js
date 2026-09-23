@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { parseAndAggregate, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows } = require('../../src/services/evidentReport/parseEvident');
-const { buildReport1Email, buildReport2Email, buildReport3Email } = require('../../src/services/evidentReport/buildReport');
+const { buildReport1Email, buildReport2Email, buildReport3Email, buildCombinedLeadershipEmail } = require('../../src/services/evidentReport/buildReport');
 
 function fixture(name) {
   return fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf-8');
@@ -312,6 +312,31 @@ test('Report #1/#2/#3 are three separate emails with distinct subjects (Ben Silb
   assert.doesNotMatch(r1.html, /Booked &amp; Billed by Month/);
   assert.doesNotMatch(r1.html, /By Sales Rep/);
   assert.doesNotMatch(r1.html, /Goal Progress/);
+});
+
+test('buildCombinedLeadershipEmail merges all 3 reports into one email with one subject (leadership request, 2026-09-23)', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
+  const repGoals = [
+    { repName: 'James Delaney', goals: [{ title: '36 New Doctors by Dec 2026', metric: 'new_doctors', target: 36, current_value: 3, progress_pct: 8 }] },
+  ];
+  const { subject, html, sheetRow } = buildCombinedLeadershipEmail(agg, [], repGoals, {});
+
+  assert.match(subject, /^AIM Leadership Report - /);
+  // All 3 reports' real content present in the one email.
+  assert.match(html, /Today's Booked Cases/);
+  assert.match(html, /YTD Sales Value Total/);
+  assert.match(html, /By Sales Rep/);
+  assert.match(html, /James Delaney/);
+  assert.match(html, /36 New Doctors by Dec 2026/);
+  assert.match(html, /Goal Progress/);
+  // Group dividers mark each report's boundary.
+  assert.match(html, /Leadership Sales Summary/);
+  assert.match(html, /Sales Performance by Representative/);
+  assert.match(html, /KPI &amp; Goal Tracking/);
+  // sheetRow (needed for the daily history log) still comes through,
+  // same as Report #1's own standalone sheetRow.
+  assert.equal(sheetRow.date, '2026-09-11');
+  assert.equal(sheetRow.company_daily_booked_value, agg.companyDailyBooked);
 });
 
 test('Billed (MTD) delta shows against a logged prior day (guard allows it once company-wide tracking exists)', () => {

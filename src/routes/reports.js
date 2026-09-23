@@ -507,7 +507,7 @@ router.post('/evident-report/send', auth, requireAdmin, async (req, res, next) =
 router.post('/evident-report/send-for-approval', auth, requireAdmin, async (req, res, next) => {
   try {
     const result = await sendEvidentReportForApproval()
-    res.json({ success: true, message: `3 report previews sent to ${APPROVER_EMAIL} for approval.`, subjects: result.subjects })
+    res.json({ success: true, message: `Report preview sent to ${APPROVER_EMAIL} for approval.`, subject: result.subject })
   } catch (err) { next(err) }
 })
 
@@ -566,7 +566,7 @@ const confirmPage = (label, detail, token) => `<!DOCTYPE html>
 // loads, unlike the actual send it's describing.
 async function describeClaimForConfirmation(claim) {
   if (claim.report_type === 'evident-report') {
-    return { label: 'the AIM Leadership Reports', detail: `This will send the 3 Leadership Reports (Daily Sales, By Sales Rep, Goal Progress) for ${claim.report_date} to leadership now.` }
+    return { label: 'the AIM Leadership Report', detail: `This will send the Leadership Report for ${claim.report_date} to leadership now.` }
   }
   if (claim.report_type === 'sales-rep-daily-report') {
     const { rows } = await db.query(`SELECT name, email FROM users WHERE id=$1`, [claim.rep_id])
@@ -624,7 +624,7 @@ router.post('/approve', rateLimiter({ windowMs: 10 * 60 * 1000, max: 20 }), asyn
 
     if (claim.report_type === 'evident-report') {
       await runEvidentReport()
-      return res.send(resultPage('Sent!', 'The 3 Leadership Reports (Daily Sales, By Sales Rep, Goal Progress) have been sent to leadership.', true))
+      return res.send(resultPage('Sent!', 'The Leadership Report has been sent to leadership.', true))
     }
 
     if (claim.report_type === 'sales-rep-daily-report') {

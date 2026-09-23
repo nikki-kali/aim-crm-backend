@@ -182,6 +182,17 @@ const deltaColor = (cls) => (cls === 'up' ? BRAND.success : cls === 'down' ? BRA
 
 const sectionLabel = (text) => `<p style="margin:0 0 14px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${BRAND.slate}">${text}</p>`;
 
+// Marks the boundary between the 3 formerly-separate reports when they're
+// combined into one email (user request, 2026-09-23 — leadership wants
+// them back in a single send; superseded Ben Silberstein's 2026-09-19
+// "must be 3 distinct emails" spec, though each report's own internal
+// structure/metrics are unchanged). `first` skips the top divider rule
+// and margin since it sits directly under the header band already.
+const groupDivider = (title, first = false) => `
+  <div style="margin:${first ? '4' : '32'}px 36px 0;padding-top:${first ? '0' : '20'}px;${first ? '' : `border-top:2px solid ${BRAND.deep};`}">
+    <h2 style="margin:0;font-family:${FONT_DISPLAY};font-size:21px;font-weight:700;color:${BRAND.ink}">${title}</h2>
+  </div>`;
+
 // Each figure gets its own bordered card — two figures sharing one card
 // reads as one combined number at a glance, which is exactly the
 // confusion this replaces. "Today" cards get the more prominent
@@ -258,12 +269,11 @@ const goalBar = (goal) => {
     </div>`;
 };
 
-// Shared email chrome (header/footer) for all three separated reports
-// (Ben Silberstein's requirement, 2026-09-19 — Report #1/#2/#3 must be
-// three distinct emails, not sections in one combined email). `title` is
-// the header's own line (distinguishes which of the 3 reports this is at
-// a glance, since all three otherwise share identical branding); `body`
-// is that report's own section markup.
+// Shared email chrome (header/footer), used both by the 3 individual
+// report builders (buildReport1/2/3Email, each still usable standalone)
+// and by buildCombinedLeadershipEmail's single merged send. `title` is
+// the header's own line; `body` is the report's (or combined reports')
+// own section markup.
 function emailShell(title, dateLabel, body) {
   return `<!DOCTYPE html>
 <html>
@@ -322,7 +332,7 @@ function dateLabelFor(runDate) {
 // below always persists the raw automated figures, so tomorrow's
 // day-over-day delta keeps comparing like-sourced numbers rather than an
 // override against an un-overridden baseline.
-function buildReport1Email(agg, historyRows = [], overrides = {}) {
+function buildReport1Body(agg, historyRows = [], overrides = {}) {
   const { companyMtdBooked, companyMtdBookedCount, companyMtdBilled, billedMtdDelta, overrideNote } =
     computeCompanyMtd(agg, historyRows, overrides);
 
@@ -356,8 +366,6 @@ function buildReport1Email(agg, historyRows = [], overrides = {}) {
     + (agg.runDate > COMPANY_YTD_SNAPSHOT.asOfDate ? agg.companyDailyBooked : 0);
   const companyYtdBooked = COMPANY_YTD_SNAPSHOT.booked + ytdBookedAccrued + LEGACY_YTD_REVENUE_ADJUSTMENT;
   const ytdNote = { text: `Baseline verified ${COMPANY_YTD_SNAPSHOT.asOfLabel} + daily activity since` };
-
-  const dateLabel = dateLabelFor(agg.runDate);
 
   const missingBanner = agg.missing.length
     ? `<div style="margin:30px 36px 0;padding:16px 19px;background:#fefaf1;border:1px solid #fde68a;border-left:3px solid #b45309;border-radius:4px 12px 12px 4px">
@@ -433,8 +441,6 @@ function buildReport1Email(agg, historyRows = [], overrides = {}) {
 
   ${bookedRowsTable}`;
 
-  const html = emailShell('Daily Sales Report', dateLabel, body);
-
   const sheetRow = {
     date: agg.runDate,
     booked_daily_count: agg.booked.daily.count,
@@ -455,9 +461,15 @@ function buildReport1Email(agg, historyRows = [], overrides = {}) {
     company_daily_billed_value: agg.companyDailyBilled,
   };
 
+  return { body, sheetRow };
+}
+
+function buildReport1Email(agg, historyRows = [], overrides = {}) {
+  const dateLabel = dateLabelFor(agg.runDate);
+  const { body, sheetRow } = buildReport1Body(agg, historyRows, overrides);
   return {
     subject: `Daily Sales Report - ${dateLabel}`,
-    html,
+    html: emailShell('Daily Sales Report', dateLabel, body),
     sheetRow,
   };
 }
@@ -476,9 +488,7 @@ function buildReport1Email(agg, historyRows = [], overrides = {}) {
 // the latter is the real dollar amount billed, which is what "Total
 // Billed by sales rep" means, not the case's total value. Its own
 // separate email (Ben Silberstein's requirement, 2026-09-19).
-function buildReport2Email(agg) {
-  const dateLabel = dateLabelFor(agg.runDate);
-
+function buildReport2Body(agg) {
   const groupRowsByRep = (rows, valueField = 'value') => {
     const g = { james: { count: 0, value: 0 }, william: { count: 0, value: 0 } };
     for (const r of rows) {
@@ -540,6 +550,12 @@ function buildReport2Email(agg) {
     <p style="margin:10px 0 0;font-size:9.5px;color:${BRAND.slate}">Total Daily Booked/Billed = the day's case count and value. "-" = no per-rep MTD breakdown today.</p>
   </div>`;
 
+  return body;
+}
+
+function buildReport2Email(agg) {
+  const dateLabel = dateLabelFor(agg.runDate);
+  const body = buildReport2Body(agg);
   return {
     subject: `Daily Sales by Sales Rep - ${dateLabel}`,
     html: emailShell('Daily Sales by Sales Rep', dateLabel, body),
@@ -556,8 +572,7 @@ function buildReport2Email(agg) {
 // `repGoals`) so this report can resolve the same live company MTD
 // Booked/Billed figures Report #1 shows, via the shared computeCompanyMtd
 // helper — kept in sync with Report #1 rather than re-derived.
-function buildReport3Email(agg, historyRows = [], repGoals = []) {
-  const dateLabel = dateLabelFor(agg.runDate);
+function buildReport3Body(agg, historyRows = [], repGoals = []) {
   const { companyMtdBooked, companyMtdBilled } = computeCompanyMtd(agg, historyRows, {});
 
   // One-time verified MONTH_HISTORY baseline (see its own comment) — the
@@ -619,12 +634,47 @@ function buildReport3Email(agg, historyRows = [], repGoals = []) {
     <p style="margin:0;font-size:13px;color:${BRAND.slate}">No active goals for James or William this period.</p>
   </div>`;
 
-  const body = `${kpiSection}\n\n  ${goalsSection}`;
+  return `${kpiSection}\n\n  ${goalsSection}`;
+}
 
+function buildReport3Email(agg, historyRows = [], repGoals = []) {
+  const dateLabel = dateLabelFor(agg.runDate);
+  const body = buildReport3Body(agg, historyRows, repGoals);
   return {
     subject: `Goal Progress Report - ${dateLabel}`,
     html: emailShell('Goal Progress Report', dateLabel, body),
   };
 }
 
-module.exports = { buildReport1Email, buildReport2Email, buildReport3Email };
+// Combined single-email send (user request, 2026-09-23 — leadership wants
+// the 3 reports back in one email; supersedes Ben Silberstein's
+// 2026-09-19 "must be 3 distinct emails" instruction). Reuses each
+// report's own body-builder unchanged, so a future request to split them
+// again needs no re-derivation of the report content itself — only the
+// email-assembly layer changes. `overrides` only ever applies to Report
+// #1's MTD figures (see buildReport1Body's own comment); Report #2/#3
+// have none.
+function buildCombinedLeadershipEmail(agg, historyRows = [], repGoals = [], overrides = {}) {
+  const dateLabel = dateLabelFor(agg.runDate);
+  const { body: report1Body, sheetRow } = buildReport1Body(agg, historyRows, overrides);
+  const report2Body = buildReport2Body(agg);
+  const report3Body = buildReport3Body(agg, historyRows, repGoals);
+
+  const body = `
+  ${groupDivider('Leadership Sales Summary', true)}
+  ${report1Body}
+
+  ${groupDivider('Sales Performance by Representative')}
+  ${report2Body}
+
+  ${groupDivider('KPI &amp; Goal Tracking')}
+  ${report3Body}`;
+
+  return {
+    subject: `AIM Leadership Report - ${dateLabel}`,
+    html: emailShell('AIM Leadership Report', dateLabel, body),
+    sheetRow,
+  };
+}
+
+module.exports = { buildReport1Email, buildReport2Email, buildReport3Email, buildCombinedLeadershipEmail };
