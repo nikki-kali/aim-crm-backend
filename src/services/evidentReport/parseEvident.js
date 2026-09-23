@@ -9,7 +9,13 @@ function stripTags(s) {
 
 function toNum(s) {
   if (s === undefined || s === null) return 0;
-  const cleaned = String(s).replace(/,/g, '').trim();
+  // Strips a literal "$" too, not just commas — Evident's own reports
+  // never include one, but the real EviSmart Daily Sales Report email
+  // does ("$121,610.28"), and parseFloat can't skip a leading "$" itself
+  // (confirmed against real EviSmart fixture data, 2026-09-23). Safe for
+  // every existing caller: a dollar sign has no other valid meaning in a
+  // numeric cell.
+  const cleaned = String(s).replace(/[,$]/g, '').trim();
   if (cleaned === '') return 0;
   const n = parseFloat(cleaned);
   return Number.isNaN(n) ? 0 : n;
@@ -179,6 +185,67 @@ function extractRepColumns(headers, totalsRow) {
     na: toNum(totalsRow[naCol]),
     james: toNum(totalsRow[jamesCol]),
     william: toNum(totalsRow[williamCol]),
+  };
+}
+
+// Reads the "Totals" table from a real "EviSmart Daily Sales Report"
+// email (user instruction, 2026-09-23 — the sole source for the
+// Leadership Report's Daily/MTD/YTD Booked+Billed figures going forward,
+// replacing the old company-wide multi-report parsing). This is a wholly
+// separate email/sender (media@aimdentallab.com, not
+// support@evidentlabs.com — see gmailFetch.js's fetchEviSmartEmails), so
+// it's parsed and exported standalone rather than threaded through
+// classify()/EXPECTED/parseAndAggregate's existing 11-report machinery.
+// Real format confirmed against a real send, 2026-09-23 (see
+// test/evidentReport/fixtures/evismart-daily-sales-report.html):
+//   Daily Booked | <count> | <$amount>
+//   Daily Billed | — | <$amount>          (billed rows have no case count)
+//   MTD Booked   | <count> | <$amount>
+//   MTD Billed   | — | <$amount>
+//   YTD Total Sales (incl. unbilled WIP) | — | <$amount>   (= booked YTD)
+//   YTD Billed only (through <date>)     | — | <$amount>
+// The YTD Billed row's own label carries a dynamic "(through <date>)"
+// suffix, so it's matched by prefix, not full text. Each row is matched
+// directly by its own regex rather than via the generic parseTable()
+// helper — that helper treats the first real row as the header row,
+// which doesn't fit this table's real <th>-only header + 6 fixed-label
+// data rows. Returns null (not zeros) when the Totals table itself isn't
+// found at all — e.g. a real "could not run (not logged in)" failure
+// send (seen for real 2026-09-19/20) has no Totals table — so a missing
+// real pull is never silently rendered as a fabricated $0 day.
+function extractEviSmartRow(html, labelPrefix) {
+  const re = new RegExp(
+    `<td[^>]*>\\s*${labelPrefix}[^<]*</td>\\s*<td[^>]*>\\s*([^<]*?)\\s*</td>\\s*<td[^>]*>\\s*([^<]*?)\\s*</td>`,
+    'i'
+  );
+  const m = html.match(re);
+  if (!m) return null;
+  const countRaw = m[1].trim();
+  return {
+    count: countRaw === '' || countRaw === '—' ? null : toNum(countRaw),
+    amount: toNum(m[2]),
+  };
+}
+
+function extractEviSmartTotals(html) {
+  const dailyBooked = extractEviSmartRow(html, 'Daily Booked');
+  const dailyBilled = extractEviSmartRow(html, 'Daily Billed');
+  const mtdBooked = extractEviSmartRow(html, 'MTD Booked');
+  const mtdBilled = extractEviSmartRow(html, 'MTD Billed');
+  const ytdTotalSales = extractEviSmartRow(html, 'YTD Total Sales');
+  const ytdBilled = extractEviSmartRow(html, 'YTD Billed only');
+
+  if (!dailyBooked && !mtdBooked && !ytdTotalSales) return null;
+
+  return {
+    dailyBookedCount: dailyBooked ? dailyBooked.count : null,
+    dailyBookedValue: dailyBooked ? dailyBooked.amount : 0,
+    dailyBilledValue: dailyBilled ? dailyBilled.amount : 0,
+    mtdBookedCount: mtdBooked ? mtdBooked.count : null,
+    mtdBookedValue: mtdBooked ? mtdBooked.amount : 0,
+    mtdBilledValue: mtdBilled ? mtdBilled.amount : 0,
+    ytdTotalSalesValue: ytdTotalSales ? ytdTotalSales.amount : 0,
+    ytdBilledValue: ytdBilled ? ytdBilled.amount : 0,
   };
 }
 
@@ -379,4 +446,4 @@ function parseAndAggregate(messages, { runDate } = {}) {
   };
 }
 
-module.exports = { parseAndAggregate, parseTable, classify, toNum, findCol, rowToObj, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractRepColumns };
+module.exports = { parseAndAggregate, parseTable, classify, toNum, findCol, rowToObj, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractRepColumns, extractEviSmartTotals };

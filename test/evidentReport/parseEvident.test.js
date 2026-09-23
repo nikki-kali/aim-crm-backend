@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { parseAndAggregate, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows } = require('../../src/services/evidentReport/parseEvident');
+const { parseAndAggregate, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractEviSmartTotals } = require('../../src/services/evidentReport/parseEvident');
 const { buildReport1Email, buildReport2Email, buildReport3Email, buildCombinedLeadershipEmail } = require('../../src/services/evidentReport/buildReport');
 
 function fixture(name) {
@@ -108,19 +108,35 @@ test("Today's Booked Cases table HTML-escapes customer names (not a trusted cons
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
 });
 
-test('Booked (MTD) case count self-accumulates from logged same-month companyDailyBookedCount plus today', () => {
-  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-16' });
-  const history = [
-    { date: '2026-09-14', company_daily_booked_count: '10' },
-    { date: '2026-09-15', company_daily_booked_count: '5' },
-    // Different month — must not be included.
-    { date: '2026-08-30', company_daily_booked_count: '999' },
-    // NULL (predates the column) — contributes nothing, not a crash.
-    { date: '2026-09-13', company_daily_booked_count: null },
-  ];
-  const { html } = buildReport1Email(agg, history);
-  // 10 + 5 + 0 (NULL row) + 94 (today's real companyDailyBookedCount) = 109.
-  assert.match(html, /109 cases/);
+test('Report #1 renders Daily/MTD/YTD Booked+Billed straight from a real EviSmart Daily Sales Report, plus the $2.7M YTD goal bar', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-23' });
+  agg.eviSmart = extractEviSmartTotals(fixture('evismart-daily-sales-report.html'));
+  const { html } = buildReport1Email(agg);
+
+  assert.match(html, /\$0\.00/); // Daily Booked value
+  assert.match(html, />0 cases</); // Daily Booked count
+  assert.match(html, /\$124\.00/); // Daily Billed
+  assert.match(html, /\$121,610\.28/); // MTD Booked value
+  assert.match(html, /1,292 cases/); // MTD Booked count
+  assert.match(html, /\$124,786\.97/); // MTD Billed
+  assert.match(html, /\$337,992\.27/); // YTD Billed (raw EviSmart figure, no legacy adjustment)
+  // YTD Sales Value Total: 388621.46 (EviSmart) + 1243759 (legacy) = 1632380.46.
+  assert.match(html, /\$1,632,380\.46/);
+  assert.match(html, /Includes \$1,243,759 from the previous system/);
+  // $2.7M goal bar, reusing the same goalBar component per-rep goals use.
+  assert.match(html, /\$2\.7M YTD Sales Value Total Goal/);
+  assert.match(html, /\$1,632,380\.46 \/ \$2,700,000\.00 \(60%\)/);
+  assert.match(html, /\$1,067,619\.54 remaining to reach target/);
+});
+
+test('Report #1 shows "N/A" (not a fabricated $0) with a clear notice when today\'s EviSmart pull is unavailable', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-19' });
+  agg.eviSmart = null; // a real "could not run (not logged in)" day
+  const { html } = buildReport1Email(agg);
+
+  assert.match(html, /today's EviSmart Daily Sales Report pull didn't come through/);
+  assert.match(html, />N\/A</);
+  assert.doesNotMatch(html, /\$2\.7M YTD Sales Value Total Goal/); // no fabricated goal progress either
 });
 
 test('parseAndAggregate exposes real per-rep MTD columns and Daily Billed rows for Report #2', () => {
@@ -233,9 +249,10 @@ test('flags missing reports instead of silently under-reporting', () => {
   assert.ok(agg.missing.includes('MTD Booked Daily Update'));
 });
 
-test('Report #3\'s month-by-month trend chart uses the verified Jun-Aug baselines and real September MTD figures', () => {
-  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
-  const { html } = buildReport3Email(agg, [], []);
+test('Report #3\'s month-by-month trend chart uses the verified Jun-Aug baselines and real EviSmart September MTD figures', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-23' });
+  agg.eviSmart = extractEviSmartTotals(fixture('evismart-daily-sales-report.html'));
+  const { html } = buildReport3Email(agg);
 
   assert.match(html, /September 2026 \(MTD\) vs\. Aug 2026/);
   // Verified pre-tracking months.
@@ -247,34 +264,42 @@ test('Report #3\'s month-by-month trend chart uses the verified Jun-Aug baseline
   assert.match(html, /66311\.9/); // July billed
   assert.match(html, /157654\.32/); // August booked
   assert.match(html, /147772\.4/); // August billed
-  // Current month, real September MTD, from Evident's own MTD Booked
-  // Daily Update / Daily MTD Total Billed reports in ALL_MESSAGES
-  // (6935 booked, 89442.46 billed).
+  // Current month, real September MTD, straight from the real EviSmart
+  // Daily Sales Report fixture (121610.28 booked, 124786.97 billed).
   assert.match(html, /September%202026%20\(MTD\)/);
-  assert.match(html, /6935/); // September MTD booked
-  assert.match(html, /89442\.46/); // September MTD billed
+  assert.match(html, /121610\.28/); // September MTD booked
+  assert.match(html, /124786\.97/); // September MTD billed
   assert.doesNotMatch(html, /Weekly Booked vs\. Billed Revenue/);
 
   // Report #1 no longer carries the chart or a month-over-month
   // comparison at all — moved entirely to Report #3 per Ben
   // Silberstein's formal spec, 2026-09-19.
-  const { html: r1Html } = buildReport1Email(agg, []);
+  const { html: r1Html } = buildReport1Email(agg);
   assert.doesNotMatch(r1Html, /Booked &amp; Billed by Month/);
   assert.doesNotMatch(r1Html, /Pace vs\./);
 });
 
-test('Report #3\'s "This Month vs. Last Month" KPI cards show value for both periods, the numerical change, and the % change', () => {
-  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
-  const { html } = buildReport3Email(agg, [], []);
+test('Report #3\'s "This Month vs. Last Month" KPI cards show value for both periods, the numerical change, and the % change, from real EviSmart MTD figures', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-23' });
+  agg.eviSmart = extractEviSmartTotals(fixture('evismart-daily-sales-report.html'));
+  const { html } = buildReport3Email(agg);
 
-  // Booked: September MTD (6935) vs. August full month (157654.32) — a
-  // real, large decline since MTD is only a few days in.
+  // Booked: EviSmart MTD (121610.28) vs. August full month (157654.32).
   assert.match(html, /Aug 2026: \$157,654\.32/);
-  assert.match(html, /-\$150,719\.32 \(-95\.6%\)/);
-  // Billed: September MTD (89442.46) vs. August full month (147772.40).
+  assert.match(html, /-\$36,044\.04 \(-22\.9%\)/);
+  // Billed: EviSmart MTD (124786.97) vs. August full month (147772.40).
   assert.match(html, /Aug 2026: \$147,772\.40/);
-  assert.match(html, /-\$58,329\.94 \(-39\.5%\)/);
+  assert.match(html, /-\$22,985\.43 \(-15\.6%\)/);
   assert.match(html, /September 2026 \(MTD\) is real month-to-date, not a full month yet/);
+});
+
+test('Report #3 shows a clear notice instead of a fabricated comparison when today\'s EviSmart pull is unavailable', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-19' });
+  agg.eviSmart = null;
+  const { html } = buildReport3Email(agg);
+
+  assert.match(html, /Today's EviSmart Daily Sales Report pull didn't come through, so this month's comparison isn't available/);
+  assert.doesNotMatch(html, /quickchart\.io/);
 });
 
 test('email copy has no em dashes and no removed footer line, across all 3 separated reports', () => {
@@ -339,117 +364,6 @@ test('buildCombinedLeadershipEmail merges all 3 reports into one email with one 
   assert.equal(sheetRow.company_daily_booked_value, agg.companyDailyBooked);
 });
 
-test('Billed (MTD) delta shows against a logged prior day (guard allows it once company-wide tracking exists)', () => {
-  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
-  const history = [{
-    date: '2026-09-10', booked_mtd_value: '1702.87', booked_mtd_billed: '89242.46',
-    wip_value: '46209.54', ytd_billed_value: '7519.13', company_daily_booked_value: '100',
-  }];
-  const { html } = buildReport1Email(agg, history);
-
-  assert.match(html, /▲ \$200\.00 vs\. yesterday/);
-});
-
-test('Billed (MTD) shows no delta when the prior row predates company-wide tracking', () => {
-  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
-  const history = [{
-    date: '2026-09-10', booked_mtd_value: '1702.87', booked_mtd_billed: '1124.46',
-    wip_value: '46209.54', ytd_billed_value: '0', company_daily_booked_value: null,
-  }];
-  const { html } = buildReport1Email(agg, history);
-
-  assert.ok(!html.includes('vs. yesterday'), 'no delta anywhere — both the Billed (MTD) guard and the existing Billed (YTD) zero-guard should suppress their deltas on a pre-transition prior row');
-});
-
-test("Billed (MTD) suppresses its delta when today's own MTD Total Billed report is missing", () => {
-  const messagesWithoutMtdBilled = ALL_MESSAGES.filter((m) => m.subject !== 'Daily MTD Total Billed');
-  const agg = parseAndAggregate(messagesWithoutMtdBilled, { runDate: '2026-09-11' });
-  assert.ok(agg.missing.includes('Daily MTD Total Billed'));
-  assert.equal(agg.companyMtdBilled, 0);
-
-  const history = [{
-    date: '2026-09-10', booked_mtd_value: '1702.87', booked_mtd_billed: '89242.46',
-    wip_value: '46209.54', ytd_billed_value: '7519.13', company_daily_booked_value: '100',
-  }];
-  const { html } = buildReport1Email(agg, history);
-
-  // Without the guard, this would render a confident "▼ $89,242.46 vs.
-  // yesterday" — a fabricated comparison against an absent-data 0, not a
-  // real measured decline.
-  assert.ok(!html.includes('$89,242.46'), 'fabricated delta must not render when the report that feeds it never arrived');
-});
-
-test('Booked (MTD) falls back to accumulating from logged same-month days plus today when MTD Booked Daily Update is missing', () => {
-  const messagesWithoutMtdBooked = ALL_MESSAGES.filter((m) => m.subject !== 'MTD Booked Daily Update');
-  const agg = parseAndAggregate(messagesWithoutMtdBooked, { runDate: '2026-09-16' });
-  assert.ok(agg.missing.includes('MTD Booked Daily Update'));
-  const history = [
-    { date: '2026-09-14', company_daily_booked_value: '500' },
-    { date: '2026-09-15', company_daily_booked_value: '300' },
-    { date: '2026-08-30', company_daily_booked_value: '9999' },
-  ];
-  const { html } = buildReport1Email(agg, history);
-
-  // 500 + 300 (same-month history) + 8065.22 (today's real companyDailyBooked) = 8865.22.
-  // The 2026-08-30 row must NOT be included (different month).
-  assert.match(html, /\$8,865\.22/);
-});
-
-test('YTD Sales Value Total (booked) auto-accrues real daily figures logged after the verified baseline date', () => {
-  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-18' });
-  const history = [
-    // Same date as the baseline itself — already reflected in the
-    // verified snapshot, so it must NOT be double-counted.
-    { date: '2026-09-16', company_daily_booked_value: '1000', company_daily_billed_value: '500' },
-    // After the baseline — a real day of accrual.
-    { date: '2026-09-17', company_daily_booked_value: '2000', company_daily_billed_value: '700' },
-  ];
-  const { html } = buildReport1Email(agg, history);
-
-  // 363360.57 (booked baseline) + 2000 (09-17 only) + 8065.22 (today's
-  // real companyDailyBooked from ALL_MESSAGES) + 1243759
-  // (LEGACY_YTD_REVENUE_ADJUSTMENT, always added by default per the
-  // user's explicit 2026-09-19 instruction) = 1617184.79.
-  assert.match(html, /\$1,617,184\.79/);
-  assert.match(html, /Baseline verified Sep 16, 2026 \+ daily activity since/);
-});
-
-test('YTD Sales Value Total shows exactly the booked baseline plus the legacy adjustment, with no daily accrual, when run on the baseline date itself', () => {
-  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-16' });
-  const { html } = buildReport1Email(agg, []);
-
-  // 363360.57 (booked baseline) + 1243759 (LEGACY_YTD_REVENUE_ADJUSTMENT) = 1607119.57.
-  assert.match(html, /\$1,607,119\.57/);
-});
-
-test('YTD Sales Value Total accrual treats a NULL company_daily_booked_value as zero (pre-tracking row)', () => {
-  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-18' });
-  const history = [
-    { date: '2026-09-17', company_daily_booked_value: null, company_daily_billed_value: '700' },
-  ];
-  const { html } = buildReport1Email(agg, history);
-
-  // 363360.57 (baseline) + 0 (NULL row contributes nothing) + 8065.22
-  // (today's real companyDailyBooked) + 1243759
-  // (LEGACY_YTD_REVENUE_ADJUSTMENT) = 1615184.79.
-  assert.match(html, /\$1,615,184\.79/);
-});
-
-test('Booked (MTD) prefers the real MTD Booked Daily Update figure over the self-accumulated fallback when it arrives', () => {
-  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-16' });
-  assert.ok(!agg.missing.includes('MTD Booked Daily Update'));
-  const history = [
-    { date: '2026-09-14', company_daily_booked_value: '500' },
-    { date: '2026-09-15', company_daily_booked_value: '300' },
-  ];
-  const { html } = buildReport1Email(agg, history);
-
-  // The fixture's real MTD Booked Daily Update total (6935) wins over the
-  // self-accumulated 500+300+8065.22=8865.22 fallback figure.
-  assert.match(html, /\$6,935\.00/);
-  assert.ok(!html.includes('$8,865.22'));
-});
-
 test('extractDailyBookedCustomerNames pulls row-level Customer Name values, dropping the blank totals row', () => {
   const names = extractDailyBookedCustomerNames(fixture('daily-booked-james.html'));
   assert.deepEqual(names, ['DR BRIAN GOLD']);
@@ -489,4 +403,23 @@ test('extractBookingRows / extractBilledRows return an empty array when there is
 test('extractDailyBookedCustomerNames returns an empty array when there is no real data', () => {
   const names = extractDailyBookedCustomerNames(fixture('daily-booked-william-nodata.html'));
   assert.deepEqual(names, []);
+});
+
+test('extractEviSmartTotals reads all 6 real rows from a real EviSmart Daily Sales Report Totals table', () => {
+  const totals = extractEviSmartTotals(fixture('evismart-daily-sales-report.html'));
+  assert.deepEqual(totals, {
+    dailyBookedCount: 0,
+    dailyBookedValue: 0,
+    dailyBilledValue: 124.00,
+    mtdBookedCount: 1292,
+    mtdBookedValue: 121610.28,
+    mtdBilledValue: 124786.97,
+    ytdTotalSalesValue: 388621.46,
+    ytdBilledValue: 337992.27,
+  });
+});
+
+test('extractEviSmartTotals returns null (not fabricated zeros) when the Totals table is absent — a real "could not run" failure send', () => {
+  const totals = extractEviSmartTotals('<h2>EviSmart Daily Sales Report</h2><p>Could not run: not logged in.</p>');
+  assert.equal(totals, null);
 });

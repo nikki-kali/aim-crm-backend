@@ -82,6 +82,40 @@ async function fetchEvidentEmails() {
   return messages
 }
 
+// Fetches the "EviSmart Daily Sales Report" email — the sole real source
+// for the Leadership Report's Daily/MTD/YTD Booked+Billed figures as of
+// 2026-09-23 (user instruction, replacing the old multi-report parsing
+// approach). Distinct from Evident's own automated sends: this comes from
+// media@aimdentallab.com (a person manually pulling EviSmart's dashboard
+// and emailing the result), not support@evidentlabs.com, and its own
+// subject carries the real business date — confirmed via a real 30-day
+// inbox scan, 2026-09-23: "EviSmart Daily Sales Report - 23 September
+// 2026" for a real send, "EviSmart Daily Sales Report - could not run
+// (not logged in)" on days the pull itself failed (seen for real on
+// 2026-09-19 and 2026-09-20). `newer_than:2d` (not `:1d` like
+// fetchEvidentEmails) because this report has sometimes arrived as a
+// same-day "updated pull" resend hours after an earlier pull — widening
+// the window lets parseEvident.js's own pick-the-latest-message logic see
+// both and prefer the fresher one, rather than this fetch silently
+// missing an update that landed just outside a tighter window.
+async function fetchEviSmartEmails() {
+  const auth = getGmailAuth()
+  const gmail = google.gmail({ version: 'v1', auth })
+  const listRes = await gmail.users.messages.list({
+    userId: 'me',
+    q: 'from:media@aimdentallab.com subject:"EviSmart Daily Sales Report" newer_than:2d',
+  })
+  const ids = (listRes.data.messages || []).map((m) => m.id)
+
+  const messages = []
+  for (const id of ids) {
+    const res = await gmail.users.messages.get({ userId: 'me', id, format: 'full' })
+    const { subject, html } = extractSubjectAndHtml(res.data)
+    messages.push({ subject, html, internalDate: Number(res.data.internalDate) })
+  }
+  return messages
+}
+
 // Like fetchEvidentEmails, but for an arbitrary Gmail search query
 // (appended to the `from:support@evidentlabs.com` filter) and returning
 // each message's own real calendar date (America/New_York) alongside its
@@ -109,4 +143,4 @@ async function fetchEvidentEmailsInRange(extraQuery) {
   return messages
 }
 
-module.exports = { fetchEvidentEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }
+module.exports = { fetchEvidentEmails, fetchEviSmartEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }

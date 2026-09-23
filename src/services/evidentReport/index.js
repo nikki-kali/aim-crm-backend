@@ -1,5 +1,5 @@
-const { fetchEvidentEmails } = require('./gmailFetch')
-const { parseAndAggregate } = require('./parseEvident')
+const { fetchEvidentEmails, fetchEviSmartEmails } = require('./gmailFetch')
+const { parseAndAggregate, extractEviSmartTotals } = require('./parseEvident')
 const { buildCombinedLeadershipEmail } = require('./buildReport')
 const { getHistory, appendRow } = require('./log')
 const { sendEmail } = require('../email')
@@ -32,6 +32,27 @@ async function fetchRepGoalsWithProgress() {
     result.push({ repName: rep.name || rep.email, goals: withProgress })
   }
   return result
+}
+
+// Fetches the real "EviSmart Daily Sales Report" and returns its parsed
+// Totals (or null) — the sole source for Daily/MTD/YTD Booked+Billed in
+// the Leadership Report (user instruction, 2026-09-23). A real day can
+// have more than one send for the same date (an initial pull plus a
+// same-day "updated pull" resend, confirmed for real 2026-09-23), and a
+// real failure send carries no Totals table at all ("could not run (not
+// logged in)", seen for real 2026-09-19/20) — so this tries every fetched
+// message newest-first (by Gmail's own internalDate) and returns the
+// first one that actually parses, rather than assuming the first message
+// returned is the freshest or that a send with no Totals table means "no
+// data exists today."
+async function fetchEviSmartTotals() {
+  const messages = await fetchEviSmartEmails()
+  const sorted = [...messages].sort((a, b) => b.internalDate - a.internalDate)
+  for (const m of sorted) {
+    const totals = extractEviSmartTotals(m.html)
+    if (totals) return totals
+  }
+  return null
 }
 
 // Returns the last COMPLETED business day before now, in America/New_York
@@ -84,6 +105,12 @@ async function runEvidentReport() {
   const aggregate = parseAndAggregate(messages, { runDate })
   if (aggregate.missing.length > 0) {
     console.warn(`[evident-report] missing reports: ${aggregate.missing.join(', ')}`)
+  }
+
+  console.log('[evident-report] fetching EviSmart Daily Sales Report...')
+  aggregate.eviSmart = await fetchEviSmartTotals()
+  if (!aggregate.eviSmart) {
+    console.warn('[evident-report] EviSmart Daily Sales Report unavailable — Daily/MTD/YTD Booked/Billed will show as "—"')
   }
 
   const repGoals = await fetchRepGoalsWithProgress()
@@ -148,6 +175,7 @@ async function sendEvidentReportForApproval() {
   const historyRows = await getHistory()
   const messages = await fetchEvidentEmails()
   const aggregate = parseAndAggregate(messages, { runDate })
+  aggregate.eviSmart = await fetchEviSmartTotals()
   const repGoals = await fetchRepGoalsWithProgress()
   const { subject, html } = buildCombinedLeadershipEmail(aggregate, historyRows, repGoals, {})
 
