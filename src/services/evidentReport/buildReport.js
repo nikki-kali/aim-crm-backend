@@ -303,7 +303,16 @@ function buildReport1Body(agg, historyRows = [], overrides = {}) {
       })}
     </div>`;
 
-  const body = `
+  // Split into `headlineSection` (Today/MTD/YTD cards + the $2.7M goal —
+  // the "essential details" the user wants up top, 2026-09-23) and
+  // `bookedRowsTable` (the long customer-detail list) as two separate
+  // return values, not one combined `body` string — buildCombinedLeadershipEmail
+  // needs to place them in different, non-adjacent spots (customer detail
+  // moved to the very end of the whole combined email, below Report
+  // #2/#3's content, since it's by far the longest section). Standalone
+  // buildReport1Email below reassembles them in their original order, so
+  // this split doesn't change that email's own layout at all.
+  const headlineSection = `
   ${eviSmartMissingBanner}
   ${missingBanner}
 
@@ -327,9 +336,7 @@ function buildReport1Body(agg, historyRows = [], overrides = {}) {
       statCard('YTD Billed', fmtOrDash(es && es.ytdBilledValue)),
     ])}
     ${ytdGoalCard}
-  </div>
-
-  ${bookedRowsTable}`;
+  </div>`;
 
   const sheetRow = {
     date: agg.runDate,
@@ -351,12 +358,13 @@ function buildReport1Body(agg, historyRows = [], overrides = {}) {
     company_daily_billed_value: agg.companyDailyBilled,
   };
 
-  return { body, sheetRow };
+  return { headlineSection, bookedRowsTable, sheetRow };
 }
 
 function buildReport1Email(agg, historyRows = [], overrides = {}) {
   const dateLabel = dateLabelFor(agg.runDate);
-  const { body, sheetRow } = buildReport1Body(agg, historyRows, overrides);
+  const { headlineSection, bookedRowsTable, sheetRow } = buildReport1Body(agg, historyRows, overrides);
+  const body = `${headlineSection}\n\n  ${bookedRowsTable}`;
   return {
     subject: `Daily Sales Report - ${dateLabel}`,
     html: emailShell('Daily Sales Report', dateLabel, body),
@@ -528,12 +536,13 @@ function buildReport3Body(agg, historyRows = [], repGoals = []) {
     <p style="margin:0;font-size:13px;color:${BRAND.slate}">No active goals for James or William this period.</p>
   </div>`;
 
-  return `${kpiSection}\n\n  ${goalsSection}`;
+  return { kpiSection, goalsSection };
 }
 
 function buildReport3Email(agg, historyRows = [], repGoals = []) {
   const dateLabel = dateLabelFor(agg.runDate);
-  const body = buildReport3Body(agg, historyRows, repGoals);
+  const { kpiSection, goalsSection } = buildReport3Body(agg, historyRows, repGoals);
+  const body = `${kpiSection}\n\n  ${goalsSection}`;
   return {
     subject: `Goal Progress Report - ${dateLabel}`,
     html: emailShell('Goal Progress Report', dateLabel, body),
@@ -543,26 +552,40 @@ function buildReport3Email(agg, historyRows = [], repGoals = []) {
 // Combined single-email send (user request, 2026-09-23 — leadership wants
 // the 3 reports back in one email; supersedes Ben Silberstein's
 // 2026-09-19 "must be 3 distinct emails" instruction). Reuses each
-// report's own body-builder unchanged, so a future request to split them
-// again needs no re-derivation of the report content itself — only the
-// email-assembly layer changes. `overrides` only ever applies to Report
-// #1's MTD figures (see buildReport1Body's own comment); Report #2/#3
-// have none.
+// report's own section-builders unchanged, so a future request to split
+// them back into 3 separate emails needs no re-derivation of the report
+// content itself — only this assembly layer changes. `overrides` only
+// ever applies to Report #1's MTD figures (see buildReport1Body's own
+// comment); Report #2/#3 have none.
+//
+// Section ORDER here is deliberately not "Report 1, then 2, then 3" —
+// reordered per explicit user request, 2026-09-23, "make sure UI and UX
+// of this report is perfect": essential headline numbers first (Today,
+// MTD/Year, the $2.7M goal, then the trend chart + This Month vs. Last
+// Month KPI cards right below that goal, since they're all part of the
+// same "how are we doing" story), by-rep and goal-progress detail next,
+// and the long customer-by-customer table (Today's Booked Cases — by far
+// the longest section) very last, since it's reference detail someone
+// scrolls to on purpose, not something that should push the headline
+// numbers below the fold.
 function buildCombinedLeadershipEmail(agg, historyRows = [], repGoals = [], overrides = {}) {
   const dateLabel = dateLabelFor(agg.runDate);
-  const { body: report1Body, sheetRow } = buildReport1Body(agg, historyRows, overrides);
+  const { headlineSection, bookedRowsTable, sheetRow } = buildReport1Body(agg, historyRows, overrides);
   const report2Body = buildReport2Body(agg);
-  const report3Body = buildReport3Body(agg, historyRows, repGoals);
+  const { kpiSection, goalsSection } = buildReport3Body(agg, historyRows, repGoals);
 
   const body = `
   ${groupDivider('Leadership Sales Summary', true)}
-  ${report1Body}
+  ${headlineSection}
+  ${kpiSection}
 
   ${groupDivider('Sales Performance by Representative')}
   ${report2Body}
 
-  ${groupDivider('KPI &amp; Goal Tracking')}
-  ${report3Body}`;
+  ${groupDivider('Goal Tracking')}
+  ${goalsSection}
+
+  ${bookedRowsTable}`;
 
   return {
     subject: `AIM Leadership Report - ${dateLabel}`,

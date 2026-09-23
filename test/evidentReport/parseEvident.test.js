@@ -341,6 +341,7 @@ test('Report #1/#2/#3 are three separate emails with distinct subjects (Ben Silb
 
 test('buildCombinedLeadershipEmail merges all 3 reports into one email with one subject (leadership request, 2026-09-23)', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
+  agg.eviSmart = extractEviSmartTotals(fixture('evismart-daily-sales-report.html'));
   const repGoals = [
     { repName: 'James Delaney', goals: [{ title: '36 New Doctors by Dec 2026', metric: 'new_doctors', target: 36, current_value: 3, progress_pct: 8 }] },
   ];
@@ -354,10 +355,28 @@ test('buildCombinedLeadershipEmail merges all 3 reports into one email with one 
   assert.match(html, /James Delaney/);
   assert.match(html, /36 New Doctors by Dec 2026/);
   assert.match(html, /Goal Progress/);
-  // Group dividers mark each report's boundary.
+  assert.match(html, /\$2\.7M YTD Sales Value Total Goal/);
+  // Group dividers mark each section's boundary.
   assert.match(html, /Leadership Sales Summary/);
   assert.match(html, /Sales Performance by Representative/);
-  assert.match(html, /KPI &amp; Goal Tracking/);
+  assert.match(html, /Goal Tracking/);
+
+  // Reordered layout (user request, 2026-09-23): essential headline
+  // numbers first — Today/MTD/YTD cards, the $2.7M goal, then the trend
+  // chart + This Month vs. Last Month KPI cards right below it, all
+  // under one "Leadership Sales Summary" divider — with the long
+  // customer-by-customer detail table moved to the very end, after Sales
+  // Performance by Rep and Goal Tracking.
+  const goalIdx = html.indexOf('$2.7M YTD Sales Value Total Goal');
+  const kpiIdx = html.indexOf('vs. Aug 2026');
+  const repIdx = html.indexOf('Sales Performance by Representative');
+  const goalTrackingIdx = html.indexOf('Goal Tracking');
+  const customerTableIdx = html.indexOf("Today's Booked Cases");
+  assert.ok(goalIdx > 0 && kpiIdx > goalIdx, 'KPI trend/comparison section should come right after the $2.7M goal bar');
+  assert.ok(kpiIdx < repIdx, 'headline section (incl. KPI) should come before Sales Performance by Representative');
+  assert.ok(repIdx < goalTrackingIdx, 'Sales Performance by Representative should come before Goal Tracking');
+  assert.ok(goalTrackingIdx < customerTableIdx, 'the long customer-detail table should be the very last section');
+
   // sheetRow (needed for the daily history log) still comes through,
   // same as Report #1's own standalone sheetRow.
   assert.equal(sheetRow.date, '2026-09-11');
