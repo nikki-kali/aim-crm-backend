@@ -354,33 +354,55 @@ test('buildCombinedLeadershipEmail merges all 3 reports into one email with one 
   assert.match(html, /By Sales Rep/);
   assert.match(html, /James Delaney/);
   assert.match(html, /36 New Doctors by Dec 2026/);
-  assert.match(html, /Goal Progress/);
   assert.match(html, /\$2\.7M YTD Sales Value Total Goal/);
-  // Group dividers mark each section's boundary.
+  // Group dividers mark each section's boundary. No separate "Goal
+  // Tracking" divider anymore — goals render inline under each rep's own
+  // MTD cards instead (user request, 2026-09-23).
   assert.match(html, /Leadership Sales Summary/);
   assert.match(html, /Sales Performance by Representative/);
-  assert.match(html, /Goal Tracking/);
+  assert.doesNotMatch(html, /Goal Tracking/);
 
   // Reordered layout (user request, 2026-09-23): essential headline
   // numbers first — Today/MTD/YTD cards, the $2.7M goal, then the trend
   // chart + This Month vs. Last Month KPI cards right below it, all
   // under one "Leadership Sales Summary" divider — with the long
   // customer-by-customer detail table moved to the very end, after Sales
-  // Performance by Rep and Goal Tracking.
+  // Performance by Rep (where James's goal now lives, right under his
+  // own MTD cards).
   const goalIdx = html.indexOf('$2.7M YTD Sales Value Total Goal');
   const kpiIdx = html.indexOf('vs. Aug 2026');
   const repIdx = html.indexOf('Sales Performance by Representative');
-  const goalTrackingIdx = html.indexOf('Goal Tracking');
+  const jamesGoalIdx = html.indexOf('36 New Doctors by Dec 2026');
+  const jamesMtdIdx = html.lastIndexOf('MTD Booked', jamesGoalIdx);
   const customerTableIdx = html.indexOf("Today's Booked Cases");
   assert.ok(goalIdx > 0 && kpiIdx > goalIdx, 'KPI trend/comparison section should come right after the $2.7M goal bar');
   assert.ok(kpiIdx < repIdx, 'headline section (incl. KPI) should come before Sales Performance by Representative');
-  assert.ok(repIdx < goalTrackingIdx, 'Sales Performance by Representative should come before Goal Tracking');
-  assert.ok(goalTrackingIdx < customerTableIdx, 'the long customer-detail table should be the very last section');
+  assert.ok(repIdx < jamesMtdIdx && jamesMtdIdx < jamesGoalIdx, 'James\'s own goal should render right after his own MTD cards, inside the By Sales Rep section');
+  assert.ok(jamesGoalIdx < customerTableIdx, 'the long customer-detail table should be the very last section');
 
   // sheetRow (needed for the daily history log) still comes through,
   // same as Report #1's own standalone sheetRow.
   assert.equal(sheetRow.date, '2026-09-11');
   assert.equal(sheetRow.company_daily_booked_value, agg.companyDailyBooked);
+});
+
+test('buildReport2Body places each rep\'s own goal bars directly under their MTD cards, not a shared section', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
+  const repGoals = [
+    { repName: 'James Delaney', goals: [{ title: '36 New Doctors by Dec 2026', metric: 'new_doctors', target: 36, current_value: 3, progress_pct: 8 }] },
+    { repName: 'William Alexander', goals: [] },
+  ];
+  const { html } = buildReport2Email(agg, repGoals);
+
+  assert.match(html, /36 New Doctors by Dec 2026/);
+  // William has no goals — no "no goals" note bleeds into his own block,
+  // it only appears once for the section as a whole when NEITHER rep has any.
+  const williamIdx = html.indexOf('William Alexander');
+  const jamesGoalIdx = html.indexOf('36 New Doctors by Dec 2026');
+  assert.ok(jamesGoalIdx < williamIdx, 'James\'s goal renders before William\'s block (right after James\'s own MTD cards)');
+
+  const { html: noGoalsHtml } = buildReport2Email(agg, []);
+  assert.match(noGoalsHtml, /No active goals for James or William this period\./);
 });
 
 test('extractDailyBookedCustomerNames pulls row-level Customer Name values, dropping the blank totals row', () => {

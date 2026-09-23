@@ -386,7 +386,16 @@ function buildReport1Email(agg, historyRows = [], overrides = {}) {
 // the latter is the real dollar amount billed, which is what "Total
 // Billed by sales rep" means, not the case's total value. Its own
 // separate email (Ben Silberstein's requirement, 2026-09-19).
-function buildReport2Body(agg) {
+//
+// `repGoals` (optional) renders each rep's own goal-progress bars right
+// under THEIR OWN MTD Booked/MTD Billed cards, not in a separate section
+// further down — user request, 2026-09-23: "the goal tracking, since
+// it's connected to both sales rep, please put under their MTD booked
+// and MTD billed." Matched to a rep block by exact repName string (the
+// same "James Delaney"/"William Alexander" labels this function already
+// hardcodes) since repGoals carries no rep id, only whatever name
+// fetchRepGoalsWithProgress pulled from the users table.
+function buildReport2Body(agg, repGoals = []) {
   const groupRowsByRep = (rows, valueField = 'value') => {
     const g = { james: { count: 0, value: 0 }, william: { count: 0, value: 0 } };
     for (const r of rows) {
@@ -399,6 +408,10 @@ function buildReport2Body(agg) {
   };
   const dailyBookedByRep = groupRowsByRep(agg.companyDailyBookedRows, 'value');
   const dailyBilledByRep = groupRowsByRep(agg.companyDailyBilledRows, 'billedValue');
+  const goalsFor = (repName) => {
+    const match = repGoals.find((r) => r.repName === repName);
+    return match ? match.goals : [];
+  };
 
   // Stacked per-rep cards, not a wide 5-column table — a table with Rep +
   // 4 numeric columns has no room to breathe on a phone (confirmed on a
@@ -408,8 +421,11 @@ function buildReport2Body(agg) {
   const repSubLabel = (text) => `<p style="margin:0 0 6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}">${text}</p>`;
   // Two rows of two cards per rep (Daily on top, MTD below), not one
   // 4-up row: a real 390px render showed 4-up cards wrapping labels to 3
-  // lines at uneven heights and "$1,458.97" overflowing its card.
-  const repBlock = (repName, daily) => `
+  // lines at uneven heights and "$1,458.97" overflowing its card. That
+  // rep's own goal bars (if any) render directly below their MTD row,
+  // inside the same card, so "how they're doing this month" and "how
+  // they're doing against their goal" read as one connected story.
+  const repBlock = (repName, daily, goals) => `
     ${repSubLabel(escapeHtml(repName))}
     ${cardRow([
       miniStatCard('Total Daily Booked', `${daily.booked.count}`, fmtMoney(daily.booked.value)),
@@ -419,12 +435,22 @@ function buildReport2Body(agg) {
     ${cardRow([
       miniStatCard('MTD Booked', daily.mtdBooked == null ? '-' : fmtMoney(daily.mtdBooked)),
       miniStatCard('MTD Billed', daily.mtdBilled == null ? '-' : fmtMoney(daily.mtdBilled)),
-    ])}`;
+    ])}
+    ${goals.length > 0 ? `
+    <div style="margin-top:10px;padding:12px 12px 4px;background:rgba(255,255,255,.5);border:1px solid ${BRAND.glassBorder};border-radius:10px">
+      ${goals.map(goalBar).join('')}
+    </div>` : ''}`;
 
   const missingBanner = agg.missing.length
     ? `<div style="margin:30px 36px 0;padding:16px 19px;background:#fefaf1;border:1px solid #fde68a;border-left:3px solid #b45309;border-radius:4px 12px 12px 4px">
          <p style="margin:0;font-size:13.5px;line-height:1.55;color:${BRAND.ink}">Heads up: today's figures are missing ${agg.missing.length} of the ${agg.expectedCount} expected Evident reports (${agg.missing.join(', ')}). Numbers below may be understated.</p>
        </div>`
+    : '';
+
+  const jamesGoals = goalsFor('James Delaney');
+  const williamGoals = goalsFor('William Alexander');
+  const noGoalsNote = repGoals.length === 0 || (jamesGoals.length === 0 && williamGoals.length === 0)
+    ? `<p style="margin:10px 0 0;font-size:9.5px;color:${BRAND.slate}">No active goals for James or William this period.</p>`
     : '';
 
   const body = `
@@ -437,23 +463,24 @@ function buildReport2Body(agg) {
       billed: dailyBilledByRep.james,
       mtdBooked: agg.companyMtdBookedByRep ? agg.companyMtdBookedByRep.james : null,
       mtdBilled: agg.companyMtdBilledByRep ? agg.companyMtdBilledByRep.james : null,
-    })}
+    }, jamesGoals)}
     <div style="height:12px"></div>
     ${repBlock('William Alexander', {
       booked: dailyBookedByRep.william,
       billed: dailyBilledByRep.william,
       mtdBooked: agg.companyMtdBookedByRep ? agg.companyMtdBookedByRep.william : null,
       mtdBilled: agg.companyMtdBilledByRep ? agg.companyMtdBilledByRep.william : null,
-    })}
+    }, williamGoals)}
     <p style="margin:10px 0 0;font-size:9.5px;color:${BRAND.slate}">Total Daily Booked/Billed = the day's case count and value. "-" = no per-rep MTD breakdown today.</p>
+    ${noGoalsNote}
   </div>`;
 
   return body;
 }
 
-function buildReport2Email(agg) {
+function buildReport2Email(agg, repGoals = []) {
   const dateLabel = dateLabelFor(agg.runDate);
-  const body = buildReport2Body(agg);
+  const body = buildReport2Body(agg, repGoals);
   return {
     subject: `Daily Sales by Sales Rep - ${dateLabel}`,
     html: emailShell('Daily Sales by Sales Rep', dateLabel, body),
@@ -571,8 +598,14 @@ function buildReport3Email(agg, historyRows = [], repGoals = []) {
 function buildCombinedLeadershipEmail(agg, historyRows = [], repGoals = [], overrides = {}) {
   const dateLabel = dateLabelFor(agg.runDate);
   const { headlineSection, bookedRowsTable, sheetRow } = buildReport1Body(agg, historyRows, overrides);
-  const report2Body = buildReport2Body(agg);
-  const { kpiSection, goalsSection } = buildReport3Body(agg, historyRows, repGoals);
+  // repGoals now renders inline under each rep's own MTD cards inside
+  // buildReport2Body (user request, 2026-09-23 — goals are "connected to
+  // both sales rep," so they belong with that rep's own numbers, not a
+  // separate section further down). Only kpiSection is pulled from
+  // Report #3 here; its goalsSection is unused in the combined layout
+  // (buildReport3Email standalone still renders it, unaffected).
+  const report2Body = buildReport2Body(agg, repGoals);
+  const { kpiSection } = buildReport3Body(agg, historyRows, repGoals);
 
   const body = `
   ${groupDivider('Leadership Sales Summary', true)}
@@ -581,9 +614,6 @@ function buildCombinedLeadershipEmail(agg, historyRows = [], repGoals = [], over
 
   ${groupDivider('Sales Performance by Representative')}
   ${report2Body}
-
-  ${groupDivider('Goal Tracking')}
-  ${goalsSection}
 
   ${bookedRowsTable}`;
 
