@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { parseAndAggregate, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractEviSmartTotals } = require('../../src/services/evidentReport/parseEvident');
+const { parseAndAggregate, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractEviSmartTotals, eviSmartSubjectDate, pickEviSmartForDate } = require('../../src/services/evidentReport/parseEvident');
 const { buildReport1Email, buildReport2Email, buildReport3Email, buildCombinedLeadershipEmail } = require('../../src/services/evidentReport/buildReport');
 
 function fixture(name) {
@@ -79,33 +79,50 @@ test('parseAndAggregate exposes companyDailyBookedRows for the Leadership Report
   assert.deepEqual(agg.companyDailyBookedRows[93], { ref: '5663', customerName: 'Dr. ALBERTO GONZALEZ', value: 0, salesperson: 'william' });
 });
 
-test("Today's Booked Cases table aggregates by customer (matches Evident's real Report 13 format), HTML-escaped, and is omitted when there are none", () => {
-  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
+test("Today's Booked Cases table comes from EviSmart's own Daily Booked by Customer table (real Sept 22 email), and is omitted when there are none", () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-22' });
+  agg.eviSmart = extractEviSmartTotals(fixture('evismart-daily-sales-report-sep22-populated.html'));
   const { html } = buildReport1Email(agg, []);
-  // 94 real rows collapse to 47 unique customers (format confirmed
-  // 2026-09-18 against a real "EviSmart Report Totals" email showing
-  // Evident's own Report 13 aggregates the same way).
-  assert.match(html, /Today's Booked Cases \(94 cases, 47 customers\)/);
-  assert.match(html, />SUNSET TERRACE</);
-  // SUNSET TERRACE has 9 real cases totaling $336.90 — the aggregated
-  // count/value, not any single row's own value.
-  assert.match(html, />SUNSET TERRACE<[\s\S]{0,300}?>9<[\s\S]{0,300}?\$336\.90/);
-  assert.match(html, />Dr\. ALBERTO GONZALEZ</);
+  // Real email: 53 customers, 116 cases, $8,414.19 (reconciles exactly
+  // with the email's own Daily Booked total).
+  assert.match(html, /Today's Booked Cases \(116 cases, 53 customers\)/);
+  assert.match(html, />A1116 - BROOKDALE MAIN</);
+  assert.match(html, />A1116 - BROOKDALE MAIN<[\s\S]{0,300}?>12<[\s\S]{0,300}?\$966\.43/);
+  assert.match(html, />A1147 - DR\. JENNIFER FLIGR</);
 
-  const emptyAgg = { ...agg, companyDailyBookedRows: [] };
+  // A real no-bookings day (Sept 23 fixture) has no table at all.
+  const emptyAgg = { ...agg, eviSmart: extractEviSmartTotals(fixture('evismart-daily-sales-report.html')) };
   const { html: emptyHtml } = buildReport1Email(emptyAgg, []);
   assert.doesNotMatch(emptyHtml, /Today's Booked Cases/);
+
+  // No EviSmart pull at all: no table, and the old Evident row list is no
+  // longer used to fill it in.
+  const { html: noEsHtml } = buildReport1Email({ ...agg, eviSmart: null }, []);
+  assert.doesNotMatch(noEsHtml, /Today's Booked Cases/);
 });
 
-test("Today's Booked Cases table HTML-escapes customer names (not a trusted constant — real Evident data)", () => {
-  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
-  const withMaliciousName = {
-    ...agg,
-    companyDailyBookedRows: [{ ref: '1', customerName: '<script>alert(1)</script>', value: 10, salesperson: '' }],
+test("Today's Booked Cases table HTML-escapes customer names (not a trusted constant — real EviSmart data)", () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-22' });
+  agg.eviSmart = {
+    ...extractEviSmartTotals(fixture('evismart-daily-sales-report.html')),
+    dailyCustomers: [{ name: '<script>alert(1)</script>', count: 1, value: 10 }],
   };
-  const { html } = buildReport1Email(withMaliciousName, []);
+  const { html } = buildReport1Email(agg, []);
   assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+});
+
+test('extractEviSmartTotals reads the populated Daily Booked by Customer table from a real Sept 22 email', () => {
+  const totals = extractEviSmartTotals(fixture('evismart-daily-sales-report-sep22-populated.html'));
+  assert.equal(totals.dailyBookedCount, 116);
+  assert.equal(totals.dailyBookedValue, 8414.19);
+  assert.equal(totals.dailyBilledValue, 5519.16);
+  assert.equal(totals.dailyCustomers.length, 53);
+  assert.deepEqual(totals.dailyCustomers[0], { name: 'A1116 - BROOKDALE MAIN', count: 12, value: 966.43 });
+  // The rows add up to the email's own stated daily total.
+  assert.equal(totals.dailyCustomers.reduce((n, c) => n + c.count, 0), 116);
+  assert.equal(Math.round(totals.dailyCustomers.reduce((n, c) => n + c.value, 0) * 100) / 100, 8414.19);
+  assert.equal(totals.lastMonth.billed, 145872.42);
 });
 
 test('Report #1 renders Daily/MTD/YTD Booked+Billed straight from a real EviSmart Daily Sales Report, plus the $2.7M YTD goal bar', () => {
@@ -150,9 +167,12 @@ test('By Sales Rep section (Report #2) renders real per-rep daily and MTD figure
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
   const { html } = buildReport2Email(agg);
 
-  assert.match(html, /By Sales Rep/);
+  // No "By Sales Rep" sub-label, and each rep sits in their own card
+  // (user request, 2026-09-23).
+  assert.doesNotMatch(html, /By Sales Rep/);
   assert.match(html, /James Delaney/);
   assert.match(html, /William Alexander/);
+  assert.match(html, /James Delaney[\s\S]*?<div style="margin:14px 36px 0;padding:16px 18px[^"]*">\s*<p[^>]*>William Alexander/);
   // Real fixture: William has exactly 1 booked case (Dr. Alberto Gonzalez,
   // $0) and 1 billed case ($0) attributed to him; James has none of either.
   // Rendered as a compact mini stat card: count, then value inline.
@@ -249,21 +269,23 @@ test('flags missing reports instead of silently under-reporting', () => {
   assert.ok(agg.missing.includes('MTD Booked Daily Update'));
 });
 
-test('Report #3\'s month-by-month trend chart uses the verified Jun-Aug baselines and real EviSmart September MTD figures', () => {
+test('Report #3\'s month-by-month trend chart uses the Jul baseline, EviSmart August figures, and real EviSmart September MTD figures', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-23' });
   agg.eviSmart = extractEviSmartTotals(fixture('evismart-daily-sales-report.html'));
   const { html } = buildReport3Email(agg);
 
   assert.match(html, /September 2026 \(MTD\) vs\. Aug 2026/);
-  // Verified pre-tracking months.
+  // July is still the one older hardcoded baseline; August now comes from
+  // the EviSmart email's own "MTD vs Last Month Comparison" table.
   assert.doesNotMatch(html, /Jun%202026/); // chart starts in July
   assert.match(html, /Jul%202026/);
   assert.match(html, /Aug%202026/);
   assert.doesNotMatch(html, /12059\.06/); // June not plotted
   assert.match(html, /99668\.9/); // July booked
   assert.match(html, /66311\.9/); // July billed
-  assert.match(html, /157654\.32/); // August booked
-  assert.match(html, /147772\.4/); // August billed
+  assert.match(html, /157654\.32/); // August booked (EviSmart)
+  assert.match(html, /145872\.42/); // August billed (EviSmart)
+  assert.doesNotMatch(html, /147772\.4/); // old hardcoded August billed is gone
   // Current month, real September MTD, straight from the real EviSmart
   // Daily Sales Report fixture (121610.28 booked, 124786.97 billed).
   assert.match(html, /September%202026%20\(MTD\)/);
@@ -287,9 +309,9 @@ test('Report #3\'s "This Month vs. Last Month" KPI cards show value for both per
   // Booked: EviSmart MTD (121610.28) vs. August full month (157654.32).
   assert.match(html, /Aug 2026: \$157,654\.32/);
   assert.match(html, /-\$36,044\.04 \(-22\.9%\)/);
-  // Billed: EviSmart MTD (124786.97) vs. August full month (147772.40).
-  assert.match(html, /Aug 2026: \$147,772\.40/);
-  assert.match(html, /-\$22,985\.43 \(-15\.6%\)/);
+  // Billed: EviSmart MTD (124786.97) vs. EviSmart's August full month (145872.42).
+  assert.match(html, /Aug 2026: \$145,872\.42/);
+  assert.match(html, /-\$21,085\.45 \(-14\.5%\)/);
   assert.match(html, /September 2026 \(MTD\) is real month-to-date, not a full month yet/);
 });
 
@@ -341,31 +363,31 @@ test('Report #1/#2/#3 are three separate emails with distinct subjects (Ben Silb
 
 test('buildCombinedLeadershipEmail merges all 3 reports into one email with one subject (leadership request, 2026-09-23)', () => {
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-11' });
-  agg.eviSmart = extractEviSmartTotals(fixture('evismart-daily-sales-report.html'));
+  agg.eviSmart = extractEviSmartTotals(fixture('evismart-daily-sales-report-sep22-populated.html'));
   const repGoals = [
     { repName: 'James Delaney', goals: [{ title: '36 New Doctors by Dec 2026', metric: 'new_doctors', target: 36, current_value: 3, progress_pct: 8 }] },
   ];
   const { subject, html, sheetRow } = buildCombinedLeadershipEmail(agg, [], repGoals, {});
 
-  assert.match(subject, /^AIM Leadership Report - /);
+  assert.match(subject, /^Daily Leadership Dashboard - /);
   // All 3 reports' real content present in the one email.
   assert.match(html, /Today's Booked Cases/);
   assert.match(html, /YTD Sales Value Total/);
-  assert.match(html, /By Sales Rep/);
+  assert.doesNotMatch(html, /By Sales Rep/);
   assert.match(html, /James Delaney/);
   assert.match(html, /36 New Doctors by Dec 2026/);
   assert.match(html, /\$2\.7M YTD Sales Value Total Goal/);
-  // Group dividers mark each section's boundary. No separate "Goal
-  // Tracking" divider anymore — goals render inline under each rep's own
-  // MTD cards instead (user request, 2026-09-23).
-  assert.match(html, /Leadership Sales Summary/);
+  // No "Leadership Sales Summary" heading (user request, 2026-09-23) and
+  // no separate "Goal Tracking" divider — goals render inline under each
+  // rep's own MTD cards instead.
+  assert.doesNotMatch(html, /Leadership Sales Summary/);
   assert.match(html, /Sales Performance by Representative/);
   assert.doesNotMatch(html, /Goal Tracking/);
 
   // Reordered layout (user request, 2026-09-23): essential headline
   // numbers first — Today/MTD/YTD cards, the $2.7M goal, then the trend
-  // chart + This Month vs. Last Month KPI cards right below it, all
-  // under one "Leadership Sales Summary" divider — with the long
+  // chart + This Month vs. Last Month KPI cards right below it, all at
+  // the top with no section heading — with the long
   // customer-by-customer detail table moved to the very end, after Sales
   // Performance by Rep (where James's goal now lives, right under his
   // own MTD cards).
@@ -377,7 +399,7 @@ test('buildCombinedLeadershipEmail merges all 3 reports into one email with one 
   const customerTableIdx = html.indexOf("Today's Booked Cases");
   assert.ok(goalIdx > 0 && kpiIdx > goalIdx, 'KPI trend/comparison section should come right after the $2.7M goal bar');
   assert.ok(kpiIdx < repIdx, 'headline section (incl. KPI) should come before Sales Performance by Representative');
-  assert.ok(repIdx < jamesMtdIdx && jamesMtdIdx < jamesGoalIdx, 'James\'s own goal should render right after his own MTD cards, inside the By Sales Rep section');
+  assert.ok(repIdx < jamesMtdIdx && jamesMtdIdx < jamesGoalIdx, 'James\'s own goal should render right after his own MTD cards, inside the Sales Performance by Representative section');
   assert.ok(jamesGoalIdx < customerTableIdx, 'the long customer-detail table should be the very last section');
 
   // sheetRow (needed for the daily history log) still comes through,
@@ -457,10 +479,88 @@ test('extractEviSmartTotals reads all 6 real rows from a real EviSmart Daily Sal
     mtdBilledValue: 124786.97,
     ytdTotalSalesValue: 388621.46,
     ytdBilledValue: 337992.27,
+    lastMonth: { monthName: 'August', booked: 157654.32, billed: 145872.42 },
+    dailyCustomers: [],
+    cumulativeAsOf: '23 Sep',
   });
+});
+
+test('Report #3 shows a notice (no invented baseline) when the EviSmart email has no last-month column', () => {
+  const noComparison = fixture('evismart-daily-sales-report.html').replace(/<h3[^>]*>MTD vs Last Month Comparison<\/h3>[\s\S]*?<\/table>/, '');
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-23' });
+  agg.eviSmart = extractEviSmartTotals(noComparison);
+  assert.equal(agg.eviSmart.lastMonth, null);
+  const { html } = buildReport3Email(agg);
+  assert.match(html, /Last month's totals weren't included in today's EviSmart Daily Sales Report/);
+  assert.doesNotMatch(html, /quickchart\.io/);
 });
 
 test('extractEviSmartTotals returns null (not fabricated zeros) when the Totals table is absent — a real "could not run" failure send', () => {
   const totals = extractEviSmartTotals('<h2>EviSmart Daily Sales Report</h2><p>Could not run: not logged in.</p>');
   assert.equal(totals, null);
+});
+
+test('combined email explains where the numbers come from, and flags cumulative figures dated after the report day', () => {
+  const sep22 = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-22' });
+  sep22.eviSmart = extractEviSmartTotals(fixture('evismart-daily-sales-report-sep22-populated.html'));
+  const { html } = buildCombinedLeadershipEmail(sep22, [], [], {});
+  assert.match(html, /Where these numbers come from/);
+  assert.match(html, /come from the EviSmart Daily Sales Report/);
+  assert.match(html, /per-rep daily emails/);
+  assert.match(html, /as of 23 Sep, the most recent full EviSmart pull\. Daily figures are for 22 Sep\./);
+  // Source note is the last thing in the body, after the customer table.
+  assert.ok(html.indexOf("Today's Booked Cases") < html.indexOf('Where these numbers come from'));
+
+  // Same-day pull: the source note shows, but no as-of warning.
+  const sep23 = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-23' });
+  sep23.eviSmart = extractEviSmartTotals(fixture('evismart-daily-sales-report.html'));
+  const { html: html23 } = buildCombinedLeadershipEmail(sep23, [], [], {});
+  assert.match(html23, /Where these numbers come from/);
+  assert.doesNotMatch(html23, /the most recent full EviSmart pull/);
+});
+
+test('extractEviSmartTotals reads the newer end-of-day EviSmart layout (real Sept 23 email: numbered sections, last month inside Totals, 4-column customer table)', () => {
+  const totals = extractEviSmartTotals(fixture('evismart-daily-sales-report-sep23-eod.html'));
+  assert.equal(totals.dailyBookedCount, 108);
+  assert.equal(totals.dailyBookedValue, 9800.62);
+  assert.equal(totals.dailyBilledValue, 10724.89);
+  assert.equal(totals.mtdBookedCount, 1399);
+  assert.equal(totals.mtdBookedValue, 131958.86);
+  assert.equal(totals.mtdBilledValue, 136113.86);
+  assert.equal(totals.ytdTotalSalesValue, 398886.04);
+  assert.equal(totals.ytdBilledValue, 348956.16); // from "(billed-only: $348,956.16)"
+  assert.deepEqual(totals.lastMonth, { monthName: 'August', booked: 157654.32, billed: 145509.42 });
+  assert.equal(totals.cumulativeAsOf, null); // same-day figures, no as-of caveat
+
+  // 53 customers; the "Total (53 customers)" row is not counted as one.
+  assert.equal(totals.dailyCustomers.length, 53);
+  assert.deepEqual(totals.dailyCustomers[0], { name: 'A10101 - AIM TEST', count: 3, value: 0 });
+  assert.ok(totals.dailyCustomers.every((c) => !/^Total/i.test(c.name)));
+  assert.equal(totals.dailyCustomers.reduce((n, c) => n + c.count, 0), 108);
+  assert.equal(Math.round(totals.dailyCustomers.reduce((n, c) => n + c.value, 0) * 100) / 100, 9800.62);
+});
+
+test('eviSmartSubjectDate reads the business date from a real EviSmart subject', () => {
+  assert.equal(eviSmartSubjectDate('EviSmart Daily Sales Report - 23 September 2026'), '2026-09-23');
+  assert.equal(eviSmartSubjectDate('EviSmart Daily Sales Report - 2 October 2026'), '2026-10-02');
+  assert.equal(eviSmartSubjectDate('EviSmart Daily Sales Report - could not run (not logged in)'), null);
+});
+
+test('pickEviSmartForDate uses only an email dated for the report day and sent after that day ended (real 22/23 Sep sends)', () => {
+  const at = (iso) => new Date(iso).getTime();
+  const msgs = [
+    // Real send times (Eastern), subjects and contents from 22-23 Sep 2026.
+    { subject: 'EviSmart Daily Sales Report - 23 September 2026', html: fixture('evismart-daily-sales-report-sep23-eod.html'), internalDate: at('2026-09-23T21:31:33-04:00') },
+    { subject: 'EviSmart Daily Sales Report - 22 September 2026', html: fixture('evismart-daily-sales-report-sep22-populated.html'), internalDate: at('2026-09-23T14:31:18-04:00') },
+    { subject: 'EviSmart Daily Sales Report - 23 September 2026', html: fixture('evismart-daily-sales-report.html'), internalDate: at('2026-09-23T08:14:33-04:00') },
+    { subject: 'EviSmart Daily Sales Report - could not run (2026-09-23)', html: '<p>could not run</p>', internalDate: at('2026-09-23T09:51:48-04:00') },
+  ];
+  // 23 Sep: the 9:31 PM end-of-day send, not the early-morning $0 pull.
+  assert.equal(pickEviSmartForDate(msgs, '2026-09-23').dailyBookedValue, 9800.62);
+  // 22 Sep: the corrected resend sent the next afternoon.
+  assert.equal(pickEviSmartForDate(msgs, '2026-09-22').dailyBookedValue, 8414.19);
+  // Only the early-day pull exists: no usable pull, not a guess.
+  assert.equal(pickEviSmartForDate([msgs[2]], '2026-09-23'), null);
+  // A different day's report is never used.
+  assert.equal(pickEviSmartForDate([msgs[0]], '2026-09-24'), null);
 });

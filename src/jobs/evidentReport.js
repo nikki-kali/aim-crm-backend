@@ -6,11 +6,11 @@ const { sendEvidentReportForApproval } = require('../services/evidentReport')
 // has real in-progress unrelated work and must not be touched. Same
 // pattern as jobs/mediaCleanup.js and jobs/socialTokenRefresh.js.
 function startEvidentReportScheduler() {
-  // Weekdays 8am America/New_York — moved from the original 6am slot
-  // 2026-09-17 to line up with the Sales Rep Daily Report's own 8am send,
-  // so leadership and the reps' inboxes get their daily reports together.
+  // Weekdays 6am America/New_York (user request, 2026-09-23; it was 8am
+  // from 2026-09-17, 6am before that). The report covers the previous
+  // business day, using EviSmart's end-of-day email sent the evening before.
   cron.schedule(
-    '0 8 * * 1-5',
+    '0 6 * * 1-5',
     async () => {
       // Gated behind EVIDENT_REPORT_ENABLED, same pattern as
       // WEEKLY_REPORT_ENABLED/UNASSIGNED_LEADS_REPORT_ENABLED in

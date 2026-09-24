@@ -227,6 +227,97 @@ function extractEviSmartRow(html, labelPrefix) {
   };
 }
 
+// The "MTD vs Last Month Comparison" table's last-month column (its header
+// reads "<Month> (full month)", e.g. "August (full month)"). Returns null
+// when the table or either figure is missing so callers show a notice
+// instead of comparing against a made-up baseline.
+function extractEviSmartLastMonth(html) {
+  // Newer layout (from 2026-09-23 evening): last month sits in the Totals
+  // table as "Last Month Booked (August 2026)" / "Last Month Billed (...)".
+  const rowRe = (label) => new RegExp(`<td[^>]*>\\s*Last Month ${label}\\s*\\(\\s*([A-Za-z]+)\\s+\\d{4}\\s*\\)\\s*</td>\\s*<td[^>]*>[^<]*</td>\\s*<td[^>]*>\\s*(\\$[\\d,]+\\.\\d{2})`, 'i');
+  const nb = html.match(rowRe('Booked'));
+  const nl = html.match(rowRe('Billed'));
+  if (nb && nl) return { monthName: nb[1], booked: toNum(nb[2]), billed: toNum(nl[2]) };
+
+  const header = html.match(/MTD vs Last Month Comparison[\s\S]*?<th[^>]*>[^<]*<\/th>\s*<th[^>]*>[^<]*<\/th>\s*<th[^>]*>\s*([A-Za-z]+)\s*\(full month\)/i);
+  if (!header) return null;
+  const table = html.slice(header.index);
+  const cell = (label) => {
+    const m = table.match(new RegExp(`<td[^>]*>\\s*${label}\\s*</td>\\s*<td[^>]*>[^<]*</td>\\s*<td[^>]*>\\s*(\\$[\\d,]+\\.\\d{2})`, 'i'));
+    return m ? toNum(m[1]) : null;
+  };
+  const booked = cell('Booked');
+  const billed = cell('Billed');
+  if (booked == null || billed == null) return null;
+  return { monthName: header[1], booked, billed };
+}
+
+const decodeEntities = (str) => str.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+
+// The "Daily Booked by Customer" table: one row per customer with its case
+// count and dollar amount. Returns [] for a real no-bookings day (the email
+// says "No cases were booked today.") and null when the section is absent
+// entirely, so callers can tell "nothing booked" from "no data".
+function extractEviSmartCustomers(html) {
+  const start = html.search(/<h[23][^>]*>[^<]*Daily Booked by Customer/i);
+  if (start === -1) return null;
+  const rest = html.slice(start + 1);
+  const next = rest.search(/<h[23]/i);
+  const section = next === -1 ? rest : rest.slice(0, next);
+  const num = '\\s*([\\d,]+)\\s*';
+  const money = '\\s*(\\$[\\d,]+\\.\\d{2})\\s*';
+  // Newer layout: Code | Customer | Cases | Value. Older: Customer (code
+  // already prefixed) | Cases | Amount. Both end up as "CODE - NAME".
+  const fourCol = new RegExp(`<tr>\\s*<td[^>]*>([^<]+)</td>\\s*<td[^>]*>([^<]+)</td>\\s*<td[^>]*>${num}</td>\\s*<td[^>]*>${money}</td>\\s*</tr>`, 'g');
+  const threeCol = new RegExp(`<tr>\\s*<td[^>]*>([^<]+)</td>\\s*<td[^>]*>${num}</td>\\s*<td[^>]*>${money}</td>\\s*</tr>`, 'g');
+  const rows = [];
+  for (const m of section.matchAll(fourCol)) {
+    rows.push({ name: `${decodeEntities(m[1].trim())} - ${decodeEntities(m[2].trim())}`, count: toNum(m[3]), value: toNum(m[4]) });
+  }
+  if (rows.length === 0) {
+    for (const m of section.matchAll(threeCol)) {
+      rows.push({ name: decodeEntities(m[1].trim()), count: toNum(m[2]), value: toNum(m[3]) });
+    }
+  }
+  // The newer layout's grand-total row ("Total (53 customers)") is not a customer.
+  return rows.filter((r) => !/^Total\b/i.test(r.name));
+}
+
+const MONTHS = { january: '01', february: '02', march: '03', april: '04', may: '05', june: '06', july: '07', august: '08', september: '09', october: '10', november: '11', december: '12' };
+
+// "EviSmart Daily Sales Report - 23 September 2026" -> "2026-09-23"; null for
+// subjects with no date (e.g. "could not run (not logged in)").
+function eviSmartSubjectDate(subject) {
+  const m = String(subject || '').match(/(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/);
+  if (!m || !MONTHS[m[2].toLowerCase()]) return null;
+  return `${m[3]}-${MONTHS[m[2].toLowerCase()]}-${m[1].padStart(2, '0')}`;
+}
+
+// Picks the EviSmart email to report from for `runDate`: dated for that day
+// (by subject) AND sent after the day ended (6 PM Eastern on runDate or
+// later). Early-day pulls exist (a real 8:14 AM 23 Sep send showed $0
+// booked) and would understate a full-day report, so they are ignored;
+// null means "no usable pull" and the report says so instead of guessing.
+// Newest first, first one whose Totals actually parse.
+function pickEviSmartForDate(messages, runDate) {
+  const etParts = (ms) => {
+    const d = new Date(ms).toLocaleString('en-CA', { timeZone: 'America/New_York', hour12: false });
+    return { date: d.slice(0, 10), hour: Number(d.slice(12, 14)) };
+  };
+  const eligible = messages
+    .filter((m) => eviSmartSubjectDate(m.subject) === runDate)
+    .filter((m) => {
+      const t = etParts(m.internalDate);
+      return t.date > runDate || (t.date === runDate && t.hour >= 18);
+    })
+    .sort((a, b) => b.internalDate - a.internalDate);
+  for (const m of eligible) {
+    const totals = extractEviSmartTotals(m.html);
+    if (totals) return totals;
+  }
+  return null;
+}
+
 function extractEviSmartTotals(html) {
   const dailyBooked = extractEviSmartRow(html, 'Daily Booked');
   const dailyBilled = extractEviSmartRow(html, 'Daily Billed');
@@ -245,7 +336,12 @@ function extractEviSmartTotals(html) {
     mtdBookedValue: mtdBooked ? mtdBooked.amount : 0,
     mtdBilledValue: mtdBilled ? mtdBilled.amount : 0,
     ytdTotalSalesValue: ytdTotalSales ? ytdTotalSales.amount : 0,
-    ytdBilledValue: ytdBilled ? ytdBilled.amount : 0,
+    ytdBilledValue: ytdBilled
+      ? ytdBilled.amount
+      : toNum((html.match(/YTD Total Sales[\s\S]{0,300}?billed-only:\s*(\$[\d,]+\.\d{2})/i) || [])[1] || '0'),
+    lastMonth: extractEviSmartLastMonth(html),
+    dailyCustomers: extractEviSmartCustomers(html),
+    cumulativeAsOf: (html.match(/\(\s*(?:MTD )?through (\d{1,2} [A-Za-z]{3})/) || [])[1] || null,
   };
 }
 
@@ -446,4 +542,4 @@ function parseAndAggregate(messages, { runDate } = {}) {
   };
 }
 
-module.exports = { parseAndAggregate, parseTable, classify, toNum, findCol, rowToObj, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractRepColumns, extractEviSmartTotals };
+module.exports = { parseAndAggregate, parseTable, classify, toNum, findCol, rowToObj, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractRepColumns, extractEviSmartTotals, eviSmartSubjectDate, pickEviSmartForDate };

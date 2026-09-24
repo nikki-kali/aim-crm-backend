@@ -80,13 +80,14 @@ async function consumeApprovalToken(token) {
   return rows[0] || null
 }
 
-// Inserted right inside the report's own white card, above its header —
-// same exact wrapper string both buildReport.js's (Leadership Report) and
-// email.js's (Sales Rep Daily Report) templates open with, so this works
-// for either without needing report-specific injection logic. Only the
-// FIRST match is replaced (plain string .replace), which is correct here
-// since each of these HTML documents contains exactly one such wrapper.
-const CARD_OPEN = '<div style="max-width:600px;margin:40px auto;background:#fff;border-radius:24px;overflow:hidden;box-shadow:0 6px 28px rgba(32,114,144,.16)">'
+// Inserted right inside the report's own card, above its header. Matched by
+// its stable opening (max-width:600px card, 40px auto margin) rather than
+// the full style string: the Leadership Report's card was restyled
+// (2026-09-19) and an exact-string match silently stopped finding it, which
+// sent approval previews with no Approve & Send button. Only the FIRST
+// match is replaced, which is correct since each report has exactly one
+// such wrapper.
+const CARD_OPEN_RE = /<div style="max-width:600px;margin:40px auto;[^"]*">/
 
 function injectApprovalBanner(html, { reportLabel, approveUrl }) {
   const banner = `
@@ -95,8 +96,8 @@ function injectApprovalBanner(html, { reportLabel, approveUrl }) {
     <a href="${approveUrl}" style="display:inline-block;padding:11px 26px;background:#059669;color:#fff;text-decoration:none;font-weight:600;font-size:13.5px;border-radius:10px;font-family:-apple-system,sans-serif">Approve &amp; Send &#8594;</a>
     <p style="margin:10px 0 0;font-size:10.5px;color:#92702c">You'll be asked to confirm before anything sends. This link expires in 24 hours and can only be used once.</p>
   </div>`
-  if (!html.includes(CARD_OPEN)) return html // defensive: template changed shape, don't silently drop the report
-  return html.replace(CARD_OPEN, CARD_OPEN + banner)
+  if (!CARD_OPEN_RE.test(html)) return html // defensive: template changed shape, don't silently drop the report
+  return html.replace(CARD_OPEN_RE, (card) => card + banner)
 }
 
 module.exports = {

@@ -1,5 +1,5 @@
 const { fetchEvidentEmails, fetchEviSmartEmails } = require('./gmailFetch')
-const { parseAndAggregate, extractEviSmartTotals } = require('./parseEvident')
+const { parseAndAggregate, pickEviSmartForDate } = require('./parseEvident')
 const { buildCombinedLeadershipEmail } = require('./buildReport')
 const { getHistory, appendRow } = require('./log')
 const { sendEmail } = require('../email')
@@ -45,14 +45,12 @@ async function fetchRepGoalsWithProgress() {
 // first one that actually parses, rather than assuming the first message
 // returned is the freshest or that a send with no Totals table means "no
 // data exists today."
-async function fetchEviSmartTotals() {
+async function fetchEviSmartTotals(runDate) {
   const messages = await fetchEviSmartEmails()
-  const sorted = [...messages].sort((a, b) => b.internalDate - a.internalDate)
-  for (const m of sorted) {
-    const totals = extractEviSmartTotals(m.html)
-    if (totals) return totals
-  }
-  return null
+  // Only an email dated for runDate and sent after that day ended counts
+  // (see pickEviSmartForDate) — never just "the newest one," which could be
+  // an early-day pull or a different day's report.
+  return pickEviSmartForDate(messages, runDate)
 }
 
 // Returns the last COMPLETED business day before now, in America/New_York
@@ -108,7 +106,7 @@ async function runEvidentReport() {
   }
 
   console.log('[evident-report] fetching EviSmart Daily Sales Report...')
-  aggregate.eviSmart = await fetchEviSmartTotals()
+  aggregate.eviSmart = await fetchEviSmartTotals(runDate)
   if (!aggregate.eviSmart) {
     console.warn('[evident-report] EviSmart Daily Sales Report unavailable — Daily/MTD/YTD Booked/Billed will show as "—"')
   }
@@ -175,13 +173,13 @@ async function sendEvidentReportForApproval() {
   const historyRows = await getHistory()
   const messages = await fetchEvidentEmails()
   const aggregate = parseAndAggregate(messages, { runDate })
-  aggregate.eviSmart = await fetchEviSmartTotals()
+  aggregate.eviSmart = await fetchEviSmartTotals(runDate)
   const repGoals = await fetchRepGoalsWithProgress()
   const { subject, html } = buildCombinedLeadershipEmail(aggregate, historyRows, repGoals, {})
 
   const token = await createApprovalToken({ reportType: 'evident-report', reportDate: runDate })
   const approveUrl = buildApproveUrl(token)
-  const bannered = injectApprovalBanner(html, { reportLabel: 'AIM Leadership Report', approveUrl })
+  const bannered = injectApprovalBanner(html, { reportLabel: 'Daily Leadership Dashboard', approveUrl })
 
   await sendEmail({
     to: [APPROVER_EMAIL],

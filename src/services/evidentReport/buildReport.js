@@ -77,10 +77,9 @@ const sectionLabel = (text) => `<p style="margin:0 0 14px;font-family:${FONT_DAT
 // combined into one email (user request, 2026-09-23 — leadership wants
 // them back in a single send; superseded Ben Silberstein's 2026-09-19
 // "must be 3 distinct emails" spec, though each report's own internal
-// structure/metrics are unchanged). `first` skips the top divider rule
-// and margin since it sits directly under the header band already.
-const groupDivider = (title, first = false) => `
-  <div style="margin:${first ? '4' : '32'}px 36px 0;padding-top:${first ? '0' : '20'}px;${first ? '' : `border-top:2px solid ${BRAND.deep};`}">
+// structure/metrics are unchanged).
+const groupDivider = (title) => `
+  <div style="margin:32px 36px 0;padding-top:20px;border-top:2px solid ${BRAND.deep}">
     <h2 style="margin:0;font-family:${FONT_DISPLAY};font-size:21px;font-weight:700;color:${BRAND.ink}">${title}</h2>
   </div>`;
 
@@ -189,7 +188,7 @@ function emailShell(title, dateLabel, body) {
   ${body}
 
   <div style="margin-top:28px;background:${BRAND.tealMist};padding:16px 36px;font-size:11.5px;color:${BRAND.slate};border-top:1px solid ${HAIRLINE}">
-    Aim Dental Laboratory CRM &nbsp;·&nbsp; Leadership Report
+    Aim Dental Laboratory CRM &nbsp;·&nbsp; Daily Leadership Dashboard
   </div>
 </div>
 </body></html>`.trim();
@@ -256,22 +255,15 @@ function buildReport1Body(agg, historyRows = [], overrides = {}) {
   // Active Doctors List). Omitted entirely when there's nothing to show.
   // Placed at the END of the email (see the template below) rather than
   // right after the Today cards — reference detail, not the headline.
-  const bookedByCustomer = (() => {
-    const order = [];
-    const byName = new Map();
-    for (const r of agg.companyDailyBookedRows) {
-      const name = r.customerName || '-';
-      if (!byName.has(name)) { byName.set(name, { name, count: 0, value: 0 }); order.push(name); }
-      const entry = byName.get(name);
-      entry.count += 1;
-      entry.value += r.value;
-    }
-    return order.map((name) => byName.get(name));
-  })();
+  // Sourced from the EviSmart Daily Sales Report's own "Daily Booked by
+  // Customer" table (user instruction, 2026-09-24: totals only from that
+  // email; the old Evident row list disagreed with it on a real day).
+  const bookedByCustomer = es && es.dailyCustomers ? es.dailyCustomers : [];
+  const bookedCaseCount = bookedByCustomer.reduce((sum, c) => sum + c.count, 0);
 
   const bookedRowsTable = bookedByCustomer.length === 0 ? '' : `
     <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
-      ${sectionLabel(`Today's Booked Cases (${agg.companyDailyBookedRows.length} cases, ${bookedByCustomer.length} customers)`)}
+      ${sectionLabel(`Today's Booked Cases (${bookedCaseCount} cases, ${bookedByCustomer.length} customers)`)}
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed">
         <tr>
           <td width="56%" style="padding:0 0 5px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}">Customer</td>
@@ -418,7 +410,7 @@ function buildReport2Body(agg, repGoals = []) {
   // real 390px render: two figures collided into unreadable text like
   // "$0.00$1,458.97"). Reuses statCard/cardRow, the same building blocks
   // as every other section.
-  const repSubLabel = (text) => `<p style="margin:0 0 6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}">${text}</p>`;
+  const repSubLabel = (text) => `<p style="margin:0 0 10px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}">${text}</p>`;
   // Two rows of two cards per rep (Daily on top, MTD below), not one
   // 4-up row: a real 390px render showed 4-up cards wrapping labels to 3
   // lines at uneven heights and "$1,458.97" overflowing its card. That
@@ -453,25 +445,29 @@ function buildReport2Body(agg, repGoals = []) {
     ? `<p style="margin:10px 0 0;font-size:9.5px;color:${BRAND.slate}">No active goals for James or William this period.</p>`
     : '';
 
+  // One glass card per rep (user request, 2026-09-23) so each rep's
+  // figures and goals read as their own unit instead of one long block.
+  const repCard = (marginTop, content) => `
+  <div style="margin:${marginTop}px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
+    ${content}
+  </div>`;
+
   const body = `
   ${missingBanner}
-
-  <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
-    ${sectionLabel('By Sales Rep')}
-    ${repBlock('James Delaney', {
-      booked: dailyBookedByRep.james,
-      billed: dailyBilledByRep.james,
-      mtdBooked: agg.companyMtdBookedByRep ? agg.companyMtdBookedByRep.james : null,
-      mtdBilled: agg.companyMtdBilledByRep ? agg.companyMtdBilledByRep.james : null,
-    }, jamesGoals)}
-    <div style="height:12px"></div>
-    ${repBlock('William Alexander', {
-      booked: dailyBookedByRep.william,
-      billed: dailyBilledByRep.william,
-      mtdBooked: agg.companyMtdBookedByRep ? agg.companyMtdBookedByRep.william : null,
-      mtdBilled: agg.companyMtdBilledByRep ? agg.companyMtdBilledByRep.william : null,
-    }, williamGoals)}
-    <p style="margin:10px 0 0;font-size:9.5px;color:${BRAND.slate}">Total Daily Booked/Billed = the day's case count and value. "-" = no per-rep MTD breakdown today.</p>
+  ${repCard(24, repBlock('James Delaney', {
+    booked: dailyBookedByRep.james,
+    billed: dailyBilledByRep.james,
+    mtdBooked: agg.companyMtdBookedByRep ? agg.companyMtdBookedByRep.james : null,
+    mtdBilled: agg.companyMtdBilledByRep ? agg.companyMtdBilledByRep.james : null,
+  }, jamesGoals))}
+  ${repCard(14, repBlock('William Alexander', {
+    booked: dailyBookedByRep.william,
+    billed: dailyBilledByRep.william,
+    mtdBooked: agg.companyMtdBookedByRep ? agg.companyMtdBookedByRep.william : null,
+    mtdBilled: agg.companyMtdBilledByRep ? agg.companyMtdBilledByRep.william : null,
+  }, williamGoals))}
+  <div style="margin:10px 36px 0">
+    <p style="margin:0;font-size:9.5px;color:${BRAND.slate}">Total Daily Booked/Billed = the day's case count and value. "-" = no per-rep MTD breakdown today.</p>
     ${noGoalsNote}
   </div>`;
 
@@ -503,11 +499,25 @@ function buildReport2Email(agg, repGoals = []) {
 function buildReport3Body(agg, historyRows = [], repGoals = []) {
   const es = agg.eviSmart;
 
-  // One-time verified MONTH_HISTORY baseline (see its own comment) — the
-  // most recent entry is "last month" for the comparison below. Current
-  // month is real, live MTD-to-date data, clearly labeled as MTD since
-  // it's a partial month being compared against a completed one.
-  const lastMonth = MONTH_HISTORY[MONTH_HISTORY.length - 1];
+  // Last month's Booked/Billed come from the SAME EviSmart Daily Sales
+  // Report as every other total (user instruction, 2026-09-24: only use
+  // that email for totals). Its own "MTD vs Last Month Comparison" table
+  // supplies them, so the earlier hardcoded August figure (which differed
+  // for Billed: $147,772.40 vs. EviSmart's $145,872.42) is no longer used
+  // for the comparison. MONTH_HISTORY still supplies only the older chart
+  // point(s) EviSmart doesn't report.
+  const priorMonthStart = new Date(Date.UTC(
+    Number(agg.runDate.slice(0, 4)),
+    Number(agg.runDate.slice(5, 7)) - 2,
+    1
+  ));
+  const lastMonth = es && es.lastMonth
+    ? {
+        label: `${es.lastMonth.monthName.slice(0, 3)} ${priorMonthStart.getUTCFullYear()}`,
+        booked: es.lastMonth.booked,
+        billed: es.lastMonth.billed,
+      }
+    : null;
   const thisMonthLabel = new Date(`${agg.runDate}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
   const thisMonthShort = new Date(`${agg.runDate}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
   const thisPeriodLabel = `${thisMonthLabel} (MTD)`;
@@ -528,19 +538,25 @@ function buildReport3Body(agg, historyRows = [], repGoals = []) {
     ]);
   };
 
-  // No fabricated comparison when today's EviSmart pull is unavailable —
-  // a compact notice instead of the chart/cards.
-  const kpiSection = !es ? `
+  // No fabricated comparison when today's EviSmart pull (or its last-month
+  // column) is unavailable — a compact notice instead of the chart/cards.
+  const kpiNotice = (text) => `
   <div style="padding:22px 36px 0">
-    ${sectionLabel(`${thisPeriodLabel} vs. ${lastMonth.label}`)}
+    ${sectionLabel(`${thisPeriodLabel} vs. last month`)}
     <div style="padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
-      <p style="margin:0;font-size:13px;color:${BRAND.slate}">Today's EviSmart Daily Sales Report pull didn't come through, so this month's comparison isn't available.</p>
+      <p style="margin:0;font-size:13px;color:${BRAND.slate}">${text}</p>
     </div>
-  </div>` : `
+  </div>`;
+
+  const kpiSection = !es
+    ? kpiNotice("Today's EviSmart Daily Sales Report pull didn't come through, so this month's comparison isn't available.")
+    : !lastMonth
+      ? kpiNotice("Last month's totals weren't included in today's EviSmart Daily Sales Report, so the month-over-month comparison isn't available.")
+      : `
   <div style="padding:22px 36px 0">
     ${sectionLabel(`${thisPeriodLabel} vs. ${lastMonth.label}`)}
     <div style="margin:0 0 14px;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
-      <img src="${buildMonthTrendChartUrl([...MONTH_HISTORY.slice(1), { label: thisPeriodLabel, booked: es.mtdBookedValue, billed: es.mtdBilledValue }])}" alt="Month-by-month booked and billed revenue trend chart" style="max-width:100%;border-radius:8px;display:block" />
+      <img src="${buildMonthTrendChartUrl([...MONTH_HISTORY.filter((m) => m.label !== lastMonth.label).slice(-1), lastMonth, { label: thisPeriodLabel, booked: es.mtdBookedValue, billed: es.mtdBilledValue }])}" alt="Month-by-month booked and billed revenue trend chart" style="max-width:100%;border-radius:8px;display:block" />
       <p style="margin:8px 0 0;font-size:11px;color:${BRAND.slate}">${thisPeriodLabel} is real month-to-date, not a full month yet, so it isn't a like-for-like comparison against a completed month until the month ends.</p>
     </div>
     ${cardRow([
@@ -607,19 +623,37 @@ function buildCombinedLeadershipEmail(agg, historyRows = [], repGoals = [], over
   const report2Body = buildReport2Body(agg, repGoals);
   const { kpiSection } = buildReport3Body(agg, historyRows, repGoals);
 
+  // Where the numbers come from (user request, 2026-09-24), so a leadership
+  // reader can trace every figure. When EviSmart's cumulative figures are
+  // dated later than the report day (a corrected resend carries MTD/YTD
+  // "through 23 Sep" into a 22 Sep report), say so instead of implying they
+  // match the report date.
+  const es = agg.eviSmart;
+  const reportDay = new Date(`${agg.runDate}T00:00:00Z`);
+  const reportDayShort = `${reportDay.getUTCDate()} ${reportDay.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' })}`;
+  const asOfNote = es && es.cumulativeAsOf && es.cumulativeAsOf !== reportDayShort
+    ? `<p style="margin:8px 0 0;font-size:11px;line-height:1.5;color:${BRAND.slate}">Month-to-date, year-to-date and last-month figures are as of ${escapeHtml(es.cumulativeAsOf)}, the most recent full EviSmart pull. Daily figures are for ${escapeHtml(reportDayShort)}.</p>`
+    : '';
+  const sourceNote = `
+  <div style="margin:24px 36px 0;padding:14px 18px;background:${BRAND.blueMist};border:1px solid ${HAIRLINE};border-radius:14px">
+    <p style="margin:0 0 6px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${BRAND.slate}">Where these numbers come from</p>
+    <p style="margin:0;font-size:11px;line-height:1.5;color:${BRAND.slate}">All company totals (Today, Month &amp; Year, last month, and the booked cases by customer list) come from the EviSmart Daily Sales Report. James and William's daily and MTD figures come from Evident's per-rep daily emails, since EviSmart does not break results out by rep. Goal progress comes from the CRM.</p>
+    ${asOfNote}
+  </div>`;
+
   const body = `
-  ${groupDivider('Leadership Sales Summary', true)}
   ${headlineSection}
   ${kpiSection}
 
   ${groupDivider('Sales Performance by Representative')}
   ${report2Body}
 
-  ${bookedRowsTable}`;
+  ${bookedRowsTable}
+  ${sourceNote}`;
 
   return {
-    subject: `AIM Leadership Report - ${dateLabel}`,
-    html: emailShell('AIM Leadership Report', dateLabel, body),
+    subject: `Daily Leadership Dashboard - ${dateLabel}`,
+    html: emailShell('Daily Leadership Dashboard', dateLabel, body),
     sheetRow,
   };
 }

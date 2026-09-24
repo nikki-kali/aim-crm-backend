@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { injectApprovalBanner } = require('../src/services/reportApproval');
+const { buildCombinedLeadershipEmail } = require('../src/services/evidentReport/buildReport');
+const { parseAndAggregate } = require('../src/services/evidentReport/parseEvident');
 
 const SAMPLE_HTML = `<!DOCTYPE html>
 <html><body>
@@ -33,4 +35,13 @@ test('injectApprovalBanner HTML-escapes reportLabel (it can carry a rep name/ema
   });
   assert.ok(!html.includes('<script>alert'), 'raw script tag must not appear unescaped');
   assert.match(html, /&lt;script&gt;alert\(&#39;xss&#39;\)&lt;\/script&gt;/);
+});
+
+test('injectApprovalBanner adds the Approve & Send button to the real Daily Leadership Dashboard (its restyled card once made the button silently vanish)', () => {
+  const agg = parseAndAggregate([], { runDate: '2026-09-22' });
+  agg.eviSmart = null;
+  const { html } = buildCombinedLeadershipEmail(agg, [], [], {});
+  const bannered = injectApprovalBanner(html, { reportLabel: 'Daily Leadership Dashboard', approveUrl: 'https://example.com/approve?token=abc' });
+  assert.match(bannered, /Approve &amp; Send/);
+  assert.ok(bannered.indexOf('Approve &amp; Send') < bannered.indexOf('Daily Leadership Dashboard</h1>') || bannered.indexOf('Approve &amp; Send') < bannered.indexOf('Sales Performance by Representative'));
 });

@@ -566,7 +566,7 @@ const confirmPage = (label, detail, token) => `<!DOCTYPE html>
 // loads, unlike the actual send it's describing.
 async function describeClaimForConfirmation(claim) {
   if (claim.report_type === 'evident-report') {
-    return { label: 'the AIM Leadership Report', detail: `This will send the Leadership Report for ${claim.report_date} to leadership now.` }
+    return { label: 'the Daily Leadership Dashboard', detail: `This will send the Daily Leadership Dashboard for ${claim.report_date} to leadership now.` }
   }
   if (claim.report_type === 'sales-rep-daily-report') {
     const { rows } = await db.query(`SELECT name, email FROM users WHERE id=$1`, [claim.rep_id])
@@ -624,7 +624,7 @@ router.post('/approve', rateLimiter({ windowMs: 10 * 60 * 1000, max: 20 }), asyn
 
     if (claim.report_type === 'evident-report') {
       await runEvidentReport()
-      return res.send(resultPage('Sent!', 'The Leadership Report has been sent to leadership.', true))
+      return res.send(resultPage('Sent!', 'The Daily Leadership Dashboard has been sent to leadership.', true))
     }
 
     if (claim.report_type === 'sales-rep-daily-report') {

@@ -92,10 +92,11 @@ async function fetchEvidentEmails() {
 // inbox scan, 2026-09-23: "EviSmart Daily Sales Report - 23 September
 // 2026" for a real send, "EviSmart Daily Sales Report - could not run
 // (not logged in)" on days the pull itself failed (seen for real on
-// 2026-09-19 and 2026-09-20). `newer_than:2d` (not `:1d` like
+// 2026-09-19 and 2026-09-20). `newer_than:5d` (not `:1d` like
 // fetchEvidentEmails) because this report has sometimes arrived as a
 // same-day "updated pull" resend hours after an earlier pull — widening
-// the window lets parseEvident.js's own pick-the-latest-message logic see
+// the window (and 5 days so a Monday-morning run still reaches Friday
+// evening's end-of-day send) lets parseEvident.js's pickEviSmartForDate see
 // both and prefer the fresher one, rather than this fetch silently
 // missing an update that landed just outside a tighter window.
 async function fetchEviSmartEmails() {
@@ -103,7 +104,7 @@ async function fetchEviSmartEmails() {
   const gmail = google.gmail({ version: 'v1', auth })
   const listRes = await gmail.users.messages.list({
     userId: 'me',
-    q: 'from:media@aimdentallab.com subject:"EviSmart Daily Sales Report" newer_than:2d',
+    q: 'from:media@aimdentallab.com subject:"EviSmart Daily Sales Report" newer_than:5d',
   })
   const ids = (listRes.data.messages || []).map((m) => m.id)
 
