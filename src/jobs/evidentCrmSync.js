@@ -7,15 +7,25 @@ const { syncCasesForDate } = require('../services/evidentCrmSync')
 // internalDate converts to 2026-09-16 8:00:42pm ET; the Sep 15 report to
 // 2026-09-15 8:00:41pm ET). This job runs the FOLLOWING weekday morning
 // (see the 7am cron schedule below), so it must ask syncCasesForDate for
-// YESTERDAY's date, not today's — today's own report hasn't been sent
+// the previous day(s), not today's — today's own report hasn't been sent
 // yet. Asking for today's date would never find a match and would
 // silently produce an all-zero summary every single run, forever.
-function yesterdayEasternDateString() {
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
-  const [y, m, d] = today.split('-').map(Number)
-  const date = new Date(Date.UTC(y, m - 1, d))
-  date.setUTCDate(date.getUTCDate() - 1)
-  return date.toISOString().slice(0, 10)
+//
+// Tuesday-Friday: just yesterday. Monday: Friday, Saturday and Sunday — a
+// plain "yesterday" on Monday is Sunday, so Friday's report was never
+// synced (confirmed 2026-09-25: no cases dated Friday 2026-09-18 in the
+// CRM). Weekend dates are included in case Evident sends on them; a date
+// with no emails is a harmless no-op, and re-syncing an already-synced day
+// is idempotent (cases are matched on evident_case_number).
+function datesToSync(todayEt) {
+  const [y, m, d] = todayEt.split('-').map(Number)
+  const today = new Date(Date.UTC(y, m - 1, d))
+  const daysBack = today.getUTCDay() === 1 ? [3, 2, 1] : [1]
+  return daysBack.map((n) => {
+    const date = new Date(today)
+    date.setUTCDate(date.getUTCDate() - n)
+    return date.toISOString().slice(0, 10)
+  })
 }
 
 // Weekdays 7am America/New_York — before the 8am Leadership/Sales Rep
@@ -37,13 +47,16 @@ function startEvidentCrmSyncScheduler() {
         console.log('[evident-crm-sync] scheduled run skipped — EVIDENT_CRM_SYNC_ENABLED is not set to true')
         return
       }
-      const dateStr = yesterdayEasternDateString()
-      console.log(`[evident-crm-sync] running scheduled sync for ${dateStr}...`)
-      try {
-        const summary = await syncCasesForDate(dateStr)
-        console.log('[evident-crm-sync] done:', summary)
-      } catch (err) {
-        console.error('[evident-crm-sync] scheduled run failed:', err)
+      const todayEt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+      // One date failing (e.g. no email yet) must not stop the others.
+      for (const dateStr of datesToSync(todayEt)) {
+        console.log(`[evident-crm-sync] running scheduled sync for ${dateStr}...`)
+        try {
+          const summary = await syncCasesForDate(dateStr)
+          console.log('[evident-crm-sync] done:', summary)
+        } catch (err) {
+          console.error(`[evident-crm-sync] scheduled run failed for ${dateStr}:`, err)
+        }
       }
     },
     { timezone: 'America/New_York' }
@@ -51,4 +64,4 @@ function startEvidentCrmSyncScheduler() {
   console.log('[evident-crm-sync] job registered')
 }
 
-module.exports = { startEvidentCrmSyncScheduler }
+module.exports = { startEvidentCrmSyncScheduler, datesToSync }
