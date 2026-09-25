@@ -1,5 +1,6 @@
 const cron = require('node-cron')
 const { syncCasesForDate } = require('../services/evidentCrmSync')
+const { claimJobRun, releaseJobRun, todayEt } = require('../services/cronRuns')
 
 // Evident's "Daily Booking Report - Nadine"/"Daily Billed Report - Nadine"
 // emails for business day D are delivered around 8:00pm America/New_York
@@ -28,6 +29,38 @@ function datesToSync(todayEt) {
   })
 }
 
+// The job body, shared by the built-in cron below and the external trigger
+// (routes/cron.js). Gated behind EVIDENT_CRM_SYNC_ENABLED. `force` skips the
+// once-per-day guard (syncing is idempotent, so a re-run is safe).
+async function runEvidentCrmSyncJob({ source = 'cron', force = false } = {}) {
+  if (process.env.EVIDENT_CRM_SYNC_ENABLED !== 'true') {
+    console.log('[evident-crm-sync] run skipped — EVIDENT_CRM_SYNC_ENABLED is not set to true')
+    return 'disabled'
+  }
+  const day = todayEt()
+  if (!force && !(await claimJobRun('evident-crm-sync', day, source))) {
+    console.log(`[evident-crm-sync] already ran for ${day}, skipping (${source})`)
+    return 'already-ran'
+  }
+  let failed = 0
+  // One date failing (e.g. no email yet) must not stop the others.
+  for (const dateStr of datesToSync(day)) {
+    console.log(`[evident-crm-sync] running sync for ${dateStr} (${source})...`)
+    try {
+      const summary = await syncCasesForDate(dateStr)
+      console.log('[evident-crm-sync] done:', summary)
+    } catch (err) {
+      failed += 1
+      console.error(`[evident-crm-sync] run failed for ${dateStr}:`, err)
+    }
+  }
+  if (failed > 0) {
+    await releaseJobRun('evident-crm-sync', day)
+    return 'failed'
+  }
+  return 'ran'
+}
+
 // Weekdays 7am America/New_York — before the 8am Leadership/Sales Rep
 // report sends, so by the time those go out the CRM already reflects
 // yesterday's real Evident activity (see yesterdayEasternDateString above
@@ -37,31 +70,10 @@ function datesToSync(todayEt) {
 function startEvidentCrmSyncScheduler() {
   cron.schedule(
     '0 7 * * 1-5',
-    async () => {
-      // Gated behind EVIDENT_CRM_SYNC_ENABLED, same shipped-but-off
-      // pattern as every other automated job in this codebase — lets the
-      // code ship and be reviewed via a manual single-day run (see
-      // scripts/backfill-evident-crm-sync.js, runnable for just today)
-      // before it starts writing to the real CRM on its own every day.
-      if (process.env.EVIDENT_CRM_SYNC_ENABLED !== 'true') {
-        console.log('[evident-crm-sync] scheduled run skipped — EVIDENT_CRM_SYNC_ENABLED is not set to true')
-        return
-      }
-      const todayEt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
-      // One date failing (e.g. no email yet) must not stop the others.
-      for (const dateStr of datesToSync(todayEt)) {
-        console.log(`[evident-crm-sync] running scheduled sync for ${dateStr}...`)
-        try {
-          const summary = await syncCasesForDate(dateStr)
-          console.log('[evident-crm-sync] done:', summary)
-        } catch (err) {
-          console.error(`[evident-crm-sync] scheduled run failed for ${dateStr}:`, err)
-        }
-      }
-    },
+    () => runEvidentCrmSyncJob({ source: 'cron' }),
     { timezone: 'America/New_York' }
   )
   console.log('[evident-crm-sync] job registered')
 }
 
-module.exports = { startEvidentCrmSyncScheduler, datesToSync }
+module.exports = { startEvidentCrmSyncScheduler, datesToSync, runEvidentCrmSyncJob }
