@@ -136,7 +136,9 @@ test('Report #1 renders Daily/MTD/YTD Booked+Billed straight from a real EviSmar
   assert.match(html, /\$121,610\.28/); // MTD Booked value
   assert.match(html, /1,292 cases/); // MTD Booked count
   assert.match(html, /\$124,786\.97/); // MTD Billed
-  assert.match(html, /\$337,992\.27/); // YTD Billed (raw EviSmart figure, no legacy adjustment)
+  // No YTD Billed card (Ben asked for total sales value, not billed).
+  assert.doesNotMatch(html, /YTD Billed/);
+  assert.doesNotMatch(html, /\$337,992\.27/);
   // YTD Sales Value Total: 388621.46 (EviSmart) + 1243759 (legacy) = 1632380.46.
   assert.match(html, /\$1,632,380\.46/);
   assert.match(html, /Includes \$1,243,759 from the previous system/);

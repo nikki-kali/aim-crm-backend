@@ -207,7 +207,9 @@ function dateLabelFor(runDate) {
 // Report #1: Leadership Sales Summary — Daily Booked (count + customer
 // detail), Daily Billed (value only), MTD Booked (count + value), MTD
 // Billed (value only), YTD Sales Value Total (booked, + the $2.7M goal
-// progress bar), YTD Billed (value only). Daily/MTD/YTD Booked+Billed now
+// progress bar; no separate YTD Billed card, per Ben Silberstein's
+// "total sales value, not just billed", 2026-09-19 and again 2026-09-25).
+// Daily/MTD/YTD Booked+Billed now
 // come directly from the real "EviSmart Daily Sales Report" email
 // (agg.eviSmart — see parseEvident.js's extractEviSmartTotals and
 // gmailFetch.js's fetchEviSmartEmails), per explicit user instruction,
@@ -326,7 +328,6 @@ function buildReport1Body(agg, historyRows = [], overrides = {}) {
     <div style="height:8px"></div>
     ${cardRow([
       statCard('YTD Sales Value Total', fmtOrDash(companyYtdSalesValueTotal), [{ text: 'Includes $1,243,759 from the previous system' }]),
-      statCard('YTD Billed', fmtOrDash(es && es.ytdBilledValue)),
     ])}
     ${ytdGoalCard}
   </div>`;
