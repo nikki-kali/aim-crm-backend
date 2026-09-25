@@ -81,7 +81,11 @@ function lastBusinessDayEasternDateString() {
 // Runs the full pipeline once: fetch → parse → build → render → send →
 // log. Used both by jobs/evidentReport.js's daily cron and the admin
 // manual test-send route (routes/reports.js's POST /evident-report/send).
-async function runEvidentReport() {
+// `requireEviSmart`: refuse to send when EviSmart's report for the day didn't
+// come through (throws code EVISMART_UNAVAILABLE BEFORE anything is sent), so
+// an automatic send to leadership never goes out with "pull didn't come
+// through" notices and missing totals. Used by the automatic daily send.
+async function runEvidentReport({ requireEviSmart = false } = {}) {
   const runDate = lastBusinessDayEasternDateString()
 
   // Pre-flight duplicate check, before fetching Gmail or sending anything.
@@ -93,7 +97,7 @@ async function runEvidentReport() {
   console.log('[evident-report] reading history log...')
   const historyRows = await getHistory()
   if (historyRows.some((r) => r.date === runDate)) {
-    throw new Error(`[evident-report] a report for ${runDate} was already sent today — refusing to send a duplicate`)
+    throw Object.assign(new Error(`[evident-report] a report for ${runDate} was already sent today — refusing to send a duplicate`), { code: 'ALREADY_SENT' })
   }
 
   console.log('[evident-report] fetching last night\'s Evident emails...')
@@ -111,6 +115,10 @@ async function runEvidentReport() {
     console.warn('[evident-report] EviSmart Daily Sales Report unavailable — Daily/MTD/YTD Booked/Billed will show as "—"')
   }
 
+  if (requireEviSmart && !aggregate.eviSmart) {
+    throw Object.assign(new Error(`[evident-report] no usable EviSmart Daily Sales Report for ${runDate}, not sending to leadership`), { code: 'EVISMART_UNAVAILABLE' })
+  }
+
   const repGoals = await fetchRepGoalsWithProgress()
   const { subject, html, sheetRow } = buildCombinedLeadershipEmail(aggregate, historyRows, repGoals, {})
 
@@ -122,7 +130,7 @@ async function runEvidentReport() {
   console.log(`[evident-report] sending combined report to ${RECIPIENTS.join(', ')}...`)
   await sendEmail({
     to: RECIPIENTS,
-    bcc: ['media@aimdentallab.com'],
+    bcc: ['media@aimdentallab.com', APPROVER_EMAIL],
     subject,
     html,
   })

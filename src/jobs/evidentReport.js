@@ -1,16 +1,43 @@
 // src/jobs/evidentReport.js
 const cron = require('node-cron')
-const { sendEvidentReportForApproval } = require('../services/evidentReport')
+const { sendEvidentReportForApproval, runEvidentReport } = require('../services/evidentReport')
 const { claimJobRun, releaseJobRun, todayEt } = require('../services/cronRuns')
 
 // Deliberately its own file, not added to jobs/scheduler.js — that file
 // has real in-progress unrelated work and must not be touched. Same
 // pattern as jobs/mediaCleanup.js and jobs/socialTokenRefresh.js.
+// What one run does, given the switch and the two ways to deliver. Kept pure
+// (both senders are passed in) so every branch can be tested without email:
+//  - switch off (default): only the approval preview goes to the approver.
+//  - switch on (EVIDENT_REPORT_AUTO_SEND=true): the real report goes straight
+//    to the leadership list, but only when EviSmart's report for the day is
+//    usable; if it isn't, nothing goes to leadership and the approval preview
+//    goes to the approver instead so a person can decide. A day that was
+//    already sent is left alone (the evident_report_log guard).
+async function deliverDailyReport({ autoSend, sendToLeadership, sendPreview }) {
+  if (!autoSend) {
+    await sendPreview()
+    return 'preview-sent'
+  }
+  try {
+    await sendToLeadership()
+    return 'sent-to-leadership'
+  } catch (err) {
+    if (err.code === 'ALREADY_SENT') return 'already-sent'
+    if (err.code === 'EVISMART_UNAVAILABLE') {
+      console.warn('[evident-report] EviSmart report unavailable; NOT sending to leadership, sending the approval preview instead')
+      await sendPreview()
+      return 'preview-fallback'
+    }
+    throw err
+  }
+}
+
 // The job body, shared by the built-in cron below and the external trigger
-// (routes/cron.js). Sends the daily preview (with its "Approve & Send"
-// button) to APPROVER_EMAIL only — never straight to leadership.
-// Gated behind EVIDENT_REPORT_ENABLED, same pattern as the other jobs.
-// `force` skips the once-per-day guard (for a deliberate manual re-run).
+// (routes/cron.js). Gated behind EVIDENT_REPORT_ENABLED, and the send to
+// leadership additionally behind EVIDENT_REPORT_AUTO_SEND (see
+// deliverDailyReport). `force` skips the once-per-day guard (for a deliberate
+// manual re-run).
 async function runEvidentReportJob({ source = 'cron', force = false } = {}) {
   if (process.env.EVIDENT_REPORT_ENABLED !== 'true') {
     console.log('[evident-report] run skipped — EVIDENT_REPORT_ENABLED is not set to true')
@@ -21,10 +48,14 @@ async function runEvidentReportJob({ source = 'cron', force = false } = {}) {
     console.log(`[evident-report] already ran for ${day}, skipping (${source})`)
     return 'already-ran'
   }
-  console.log(`[evident-report] Running daily preview run (${source})`)
+  const autoSend = process.env.EVIDENT_REPORT_AUTO_SEND === 'true'
+  console.log(`[evident-report] Running daily run (${source}, ${autoSend ? 'automatic send to leadership' : 'approval preview only'})`)
   try {
-    await sendEvidentReportForApproval()
-    return 'ran'
+    return await deliverDailyReport({
+      autoSend,
+      sendToLeadership: () => runEvidentReport({ requireEviSmart: true }),
+      sendPreview: () => sendEvidentReportForApproval(),
+    })
   } catch (err) {
     console.error('[evident-report] run failed:', err)
     await releaseJobRun('evident-report', day)
@@ -44,4 +75,4 @@ function startEvidentReportScheduler() {
   console.log('[evident-report] job registered')
 }
 
-module.exports = { startEvidentReportScheduler, runEvidentReportJob }
+module.exports = { startEvidentReportScheduler, runEvidentReportJob, deliverDailyReport }
