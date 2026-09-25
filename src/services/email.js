@@ -23,7 +23,7 @@ function getResend() {
 // (info@) already exist and are proven working (same account the newsletter
 // signup sync in routes/newsletter.js already uses), so it works as a
 // fallback while Resend's domain verification is stuck pending.
-async function sendViaBrevo({ to, subject, html, cc, bcc, attachments, replyTo }) {
+async function sendViaBrevo({ to, subject, html, cc, bcc, attachments, replyTo, headers }) {
   // `to` may be a single address or an array — Resend accepts either
   // directly, but Brevo wants an array of {email} objects regardless, so
   // normalize here rather than assuming a single string (a multi-recipient
@@ -43,6 +43,7 @@ async function sendViaBrevo({ to, subject, html, cc, bcc, attachments, replyTo }
       sender: { name: 'Aim Dental CRM', email: 'info@aimdentallab.com' },
       to: toList.map((email) => ({ email })),
       ...(replyTo ? { replyTo: { email: replyTo } } : {}),
+      ...(headers ? { headers } : {}),
       ...(cc?.length ? { cc: cc.map((email) => ({ email })) } : {}),
       ...(bccList.length ? { bcc: bccList.map((email) => ({ email })) } : {}),
       subject,
@@ -65,13 +66,16 @@ async function sendViaBrevo({ to, subject, html, cc, bcc, attachments, replyTo }
 // is inferred from filename if omitted. Used by routes/scanSubmission.js to
 // forward a doctor's uploaded scan files straight through in the staff
 // notification email; every other call site omits this.
-async function sendEmail({ to, subject, html, cc, bcc, attachments, replyTo }) {
+// `headers` (optional): extra mail headers, e.g. { 'In-Reply-To': id, References: id }
+// so a reply lands on an existing thread.
+async function sendEmail({ to, subject, html, cc, bcc, attachments, replyTo, headers }) {
   const client = getResend()
   const from = process.env.RESEND_FROM || 'Aim Dental CRM <onboarding@resend.dev>'
   const { error } = await client.emails.send({
     from,
     to: to || process.env.ALERT_EMAIL,
     ...(replyTo ? { replyTo } : {}),
+    ...(headers ? { headers } : {}),
     ...(cc?.length ? { cc } : {}),
     ...(bcc?.length ? { bcc } : {}),
     subject,
@@ -84,7 +88,7 @@ async function sendEmail({ to, subject, html, cc, bcc, attachments, replyTo }) {
     throw new Error(error.message)
   }
   console.warn('sendEmail: Resend failed, falling back to Brevo —', error.message)
-  await sendViaBrevo({ to, subject, html, cc, bcc, attachments, replyTo })
+  await sendViaBrevo({ to, subject, html, cc, bcc, attachments, replyTo, headers })
 }
 
 function coldLeadEmail(leads) {
