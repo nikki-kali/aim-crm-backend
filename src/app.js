@@ -68,6 +68,7 @@ app.use(cors({
 }))
 app.use(express.json({ limit: '5mb' }))
 app.use('/api/cron', require('./routes/cron')) // secret-protected trigger for the daily jobs (external timer)
+app.use('/api/report-hold', require('./routes/reportHold')) // signed "hold today's send" link from the daily preview email
 // Only needed by the plain HTML <form method="POST"> on the report-approval
 // confirmation page (routes/reports.js's POST /approve) — a real browser
 // form submit, not fetch/XHR, so it can't send JSON.

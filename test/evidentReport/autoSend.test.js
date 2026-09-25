@@ -51,3 +51,17 @@ test('the preview banner says when leadership gets it automatically, and keeps t
   const manual = injectApprovalBanner(html, { reportLabel: 'Daily Leadership Dashboard', approveUrl: 'https://example.com/a' });
   assert.match(manual, /Nothing has been sent yet\./);
 });
+
+test('a day the approver held is skipped: nothing goes to leadership and no alert is sent', async () => {
+  const f = fakes();
+  assert.equal(await deliverToLeadership({ autoSend: true, isHeld: async () => true, ...f }), 'held-by-approver');
+  assert.deepEqual(f.calls, []);
+});
+
+test('the preview banner shows a Hold link only when one is provided', () => {
+  const html = '<div style="max-width:600px;margin:40px auto;background:#fff"><h1>Report</h1></div>';
+  const withHold = injectApprovalBanner(html, { reportLabel: 'X', approveUrl: 'https://example.com/a', autoSendAt: '7:00 AM ET', holdUrl: 'https://example.com/hold?day=2026-09-28&sig=abc' });
+  assert.match(withHold, /Hold today's send<\/a>/);
+  assert.match(withHold, /href="https:\/\/example\.com\/hold\?day=2026-09-28&sig=abc"/);
+  assert.doesNotMatch(injectApprovalBanner(html, { reportLabel: 'X', approveUrl: 'https://example.com/a' }), /Hold today's send/);
+});

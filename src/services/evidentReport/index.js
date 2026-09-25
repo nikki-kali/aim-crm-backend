@@ -4,6 +4,8 @@ const { buildCombinedLeadershipEmail } = require('./buildReport')
 const { getHistory, appendRow } = require('./log')
 const { sendEmail } = require('../email')
 const { APPROVER_EMAIL, createApprovalToken, buildApproveUrl, injectApprovalBanner } = require('../reportApproval')
+const { buildHoldUrl } = require('../reportHold')
+const { todayEt } = require('../cronRuns')
 const db = require('../../config/db')
 const { computeProgress } = require('../goalProgress')
 const { DAILY_REPORT_REP_EMAILS } = require('../salesRepDailyReport')
@@ -189,7 +191,8 @@ async function sendEvidentReportForApproval() {
   const approveUrl = buildApproveUrl(token)
   // When the automatic send is on, the preview says when leadership gets it.
   const autoSendAt = process.env.EVIDENT_REPORT_AUTO_SEND === 'true' ? '7:00 AM ET' : undefined
-  const bannered = injectApprovalBanner(html, { reportLabel: 'Daily Leadership Dashboard', approveUrl, autoSendAt })
+  const holdUrl = autoSendAt ? buildHoldUrl(todayEt()) : undefined
+  const bannered = injectApprovalBanner(html, { reportLabel: 'Daily Leadership Dashboard', approveUrl, autoSendAt, holdUrl })
 
   await sendEmail({
     to: [APPROVER_EMAIL],

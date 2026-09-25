@@ -3,6 +3,7 @@ const cron = require('node-cron')
 const { sendEvidentReportForApproval, runEvidentReport } = require('../services/evidentReport')
 const { sendEmail } = require('../services/email')
 const { APPROVER_EMAIL } = require('../services/reportApproval')
+const { isHeld } = require('../services/reportHold')
 const { claimJobRun, releaseJobRun, todayEt } = require('../services/cronRuns')
 
 // Deliberately its own file, not added to jobs/scheduler.js — that file
@@ -13,9 +14,11 @@ const { claimJobRun, releaseJobRun, todayEt } = require('../services/cronRuns')
 // EVIDENT_REPORT_AUTO_SEND is on. If EviSmart's report for the day is
 // unusable, nothing goes to leadership and the approver is alerted instead;
 // a day already sent (for example the approver clicked Approve & Send after
-// the 6:00 AM preview) is left alone.
-async function deliverToLeadership({ autoSend, sendToLeadership, alertApprover }) {
+// the 6:00 AM preview) is left alone, and a day the approver held (the
+// "Hold today's send" link in the preview) is skipped.
+async function deliverToLeadership({ autoSend, sendToLeadership, alertApprover, isHeld = async () => false }) {
   if (!autoSend) return 'switch-off'
+  if (await isHeld()) return 'held-by-approver'
   try {
     await sendToLeadership()
     return 'sent-to-leadership'
@@ -76,6 +79,7 @@ async function runEvidentReportSendJob({ source = 'cron', force = false } = {}) 
   try {
     const outcome = await deliverToLeadership({
       autoSend,
+      isHeld: () => isHeld(day),
       sendToLeadership: () => runEvidentReport({ requireEviSmart: true }),
       alertApprover: (reason) => sendEmail({
         to: [APPROVER_EMAIL],
