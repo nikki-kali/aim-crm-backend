@@ -89,10 +89,12 @@ async function consumeApprovalToken(token) {
 // such wrapper.
 const CARD_OPEN_RE = /<div style="max-width:600px;margin:40px auto;[^"]*">/
 
-function injectApprovalBanner(html, { reportLabel, approveUrl }) {
+// `autoSendAt` (e.g. '7:00 AM ET'): when set, the banner says the report goes
+// out automatically then unless the approver sends it sooner.
+function injectApprovalBanner(html, { reportLabel, approveUrl, autoSendAt }) {
   const banner = `
   <div style="background:#fefaf1;border-bottom:1px solid #fde68a;padding:18px 36px;text-align:center">
-    <p style="margin:0 0 10px;font-size:13px;color:#78350f;line-height:1.5">This is a preview of the <b>${escapeHtml(reportLabel)}</b>. Nothing has been sent yet.</p>
+    <p style="margin:0 0 10px;font-size:13px;color:#78350f;line-height:1.5">This is a preview of the <b>${escapeHtml(reportLabel)}</b>. ${autoSendAt ? `It goes to leadership automatically at <b>${escapeHtml(autoSendAt)}</b>. Click below to send it sooner.` : 'Nothing has been sent yet.'}</p>
     <a href="${approveUrl}" style="display:inline-block;padding:11px 26px;background:#059669;color:#fff;text-decoration:none;font-weight:600;font-size:13.5px;border-radius:10px;font-family:-apple-system,sans-serif">Approve &amp; Send &#8594;</a>
     <p style="margin:10px 0 0;font-size:10.5px;color:#92702c">You'll be asked to confirm before anything sends. This link expires in 24 hours and can only be used once.</p>
   </div>`

@@ -1,7 +1,7 @@
 const express = require('express')
 const crypto = require('crypto')
 const { runEvidentCrmSyncJob } = require('../jobs/evidentCrmSync')
-const { runEvidentReportJob } = require('../jobs/evidentReport')
+const { runEvidentReportJob, runEvidentReportSendJob } = require('../jobs/evidentReport')
 const { runSalesRepDailyReportJob } = require('../jobs/salesRepDailyReport')
 
 const router = express.Router()
@@ -16,6 +16,7 @@ const router = express.Router()
 const JOBS = {
   'evident-crm-sync': runEvidentCrmSyncJob,
   'evident-report': runEvidentReportJob,
+  'evident-report-send': runEvidentReportSendJob,
   'sales-rep-daily-report': runSalesRepDailyReportJob,
 }
 

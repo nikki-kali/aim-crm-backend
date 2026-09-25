@@ -13,8 +13,8 @@ test('cron trigger only accepts the exact secret', () => {
   assert.equal(isAuthorized('anything', undefined), false); // not configured: never authorized
 });
 
-test('cron trigger exposes exactly the three daily jobs', () => {
-  assert.deepEqual(Object.keys(cronRoute.JOBS).sort(), ['evident-crm-sync', 'evident-report', 'sales-rep-daily-report']);
+test('cron trigger exposes exactly the daily jobs', () => {
+  assert.deepEqual(Object.keys(cronRoute.JOBS).sort(), ['evident-crm-sync', 'evident-report', 'evident-report-send', 'sales-rep-daily-report']);
 });
 
 test('a job is claimed once per day: first caller runs it, a second is told it already ran', async () => {
