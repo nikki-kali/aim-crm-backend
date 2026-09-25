@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { parseAndAggregate, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractEviSmartTotals, eviSmartSubjectDate, pickEviSmartForDate } = require('../../src/services/evidentReport/parseEvident');
+const { parseAndAggregate, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractEviSmartTotals, eviSmartSubjectDate, pickEviSmartForDate, repKeyFromSalesperson } = require('../../src/services/evidentReport/parseEvident');
 const { buildReport1Email, buildReport2Email, buildReport3Email, buildCombinedLeadershipEmail } = require('../../src/services/evidentReport/buildReport');
 
 function fixture(name) {
@@ -563,4 +563,25 @@ test('pickEviSmartForDate uses only an email dated for the report day and sent a
   assert.equal(pickEviSmartForDate([msgs[2]], '2026-09-23'), null);
   // A different day's report is never used.
   assert.equal(pickEviSmartForDate([msgs[0]], '2026-09-24'), null);
+});
+
+test("repKeyFromSalesperson matches Evident's truncated salesperson labels (real 'james dela' / 'william'), not just an exact 'james'", () => {
+  assert.equal(repKeyFromSalesperson('james dela'), 'james');
+  assert.equal(repKeyFromSalesperson('James Delaney'), 'james');
+  assert.equal(repKeyFromSalesperson(' william '), 'william');
+  assert.equal(repKeyFromSalesperson(''), null);
+  assert.equal(repKeyFromSalesperson(undefined), null);
+  assert.equal(repKeyFromSalesperson('jamesbond-not-a-rep x'), null);
+});
+
+test("James's booked case shows on the dashboard when Evident labels it 'james dela' (real 23 Sep Daily Booking Report)", () => {
+  const html = fixture('company-daily-booked-nadine-sep23-james.html');
+  const rows = extractBookingRows(html);
+  assert.ok(rows.some((r) => r.salesperson === 'james dela' && r.ref === '6139'));
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-23' });
+  agg.companyDailyBookedRows = rows;
+  const { html: report } = buildReport2Email(agg);
+  // James's block: 1 case, $50.00 (Dr. Joel Manley, ref 6139).
+  const jamesBlock = report.slice(report.indexOf('James Delaney'), report.indexOf('William Alexander'));
+  assert.match(jamesBlock, /Total Daily Booked<\/p>\s*<p[^>]*>1 <span[^>]*>\$50\.00<\/span>/);
 });

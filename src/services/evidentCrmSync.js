@@ -1,5 +1,5 @@
 const db = require('../config/db')
-const { extractBookingRows, extractBilledRows, parseTable, findCol, rowToObj } = require('./evidentReport/parseEvident')
+const { extractBookingRows, extractBilledRows, parseTable, findCol, rowToObj, repKeyFromSalesperson } = require('./evidentReport/parseEvident')
 const { fetchEvidentEmailsInRange } = require('./evidentReport/gmailFetch')
 const { syncClientRevenue } = require('./clientRevenue')
 
@@ -24,7 +24,7 @@ const SALESPERSON_TO_REP_EMAIL = {
 // the unassigned/"N/A" case — blank, unrecognized, or the rep genuinely
 // not existing in this CRM (shouldn't happen, but never throws over it).
 async function resolveRepId(salesperson) {
-  const email = SALESPERSON_TO_REP_EMAIL[(salesperson || '').trim().toLowerCase()]
+  const email = SALESPERSON_TO_REP_EMAIL[repKeyFromSalesperson(salesperson)]
   if (!email) return null
   const { rows } = await db.query(`SELECT id FROM users WHERE email=$1`, [email])
   return rows[0] ? rows[0].id : null

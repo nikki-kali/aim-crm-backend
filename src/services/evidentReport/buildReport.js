@@ -8,6 +8,7 @@
 
 const { buildMonthTrendChartUrl } = require('./chart');
 const { LEGACY_YTD_REVENUE_ADJUSTMENT } = require('../clientRevenue');
+const { repKeyFromSalesperson } = require('./parseEvident');
 
 const BRAND = {
   ink: '#10353f',
@@ -391,7 +392,7 @@ function buildReport2Body(agg, repGoals = []) {
   const groupRowsByRep = (rows, valueField = 'value') => {
     const g = { james: { count: 0, value: 0 }, william: { count: 0, value: 0 } };
     for (const r of rows) {
-      const key = r.salesperson === 'james' ? 'james' : r.salesperson === 'william' ? 'william' : null;
+      const key = repKeyFromSalesperson(r.salesperson);
       if (!key) continue;
       g[key].count += 1;
       g[key].value += r[valueField];

@@ -117,6 +117,18 @@ function extractCaseTotals(html) {
 // just a combined total. Customer Name is trimmed (Evident's own HTML
 // pads it with spaces); Salesperson is '' for the unattributed "N/A"
 // bucket, a lowercase first name ('james'/'william') when attributed.
+// Maps Evident's "Salesperson" cell to 'james' / 'william' / null. Evident
+// truncates the rep's name in these cells ("james dela" for James Delaney,
+// "william" for William), so matching the exact string 'james' silently
+// dropped every one of James's rows (confirmed 2026-09-25 against real
+// 23 and 24 Sep emails). Matches on the first name instead.
+function repKeyFromSalesperson(salesperson) {
+  const first = String(salesperson || '').trim().toLowerCase().split(/\s+/)[0];
+  if (first === 'james') return 'james';
+  if (first === 'william') return 'william';
+  return null;
+}
+
 function extractBookingRows(html) {
   const table = parseTable(html);
   if (!table || table.rows.length === 0) return [];
@@ -542,4 +554,4 @@ function parseAndAggregate(messages, { runDate } = {}) {
   };
 }
 
-module.exports = { parseAndAggregate, parseTable, classify, toNum, findCol, rowToObj, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractRepColumns, extractEviSmartTotals, eviSmartSubjectDate, pickEviSmartForDate };
+module.exports = { parseAndAggregate, parseTable, classify, toNum, findCol, rowToObj, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractRepColumns, extractEviSmartTotals, eviSmartSubjectDate, pickEviSmartForDate, repKeyFromSalesperson };
