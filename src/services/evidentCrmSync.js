@@ -41,6 +41,19 @@ function brandFromCustomerCode(customerCode) {
   return /^KH/i.test((customerCode || '').trim()) ? 'Kings Highway' : 'Aim Dental'
 }
 
+// EviSmart's internal test account ("AIM TEST", customer code A10101) shows
+// up in Evident's daily reports. It is not a real doctor, so the sync leaves
+// it out of the CRM (user instruction, 2026-09-26: skip it). It still appears
+// in the leadership report's booked-cases list, which comes straight from
+// EviSmart.
+const TEST_ACCOUNT_CODES = new Set(['A10101'])
+const TEST_ACCOUNT_NAMES = new Set(['AIMTEST'])
+function isTestAccount(customerName, customerCode) {
+  const code = String(customerCode || '').trim().toUpperCase()
+  const name = String(customerName || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+  return TEST_ACCOUNT_CODES.has(code) || TEST_ACCOUNT_NAMES.has(name)
+}
+
 // Finds the existing client by normalized-name match, or creates one.
 // Returns { clientName, created } — clientName is the EXACT stored
 // clients.doctor_name to use as cases.client_name (matched or
@@ -247,6 +260,7 @@ async function syncCasesForDate(dateStr) {
     }
 
     for (const row of extractBookingRows(bookingMsg.html)) {
+      if (isTestAccount(row.customerName, codeByRef.get(row.ref))) { summary.skipped++; continue }
       try {
         const result = await upsertBookingRow(row, codeByRef.get(row.ref), dateStr)
         if (result.created) {
@@ -274,6 +288,7 @@ async function syncCasesForDate(dateStr) {
     }
 
     for (const row of extractBilledRows(billedMsg.html)) {
+      if (isTestAccount(row.customerName, codeByRef.get(row.ref))) { summary.skipped++; continue }
       try {
         const result = await upsertBilledRow(row, codeByRef.get(row.ref), dateStr)
         if (result.created) summary.casesCreated++
@@ -303,4 +318,4 @@ async function syncCasesForDate(dateStr) {
   return summary
 }
 
-module.exports = { normalizeDoctorName, resolveRepId, syncCasesForDate, gmailDateBounds }
+module.exports = { normalizeDoctorName, resolveRepId, syncCasesForDate, gmailDateBounds, isTestAccount }
