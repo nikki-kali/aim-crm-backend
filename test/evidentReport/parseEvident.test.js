@@ -487,6 +487,12 @@ test('extractEviSmartTotals reads all 6 real rows from a real EviSmart Daily Sal
   });
 });
 
+test('extractEviSmartTotals reads YTD Total Sales when its cell has nested <br><span> billed-only markup (real Sept 25 email, format change)', () => {
+  const totals = extractEviSmartTotals(fixture('evismart-daily-sales-report-sep25-nested-ytd.html'));
+  assert.equal(totals.ytdTotalSalesValue, 414191.25);
+  assert.equal(totals.ytdBilledValue, 364592.55);
+});
+
 test('Report #3 shows a notice (no invented baseline) when the EviSmart email has no last-month column', () => {
   const noComparison = fixture('evismart-daily-sales-report.html').replace(/<h3[^>]*>MTD vs Last Month Comparison<\/h3>[\s\S]*?<\/table>/, '');
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-23' });
@@ -546,6 +552,12 @@ test('eviSmartSubjectDate reads the business date from a real EviSmart subject',
   assert.equal(eviSmartSubjectDate('EviSmart Daily Sales Report - 23 September 2026'), '2026-09-23');
   assert.equal(eviSmartSubjectDate('EviSmart Daily Sales Report - 2 October 2026'), '2026-10-02');
   assert.equal(eviSmartSubjectDate('EviSmart Daily Sales Report - could not run (not logged in)'), null);
+});
+
+test('eviSmartSubjectDate also reads the "Month D, YYYY" subject format (real send, 2026-09-26)', () => {
+  assert.equal(eviSmartSubjectDate('EviSmart Daily Sales Report - September 25, 2026'), '2026-09-25');
+  assert.equal(eviSmartSubjectDate('EviSmart Daily Sales Report - October 2, 2026'), '2026-10-02');
+  assert.equal(eviSmartSubjectDate('EviSmart Daily Sales Report - September 25 2026'), '2026-09-25');
 });
 
 test('pickEviSmartForDate uses only an email dated for the report day and sent after that day ended (real 22/23 Sep sends)', () => {
