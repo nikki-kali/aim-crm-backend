@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { parseAndAggregate, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractEviSmartTotals, eviSmartSubjectDate, pickEviSmartForDate, repKeyFromSalesperson } = require('../../src/services/evidentReport/parseEvident');
+const { parseAndAggregate, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractEviSmartTotals, eviSmartSubjectDate, pickEviSmartForDate, repKeyFromSalesperson, applyEmailMtdTotals } = require('../../src/services/evidentReport/parseEvident');
 const { buildReport1Email, buildReport2Email, buildReport3Email, buildCombinedLeadershipEmail } = require('../../src/services/evidentReport/buildReport');
 
 function fixture(name) {
@@ -598,4 +598,33 @@ test("James's booked case shows on the dashboard when Evident labels it 'james d
   // James's block: 1 case, $50.00 (Dr. Joel Manley, ref 6139).
   const jamesBlock = report.slice(report.indexOf('James Delaney'), report.indexOf('William Alexander'));
   assert.match(jamesBlock, /Total Daily Booked<\/p>\s*<p[^>]*>1 <span[^>]*>\$50\.00<\/span>/);
+});
+
+test('applyEmailMtdTotals: company MTD Booked/Billed come from the two Evident emails, not EviSmart (real 25 Sep: Billed differed by $1,443.00)', () => {
+  const eviSmart = { dailyBookedValue: 1, mtdBookedCount: 1399, mtdBookedValue: 147242.08, mtdBilledValue: 151750.25, lastMonth: { booked: 9, billed: 9 } };
+  const agg = { companyMtdBooked: 147242.08, companyMtdBilled: 153193.25, missing: [] };
+  const out = applyEmailMtdTotals(eviSmart, agg);
+  assert.equal(out.mtdBilledValue, 153193.25);
+  assert.equal(out.mtdBookedValue, 147242.08);
+  // everything else stays EviSmart's, including the MTD case count (the emails have none)
+  assert.equal(out.mtdBookedCount, 1399);
+  assert.deepEqual(out.lastMonth, { booked: 9, billed: 9 });
+  assert.equal(eviSmart.mtdBilledValue, 151750.25, 'input is not mutated');
+});
+
+test('applyEmailMtdTotals: an email that did not arrive keeps EviSmart figure for just that metric', () => {
+  const eviSmart = { mtdBookedValue: 100, mtdBilledValue: 200 };
+  const out = applyEmailMtdTotals(eviSmart, { companyMtdBooked: 0, companyMtdBilled: 250, missing: ['MTD Booked Daily Update'] });
+  assert.equal(out.mtdBookedValue, 100);
+  assert.equal(out.mtdBilledValue, 250);
+  const out2 = applyEmailMtdTotals(eviSmart, { companyMtdBooked: 150, companyMtdBilled: 0, missing: ['Daily MTD Total Billed'] });
+  assert.equal(out2.mtdBookedValue, 150);
+  assert.equal(out2.mtdBilledValue, 200);
+});
+
+test('applyEmailMtdTotals: null EviSmart stays null, and a real $0 from the emails is respected', () => {
+  assert.equal(applyEmailMtdTotals(null, { companyMtdBooked: 5, companyMtdBilled: 5, missing: [] }), null);
+  const out = applyEmailMtdTotals({ mtdBookedValue: 100, mtdBilledValue: 200 }, { companyMtdBooked: 0, companyMtdBilled: 0, missing: [] });
+  assert.equal(out.mtdBookedValue, 0);
+  assert.equal(out.mtdBilledValue, 0);
 });

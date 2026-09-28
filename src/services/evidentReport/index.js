@@ -1,5 +1,5 @@
 const { fetchEvidentEmails, fetchEviSmartEmails } = require('./gmailFetch')
-const { parseAndAggregate, pickEviSmartForDate } = require('./parseEvident')
+const { parseAndAggregate, pickEviSmartForDate, applyEmailMtdTotals } = require('./parseEvident')
 const { buildCombinedLeadershipEmail } = require('./buildReport')
 const { getHistory, appendRow } = require('./log')
 const { sendEmail } = require('../email')
@@ -118,7 +118,7 @@ async function runEvidentReport({ requireEviSmart = false } = {}) {
   }
 
   console.log('[evident-report] fetching EviSmart Daily Sales Report...')
-  aggregate.eviSmart = await fetchEviSmartTotals(runDate)
+  aggregate.eviSmart = applyEmailMtdTotals(await fetchEviSmartTotals(runDate), aggregate)
   if (!aggregate.eviSmart) {
     console.warn('[evident-report] EviSmart Daily Sales Report unavailable — Daily/MTD/YTD Booked/Billed will show as "—"')
   }
@@ -189,7 +189,7 @@ async function sendEvidentReportForApproval() {
   const historyRows = await getHistory()
   const messages = (await fetchEvidentEmails()).filter((m) => m.date === runDate)
   const aggregate = parseAndAggregate(messages, { runDate })
-  aggregate.eviSmart = await fetchEviSmartTotals(runDate)
+  aggregate.eviSmart = applyEmailMtdTotals(await fetchEviSmartTotals(runDate), aggregate)
   const repGoals = await fetchRepGoalsWithProgress()
   const { subject, html } = buildCombinedLeadershipEmail(aggregate, historyRows, repGoals, {})
 

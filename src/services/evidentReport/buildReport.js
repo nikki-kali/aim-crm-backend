@@ -215,13 +215,20 @@ function dateLabelFor(runDate) {
 // gmailFetch.js's fetchEviSmartEmails), per explicit user instruction,
 // 2026-09-23 — replaces the old self-accumulation-from-historyRows
 // approach entirely (the removed computeCompanyMtd/COMPANY_YTD_SNAPSHOT).
-// `historyRows`/`overrides` are no longer used by this function — kept in
-// the signature only so index.js/buildCombinedLeadershipEmail/existing
-// tests don't need to change just for this; EviSmart is now the sole
-// source, so there's nothing left to override or accumulate from logged
-// history. When agg.eviSmart is null (a real "could not run (not logged
-// in)" pull failure, seen for real 2026-09-19/20), every figure below
-// reads "—" rather than a fabricated $0, with a notice explaining why.
+// EXCEPTION, 2026-09-29 (Elizabeth reported the report's MTD figures as
+// wrong): agg.eviSmart.mtdBookedValue/mtdBilledValue are overlaid in
+// index.js (see applyEmailMtdTotals) with the company-wide totals from
+// the two dedicated Evident emails ("MTD Booked Daily Update" / "Daily
+// MTD Total Billed") instead of EviSmart's own MTD row — those two
+// emails and EviSmart disagreed on a real day (25 Sep: Billed
+// $153,193.25 vs. $151,750.25). Daily and YTD figures are untouched and
+// still come solely from EviSmart. `historyRows`/`overrides` are no
+// longer used by this function — kept in the signature only so
+// index.js/buildCombinedLeadershipEmail/existing tests don't need to
+// change just for this. When agg.eviSmart is null (a real "could not run
+// (not logged in)" pull failure, seen for real 2026-09-19/20), every
+// figure below reads "—" rather than a fabricated $0, with a notice
+// explaining why.
 function buildReport1Body(agg, historyRows = [], overrides = {}) {
   const es = agg.eviSmart;
   // LEGACY_YTD_REVENUE_ADJUSTMENT (see clientRevenue.js) is always added

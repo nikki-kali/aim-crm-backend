@@ -385,6 +385,31 @@ function extractEviSmartTotals(html) {
   };
 }
 
+// Overlays company-wide MTD Booked/Billed from the two dedicated Evident
+// emails ("MTD Booked Daily Update" / "Daily MTD Total Billed", parsed
+// into agg.companyMtdBooked/companyMtdBilled above) onto the EviSmart
+// Daily Sales Report totals — Elizabeth reported the Leadership Report's
+// MTD figures as wrong (2026-09-29); the report reads EviSmart for
+// everything per the 2026-09-23 "one source" instruction, but EviSmart's
+// own MTD Booked/Billed already differs from these two dedicated MTD
+// emails on a real day (25 Sep: Billed $153,193.25 in the email vs.
+// $151,750.25 from EviSmart), so the two dedicated reports are the more
+// direct source for just those two figures. Everything else on `es`
+// (case counts, YTD, last month, daily) is untouched — the emails don't
+// carry those. Falls back to EviSmart's own figure per-metric when that
+// day's email didn't arrive (agg.missing), rather than silently zeroing
+// it, since agg.companyMtdBooked/Billed default to 0 when their EXPECTED
+// entry is missing. Returns null unchanged when EviSmart itself has no
+// usable pull that day (nothing to overlay onto).
+function applyEmailMtdTotals(eviSmart, agg) {
+  if (!eviSmart) return null;
+  return {
+    ...eviSmart,
+    mtdBookedValue: agg.missing.includes('MTD Booked Daily Update') ? eviSmart.mtdBookedValue : agg.companyMtdBooked,
+    mtdBilledValue: agg.missing.includes('Daily MTD Total Billed') ? eviSmart.mtdBilledValue : agg.companyMtdBilled,
+  };
+}
+
 const EXPECTED = [
   { type: 'dailyBooked', rep: 'james', label: "Daily Booked Cases - James' Doctors" },
   { type: 'dailyBooked', rep: 'william', label: "Daily Booked Cases - William's Doctors" },
@@ -582,4 +607,4 @@ function parseAndAggregate(messages, { runDate } = {}) {
   };
 }
 
-module.exports = { parseAndAggregate, parseTable, classify, toNum, findCol, rowToObj, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractRepColumns, extractEviSmartTotals, eviSmartSubjectDate, pickEviSmartForDate, repKeyFromSalesperson };
+module.exports = { parseAndAggregate, parseTable, classify, toNum, findCol, rowToObj, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractRepColumns, extractEviSmartTotals, eviSmartSubjectDate, pickEviSmartForDate, repKeyFromSalesperson, applyEmailMtdTotals };
