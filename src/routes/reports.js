@@ -11,7 +11,7 @@ const {
 } = require('../services/unassignedLeadsReport')
 const {
   sendRepDailyReport, sendRepDailyReportForApproval, buildDailyReportHtml, computeDailyDoctorStatus,
-  computeWeeklyNewDoctorGoal, REPORT_CC: DAILY_REPORT_CC,
+  REPORT_CC: DAILY_REPORT_CC,
 } = require('../services/salesRepDailyReport')
 const { runEvidentReport, sendEvidentReportForApproval } = require('../services/evidentReport')
 const { APPROVER_EMAIL, peekApprovalToken, consumeApprovalToken } = require('../services/reportApproval')
@@ -460,8 +460,7 @@ router.get('/sales-rep-daily-report/preview', auth, requireAdmin, async (req, re
     if (!rows[0]) return res.status(404).json({ error: 'Rep not found' })
     const dateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
     const status = await computeDailyDoctorStatus(repId, dateStr)
-    const goal = await computeWeeklyNewDoctorGoal(repId, dateStr, rows[0].email)
-    const { html } = await buildDailyReportHtml(rows[0].name || rows[0].email, rows[0].email, dateStr, status, goal)
+    const { html } = await buildDailyReportHtml(rows[0].name || rows[0].email, rows[0].email, dateStr, status)
     res.set('Content-Type', 'text/html').send(html)
   } catch (err) { next(err) }
 })

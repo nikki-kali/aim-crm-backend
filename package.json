@@ -4,7 +4,7 @@
   "description": "",
   "main": "src/index.js",
   "scripts": {
-    "test": "node --test test/evidentReport/*.test.js test/salesRepDailyReport/*.test.js",
+    "test": "node --test test/evidentReport/*.test.js test/salesRepDailyReport/*.test.js test/goalBarAnimation.test.js test/evidentCrmSync.test.js test/reportApproval.test.js",
     "dev": "node --watch src/index.js",
     "start": "node src/index.js"
   },
@@ -13,20 +13,24 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@sparticuz/chromium": "133.0.0",
+    "@sparticuz/chromium": "^133.0.0",
     "@supabase/supabase-js": "^2.112.0",
     "bcryptjs": "^3.0.3",
+    "canvas": "^3.2.3",
     "cheerio": "^1.2.0",
     "cors": "^2.8.6",
     "csv-parser": "^3.2.1",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "gif-encoder-2": "^1.0.5",
+    "gifsicle": "^7.0.1",
     "googleapis": "^173.0.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.2.0",
     "node-cron": "^4.4.1",
     "nodemailer": "^9.0.1",
     "pg": "^8.21.0",
+    "puppeteer-core": "^25.12.0",
     "resend": "^6.14.0"
   }
 }

@@ -1,8 +1,10 @@
 const db = require('../config/db')
 const { sendEmail, salesRepDailyReportEmail } = require('./email')
 const { fetchEvidentEmailsInRange } = require('./evidentReport/gmailFetch')
-const { extractDailyBookedCustomerNames, extractCaseTotals } = require('./evidentReport/parseEvident')
+const { extractDailyBookedCustomerNames } = require('./evidentReport/parseEvident')
+const { computeProgress } = require('./goalProgress')
 const { APPROVER_EMAIL, createApprovalToken, buildApproveUrl, injectApprovalBanner } = require('./reportApproval')
+const { renderGoalBarsGif } = require('./goalBarGifRenderer')
 
 // Recipients are the two real AIM reps by email, not a role query — role
 // IN ('staff','sales_rep') would also catch Yoel Klein and the TEST
@@ -27,44 +29,100 @@ const EVIDENT_DAILY_BOOKED_LABEL_BY_REP_KEY = {
   william: "Daily Booked Cases - William's Doctors",
 }
 
-// This week's (Monday through dateStr) booked cases + how much of that is
-// already billed, straight from Evident's own "Daily Booked Cases" report
-// for this rep, summed day by day — the same per-day parsing the
-// Leadership Report already relies on, so these numbers can never drift
-// from what leadership sees. Widened from "today only" to "this week"
-// 2026-09-17, alongside the same change to Submitted status, so the KPI
-// cards and the Active Doctors List describe the same window. hasData is
-// true as long as at least one real email for this rep arrived within the
-// week (even a genuine zero-booking day still counts) — only false when
-// nothing came back at all, so the section is omitted rather than shown
-// as a fabricated $0. Best-effort: a Gmail hiccup or an unrecognized rep
-// email must never block the rest of the report from sending, so this
-// always resolves to { hasData: false } rather than throwing.
-async function fetchRepBookedThisWeek(repEmail, dateStr) {
-  const repKey = EVIDENT_REP_KEY_BY_EMAIL[repEmail]
-  if (!repKey) return { hasData: false }
-  try {
-    const weekStart = mondayOfWeekEastern(dateStr)
-    const days = daysBetween(weekStart, dateStr)
-    const label = EVIDENT_DAILY_BOOKED_LABEL_BY_REP_KEY[repKey]
-    const messages = await fetchEvidentEmailsInRange(`subject:"${label}" newer_than:8d`)
+// Every rep's monthly sales target (user instruction, 2026-09-26).
+const MONTHLY_SALES_TARGET = 30000
 
-    const totals = { count: 0, billed: 0, wip: 0, value: 0 }
-    let hasData = false
-    for (const msg of messages) {
-      if (!days.includes(msg.date)) continue
-      hasData = true
-      const t = extractCaseTotals(msg.html)
-      totals.count += t.count
-      totals.billed += t.billed
-      totals.wip += t.wip
-      totals.value += t.value
-    }
-    return { ...totals, hasData }
+// First and last day, plus the "September 2026" label, of the calendar
+// month `dateStr` (YYYY-MM-DD) falls in.
+function monthWindow(dateStr) {
+  const [y, m] = dateStr.split('-').map(Number)
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate()
+  const mm = String(m).padStart(2, '0')
+  const monthName = new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+  return { start: `${y}-${mm}-01`, end: `${y}-${mm}-${String(lastDay).padStart(2, '0')}`, monthName }
+}
+
+// The rep's monthly sales progress for the bar in their daily report: the
+// same calculation as the Leadership Dashboard's per-rep goal (real case
+// value for the rep's own doctors, via goalProgress.js's computeProgress).
+// Uses the rep's existing monthly_revenue goal row when one covers the
+// date, otherwise falls back to the $30,000 calendar-month default so the
+// bar keeps working when a new month starts without someone creating a
+// goal. Best-effort: any failure returns null and the report still sends
+// without the bar rather than blocking on it.
+async function computeMonthlySalesGoal(repEmail, dateStr) {
+  try {
+    const { rows: [rep] } = await db.query(`SELECT id FROM users WHERE email=$1`, [repEmail])
+    if (!rep) return null
+    const { rows: [existing] } = await db.query(
+      `SELECT * FROM goals WHERE rep_id=$1 AND metric='monthly_revenue' AND period_start <= $2 AND period_end >= $2 ORDER BY created_at DESC LIMIT 1`,
+      [rep.id, dateStr]
+    )
+    if (existing) return await computeProgress(existing)
+    const { start, end, monthName } = monthWindow(dateStr)
+    return await computeProgress({
+      rep_id: rep.id, metric: 'monthly_revenue', target: MONTHLY_SALES_TARGET,
+      period_start: start, period_end: end, title: `$30K Monthly Sales - ${monthName}`,
+    })
   } catch (err) {
-    console.error(`[sales-rep-daily-report] failed to fetch this week's booked/billed for ${repEmail}:`, err.message)
-    return { hasData: false }
+    console.error(`[sales-rep-daily-report] failed to compute monthly sales goal for ${repEmail}:`, err.message)
+    return null
   }
+}
+
+// Calendar-month fallback new-doctors targets — only used when a rep has no
+// real per-month new_doctors goal row covering the date (see
+// computeMonthlyDoctorsGoal below). Was the ONLY source until 2026-09-28,
+// when it was found to silently override each rep's real Operation Final
+// Push target (James 18/17/15 and William 12/10/8 across Oct/Nov/Dec, not
+// one flat number) — now just the same-shape fallback computeMonthlySalesGoal
+// already had for monthly_revenue.
+const MONTHLY_NEW_DOCTOR_TARGETS = {
+  'james@aimdentallab.com': 16,
+  'williama@aimdentallab.com': 12,
+}
+
+// New doctors this month for the bar: mirrors computeMonthlySalesGoal
+// exactly — prefers the rep's own existing new_doctors goal row for the
+// date (so real per-rep, per-month targets from Operation Final Push are
+// used once entered), falling back to the flat MONTHLY_NEW_DOCTOR_TARGETS
+// default only when no such row exists yet. Best-effort: null on any
+// failure, same as the sales bar.
+async function computeMonthlyDoctorsGoal(repEmail, dateStr) {
+  try {
+    const { rows: [rep] } = await db.query(`SELECT id FROM users WHERE email=$1`, [repEmail])
+    if (!rep) return null
+    const { rows: [existing] } = await db.query(
+      `SELECT * FROM goals WHERE rep_id=$1 AND metric='new_doctors' AND period_start <= $2 AND period_end >= $2 ORDER BY created_at DESC LIMIT 1`,
+      [rep.id, dateStr]
+    )
+    if (existing) return await computeProgress(existing)
+    const target = MONTHLY_NEW_DOCTOR_TARGETS[repEmail]
+    if (!target) return null
+    const { start, end, monthName } = monthWindow(dateStr)
+    return await computeProgress({
+      rep_id: rep.id, metric: 'new_doctors', target,
+      period_start: start, period_end: end, title: `New Doctors - ${monthName}`,
+    })
+  } catch (err) {
+    console.error(`[sales-rep-daily-report] failed to compute monthly doctors goal for ${repEmail}:`, err.message)
+    return null
+  }
+}
+
+// Weekdays (Mon-Fri) left in dateStr's month AFTER dateStr, for the "days
+// left" line. Holidays aren't subtracted; it's a friendly countdown, not
+// a payroll figure.
+function businessDaysLeftInMonth(dateStr) {
+  const { end } = monthWindow(dateStr)
+  let count = 0
+  const cur = new Date(`${dateStr}T00:00:00Z`)
+  const last = new Date(`${end}T00:00:00Z`)
+  for (cur.setUTCDate(cur.getUTCDate() + 1); cur <= last; cur.setUTCDate(cur.getUTCDate() + 1)) {
+    const dow = cur.getUTCDay()
+    if (dow !== 0 && dow !== 6) count += 1
+  }
+  return count
 }
 
 // Doctor names Evident shows this rep booked a case for THIS WEEK
@@ -81,7 +139,7 @@ async function fetchRepBookedThisWeek(repEmail, dateStr) {
 // Alberto Gonzalez, booked Monday) showed "Not Submitted" on a later day
 // in the same week despite genuinely being active — a same-day-only
 // check was too narrow for what "Submitted" should mean here. Same
-// week-range fetch pattern as countNewDoctorsBookedThisWeek below.
+// week-range fetch pattern used for the booked-doctor names.
 // Best-effort: a Gmail hiccup returns an empty set, so the report still
 // renders using CRM data alone.
 async function fetchRepBookedDoctorNamesThisWeek(repEmail, dateStr) {
@@ -106,8 +164,6 @@ async function fetchRepBookedDoctorNamesThisWeek(repEmail, dateStr) {
     return new Set()
   }
 }
-
-const DEFAULT_WEEKLY_NEW_DOCTOR_TARGET = 5
 
 // Returns the last COMPLETED business day before now, in America/New_York
 // — NOT literally "today" (user correction, 2026-09-23, same real bug
@@ -172,6 +228,8 @@ async function computeDailyDoctorStatus(repId, dateStr) {
   const weekStart = mondayOfWeekEastern(dateStr)
   const { rows } = await db.query(
     `SELECT cl.doctor_name, cl.clinic_name,
+      (cl.notes ILIKE '%No case sent yet at import%'
+        AND NOT EXISTS (SELECT 1 FROM cases c2 WHERE c2.client_name = cl.doctor_name)) AS first_case_pending,
       EXISTS (
         SELECT 1 FROM cases c
         WHERE c.client_name = cl.doctor_name
@@ -186,6 +244,7 @@ async function computeDailyDoctorStatus(repId, dateStr) {
     doctor_name: r.doctor_name,
     clinic_name: r.clinic_name,
     submitted_this_week: r.submitted_this_week,
+    first_case_pending: r.first_case_pending,
   }))
   const submittedCount = doctors.filter(d => d.submitted_this_week).length
   return {
@@ -214,99 +273,19 @@ function daysBetween(startStr, endStr) {
   return days
 }
 
-// A doctor who booked a case with this rep THIS WEEK (Monday through
-// dateStr), per Evident's own "Daily Booked Cases" report, but who has no
-// `clients` record at all yet — counted toward the weekly new-doctor goal
-// immediately on booking, without waiting for a case to bill or for staff
-// to manually add them to the CRM (billing alone can take weeks; the CRM
-// record might never get created without someone noticing). Matched
-// against clients.doctor_name case/punctuation-insensitively — not a full
-// fuzzy match, but consistent with every other name check in this
-// pipeline (see cases.js's import-evident route's own doctor-name
-// matching). A doctor whose clients record was itself created this week
-// is already counted by the query above via created_at, and correctly
-// excluded here (their name IS now known), so nobody is double-counted.
-// Best-effort: a Gmail hiccup returns 0 rather than throwing, so the goal
-// still renders with at least the CRM-only count.
-async function countNewDoctorsBookedThisWeek(repEmail, dateStr) {
-  const repKey = EVIDENT_REP_KEY_BY_EMAIL[repEmail]
-  if (!repKey) return 0
-  try {
-    const weekStart = mondayOfWeekEastern(dateStr)
-    const label = EVIDENT_DAILY_BOOKED_LABEL_BY_REP_KEY[repKey]
-    const days = daysBetween(weekStart, dateStr)
-    // Sized to comfortably cover the whole week (up to 7 real days) plus a
-    // cushion for delivery-time drift around midnight ET.
-    const messages = await fetchEvidentEmailsInRange(`subject:"${label}" newer_than:8d`)
-
-    const namesThisWeek = new Set()
-    for (const msg of messages) {
-      if (!days.includes(msg.date)) continue
-      for (const name of extractDailyBookedCustomerNames(msg.html)) {
-        namesThisWeek.add(normalizeDoctorName(name))
-      }
-    }
-    if (namesThisWeek.size === 0) return 0
-
-    const { rows } = await db.query(`SELECT doctor_name FROM clients`)
-    const known = new Set(rows.map((r) => normalizeDoctorName(r.doctor_name)))
-
-    let newCount = 0
-    for (const name of namesThisWeek) {
-      if (!known.has(name)) newCount++
-    }
-    return newCount
-  } catch (err) {
-    console.error(`[sales-rep-daily-report] failed to detect new doctors booked this week for ${repEmail}:`, err.message)
-    return 0
-  }
-}
-
-// "New doctor" counts two things toward `current`: (1) a clients row
-// assigned to the rep with created_at in the current week (Monday through
-// dateStr, in progress — live progress building across the week, not a
-// completed prior week), and (2) a doctor Evident shows this rep booked
-// this week who has no clients record anywhere yet (see
-// countNewDoctorsBookedThisWeek above). Falls back to a default target of
-// 5 when no admin-set weekly new_doctors goal exists for this rep for the
-// current week; no goal row gets auto-created for the fallback case.
-async function computeWeeklyNewDoctorGoal(repId, dateStr, repEmail) {
-  const weekStart = mondayOfWeekEastern(dateStr)
-
-  const [goalRes, countRes, newFromBookings] = await Promise.all([
-    db.query(
-      `SELECT target FROM goals
-       WHERE rep_id=$1 AND metric='new_doctors' AND period='weekly'
-         AND period_start <= $2 AND period_end >= $2`,
-      [repId, dateStr]
-    ),
-    // Same `::date` reasoning as computeDailyDoctorStatus above — the
-    // previous `AT TIME ZONE` boundary here was the same genuine bug, and
-    // mattered more for this query than for the cases one, since
-    // `clients.created_at` is set via a real `NOW()` at insert time (see
-    // cases.js's import-evident client-create path), not UTC-midnight-of-
-    // business-date, so it doesn't get the accidental cushion Evident-
-    // imported `cases.created_at` rows do. Inclusive on both ends: Monday
-    // (weekStart) through dateStr, matching "this week so far."
-    db.query(
-      `SELECT COUNT(*) AS val FROM clients
-       WHERE assigned_to=$1
-         AND created_at::date >= $2::date AND created_at::date <= $3::date`,
-      [repId, weekStart, dateStr]
-    ),
-    countNewDoctorsBookedThisWeek(repEmail, dateStr),
-  ])
-
-  const target = goalRes.rows[0] ? Number(goalRes.rows[0].target) : DEFAULT_WEEKLY_NEW_DOCTOR_TARGET
-  const current = Number(countRes.rows[0].val) + newFromBookings
-  return { target, current, hasCustomGoal: !!goalRes.rows[0] }
-}
-
-async function buildDailyReportHtml(repName, repEmail, dateStr, status, goal, { test = false } = {}) {
+async function buildDailyReportHtml(repName, repEmail, dateStr, status, { test = false } = {}) {
   const dateLabel = new Date(`${dateStr}T12:00:00`).toLocaleDateString('en-US', {
     weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
   })
-  const bookedThisWeek = await fetchRepBookedThisWeek(repEmail, dateStr)
+  const salesGoal = await computeMonthlySalesGoal(repEmail, dateStr)
+  const doctorsGoal = await computeMonthlyDoctorsGoal(repEmail, dateStr)
+  const daysLeft = businessDaysLeftInMonth(dateStr)
+
+  // Animated bars (user request, 2026-09-28) — best-effort: renderGoalBarsGif
+  // never throws, so a Chrome/encoding/upload failure just means barsGifUrl
+  // stays null and salesRepDailyReportEmail falls back to its existing
+  // static bars, same report either way, never a blocked or broken send.
+  const barsGifUrl = await renderGoalBarsGif({ salesGoal, doctorsGoal, casesGoal: null, repEmail, dateStr })
 
   // Enrich the CRM-sourced doctor list with live Evident data: a doctor
   // counts as submitted this week if EITHER the CRM has a case dated this
@@ -321,7 +300,7 @@ async function buildDailyReportHtml(repName, repEmail, dateStr, status, goal, { 
   const submittedCount = doctors.filter((d) => d.submitted_this_week).length
   const enrichedStatus = { ...status, doctors, submittedCount, notSubmittedCount: doctors.length - submittedCount }
 
-  const html = salesRepDailyReportEmail({ repName, dateLabel, ...enrichedStatus, goal, test, bookedThisWeek })
+  const html = salesRepDailyReportEmail({ repName, dateLabel, ...enrichedStatus, test, salesGoal, doctorsGoal, daysLeft, barsGifUrl })
   return { html, dateLabel }
 }
 
@@ -334,8 +313,7 @@ async function buildDailyReportHtml(repName, repEmail, dateStr, status, goal, { 
 // leadership-facing/sales-rep report email in this codebase).
 async function sendRepDailyReport(rep, { to, cc = REPORT_CC, test = false, dateStr = lastBusinessDayEasternDateString() } = {}) {
   const status = await computeDailyDoctorStatus(rep.id, dateStr)
-  const goal = await computeWeeklyNewDoctorGoal(rep.id, dateStr, rep.email)
-  const { html, dateLabel } = await buildDailyReportHtml(rep.name || rep.email, rep.email, dateStr, status, goal, { test })
+  const { html, dateLabel } = await buildDailyReportHtml(rep.name || rep.email, rep.email, dateStr, status, { test })
   await sendEmail({
     to: to || rep.email,
     ...(cc?.length ? { cc } : {}),
@@ -343,7 +321,7 @@ async function sendRepDailyReport(rep, { to, cc = REPORT_CC, test = false, dateS
     subject: `${test ? 'TEST — ' : ''}Daily Sales Report — ${rep.name || rep.email} — ${dateLabel}`,
     html,
   })
-  return { status, goal }
+  return { status }
 }
 
 // Builds this rep's report (live data, no send to the rep) and emails it
@@ -357,8 +335,7 @@ async function sendRepDailyReport(rep, { to, cc = REPORT_CC, test = false, dateS
 // single-use consumption in routes/reports.js guards against instead.
 async function sendRepDailyReportForApproval(rep, dateStr = lastBusinessDayEasternDateString()) {
   const status = await computeDailyDoctorStatus(rep.id, dateStr)
-  const goal = await computeWeeklyNewDoctorGoal(rep.id, dateStr, rep.email)
-  const { html, dateLabel } = await buildDailyReportHtml(rep.name || rep.email, rep.email, dateStr, status, goal, {})
+  const { html, dateLabel } = await buildDailyReportHtml(rep.name || rep.email, rep.email, dateStr, status, {})
 
   const token = await createApprovalToken({ reportType: 'sales-rep-daily-report', repId: rep.id, reportDate: dateStr })
   const approveUrl = buildApproveUrl(token)
@@ -395,8 +372,14 @@ async function sendAllSalesRepDailyReports() {
 }
 
 module.exports = {
+  monthWindow,
+  MONTHLY_SALES_TARGET,
+  computeMonthlySalesGoal,
+  computeMonthlyDoctorsGoal,
+  lastBusinessDayEasternDateString,
   computeDailyDoctorStatus,
-  computeWeeklyNewDoctorGoal,
+  businessDaysLeftInMonth,
+  MONTHLY_NEW_DOCTOR_TARGETS,
   buildDailyReportHtml,
   sendRepDailyReport,
   sendRepDailyReportForApproval,
@@ -404,5 +387,4 @@ module.exports = {
   mondayOfWeekEastern,
   DAILY_REPORT_REP_EMAILS,
   REPORT_CC,
-  DEFAULT_WEEKLY_NEW_DOCTOR_TARGET,
 }

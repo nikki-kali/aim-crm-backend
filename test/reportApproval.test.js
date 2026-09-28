@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { injectApprovalBanner } = require('../src/services/reportApproval');
 const { buildCombinedLeadershipEmail } = require('../src/services/evidentReport/buildReport');
 const { parseAndAggregate } = require('../src/services/evidentReport/parseEvident');
+const { salesRepDailyReportEmail } = require('../src/services/email');
 
 const SAMPLE_HTML = `<!DOCTYPE html>
 <html><body>
@@ -44,4 +45,17 @@ test('injectApprovalBanner adds the Approve & Send button to the real Daily Lead
   const bannered = injectApprovalBanner(html, { reportLabel: 'Daily Leadership Dashboard', approveUrl: 'https://example.com/approve?token=abc' });
   assert.match(bannered, /Approve &amp; Send/);
   assert.ok(bannered.indexOf('Approve &amp; Send') < bannered.indexOf('Daily Leadership Dashboard</h1>') || bannered.indexOf('Approve &amp; Send') < bannered.indexOf('Sales Performance by Representative'));
+});
+
+test('injectApprovalBanner adds the Approve & Send button to the real Sales Rep Daily Report (its restyled wrapper must keep matching)', () => {
+  const html = salesRepDailyReportEmail({
+    repName: 'James Delaney', dateLabel: 'Friday, September 25, 2026',
+    doctors: [{ doctor_name: 'Dr. Brian Gold', clinic_name: null, submitted_this_week: false, first_case_pending: false }],
+    totalCount: 1, submittedCount: 0, notSubmittedCount: 1,
+    salesGoal: { title: 'x', metric: 'monthly_revenue', target: '30000', current_value: 100, progress_pct: 0 },
+    doctorsGoal: { title: 'y', metric: 'new_doctors', target: 16, current_value: 1, progress_pct: 6 }, daysLeft: 3,
+  });
+  const bannered = injectApprovalBanner(html, { reportLabel: "James Delaney's Daily Sales Report", approveUrl: 'https://example.com/approve?token=abc' });
+  assert.match(bannered, /Approve &amp; Send/);
+  assert.ok(bannered.indexOf('Approve &amp; Send') < bannered.indexOf('James Delaney &nbsp;'));
 });

@@ -106,6 +106,34 @@ function buildMonthComparisonChartUrl(lastMonth, thisMonth) {
   return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(config))}`;
 }
 
+// Horizontal "percent of monthly goal" bars for the daily team post (the
+// WhatsApp picture): one row per name (Team, then each rep), one bar for
+// sales and one for new doctors, both as a percent of that row's own goal so
+// they share one 0-100 scale. `rows` is [{ label, salesPct, doctorsPct }],
+// already resolved by the caller, same "chart.js stays a pure renderer"
+// boundary as the functions above.
+function buildTeamProgressChartUrl(rows, title) {
+  const config = {
+    type: 'horizontalBar',
+    data: {
+      labels: rows.map((r) => r.label),
+      datasets: [
+        { label: 'Sales', data: rows.map((r) => r.salesPct), backgroundColor: '#06babe' },
+        { label: 'New doctors', data: rows.map((r) => r.doctorsPct), backgroundColor: '#207290' },
+      ],
+    },
+    options: {
+      title: { display: true, text: title, fontSize: 20, fontColor: '#10353f' },
+      legend: { display: true, position: 'bottom' },
+      scales: {
+        xAxes: [{ ticks: { min: 0, max: 100, stepSize: 25 }, scaleLabel: { display: true, labelString: '% of monthly goal' } }],
+      },
+      plugins: { datalabels: { anchor: 'end', align: 'end', color: '#10353f', font: { weight: 'bold' } } },
+    },
+  };
+  return `https://quickchart.io/chart?w=800&h=460&bkg=white&c=${encodeURIComponent(JSON.stringify(config))}`;
+}
+
 // Multi-point month-by-month Booked/Billed trend line (user request,
 // 2026-09-19, superseding the two-point buildMonthComparisonChartUrl above
 // as the report's chart — that function is kept intact, not deleted, in
@@ -128,4 +156,5 @@ function buildMonthTrendChartUrl(months) {
   return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(config))}`;
 }
 
-module.exports = { buildWeeklyRevenueChartUrl, buildMonthComparisonChartUrl, buildMonthTrendChartUrl };
+module.exports = {
+  buildTeamProgressChartUrl, buildWeeklyRevenueChartUrl, buildMonthComparisonChartUrl, buildMonthTrendChartUrl };

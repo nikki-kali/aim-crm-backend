@@ -1,10 +1,17 @@
 const { Resend } = require('resend')
+const { emailShell } = require('./evidentReport/buildReport')
 
 // FRONTEND_URL supports a comma-separated list (see app.js's CORS setup) so
 // multiple allowed origins can coexist during a domain migration — but a
 // link inside an email needs exactly one URL, not the raw multi-value
 // string glued onto a path. Every email CTA button should build its href
 // through this, not `process.env.FRONTEND_URL` directly.
+// Doctor and rep names come from the database, so they are escaped before
+// going into email HTML.
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+}
+
 function primaryFrontendUrl() {
   return (process.env.FRONTEND_URL || '').split(',')[0].trim() || '#'
 }
@@ -453,186 +460,263 @@ function repReportEmail({ repName, dateLabel, monthLabel, lastMonthLabel, week, 
 // template on purpose: a daily operational checklist (who submitted a
 // case today, who didn't, weekly new-doctor goal progress), not a
 // performance narrative with tiers/coaching suggestions.
-function salesRepDailyReportEmail({ repName, dateLabel, doctors, totalCount, submittedCount, notSubmittedCount, goal, test, bookedThisWeek }) {
+// The short encouraging note under the goal bars in the Sales Rep Daily
+// Report (user request, 2026-09-26). Every line is true to the rep's real
+// numbers and only ever positive: no shaming, no invented deadlines. It
+// leans on well-known motivation effects: showing the head start they
+// already have (endowed progress), how close the finish line is (people
+// speed up near a goal), and one concrete next win that visibly moves the
+// bar. Two wordings per stage, picked by day of month, so it doesn't read
+// the same every morning. Returns '' when there are no goals to talk about.
+function repCoachMessage({ firstName, salesGoal, doctorsGoal, daysLeft = 0, dayOfMonth = 1 }) {
+  if (!salesGoal && !doctorsGoal) return ''
+  const pick = (variants) => variants[dayOfMonth % variants.length]
+  const whole = (n) => '$' + Math.round(Number(n)).toLocaleString('en-US')
+  const name = firstName
+
+  const salesCur = salesGoal ? Number(salesGoal.current_value) : 0
+  const salesTarget = salesGoal ? Number(salesGoal.target) : 0
+  const salesPct = salesGoal ? (salesGoal.progress_pct || 0) : 0
+  const salesLeft = Math.max(salesTarget - salesCur, 0)
+  const docCur = doctorsGoal ? Number(doctorsGoal.current_value) : 0
+  const docTarget = doctorsGoal ? Number(doctorsGoal.target) : 0
+  const docPct = doctorsGoal ? (doctorsGoal.progress_pct || 0) : 0
+  const docLeft = Math.max(docTarget - docCur, 0)
+
+  const salesDone = !!salesGoal && salesLeft === 0
+  const docsDone = !!doctorsGoal && docLeft === 0
+  const daysText = daysLeft > 0 ? ` with ${daysLeft} business day${daysLeft === 1 ? '' : 's'} left` : ''
+
+  if ((salesDone || !salesGoal) && (docsDone || !doctorsGoal)) {
+    return `You've hit ${salesGoal && doctorsGoal ? 'both goals' : 'your goal'} this month, ${name}. Everything from here is bonus. Keep the momentum going!`
+  }
+  if (doctorsGoal && docLeft > 0 && docLeft <= 2) {
+    return pick([
+      `You're just ${docLeft} new doctor${docLeft === 1 ? '' : 's'} away from your monthly goal, ${name}. The finish line is close, and one great conversation could get you there.`,
+      `${docLeft} more new doctor${docLeft === 1 ? '' : 's'} and you've hit your monthly doctors goal, ${name}. You're closer than you think.`,
+    ])
+  }
+  if (salesGoal && salesPct >= 75) {
+    return pick([
+      `Home stretch, ${name}! You're ${salesPct}% of the way to your sales goal with ${whole(salesLeft)} to go${daysText}. Finish strong.`,
+      `${salesPct}% of the way there, ${name}. The last stretch is where great months are made, and you're in it.`,
+    ])
+  }
+  if ((salesGoal && salesPct >= 50) || (doctorsGoal && docPct >= 50)) {
+    return pick([
+      `You're past the halfway mark on ${salesPct >= 50 ? 'your sales goal' : 'your new-doctors goal'}, ${name}. That's real momentum. Keep it rolling.`,
+      `More than halfway there on ${salesPct >= 50 ? 'sales' : 'new doctors'}, ${name}. The hardest part is behind you.`,
+    ])
+  }
+  if (salesCur > 0 || docCur > 0) {
+    const board = [salesGoal && salesCur > 0 ? `${whole(salesCur)} in sales` : '', doctorsGoal && docCur > 0 ? `${docCur} new doctor${docCur === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ')
+    const next = doctorsGoal && docLeft > 0
+      ? `One more new doctor takes you to ${docCur + 1} of ${docTarget}.`
+      : 'Your next case moves the bar again.'
+    return pick([
+      `You already have ${board} on the board this month, ${name}. That's a real head start. ${next}`,
+      `${name}, ${board} is already in the books this month. Every win from here builds on it. ${next}`,
+    ])
+  }
+  return `Everyone's bars start at zero, ${name}. Your first win of the month is the hardest and the most powerful, because it gets you on the board. Today is a great day to make it happen.`
+}
+
+function salesRepDailyReportEmail({ repName, dateLabel, doctors, totalCount, submittedCount, notSubmittedCount, test, salesGoal, doctorsGoal, daysLeft, barsGifUrl }) {
   const { ink, slate, teal, deep, success } = BRAND
   const hairline = '#dcebe9'
-  const danger = '#b91c1c'
+  const firstName = String(repName).split(' ')[0]
   // Quote picked by day-of-month, same pattern already used for this
   // codebase's other daily-cadence email (noActionLeadEmail below) — tone
   // varies day to day without needing per-rep state.
   const quote = PUSH_QUOTES[new Date().getDate() % PUSH_QUOTES.length]
+  const fmtMoney = (n) => '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-  const sectionLabel = (text) => `<p style="margin:0 0 14px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${slate}">${text}</p>`
+  // Matches the Leadership Dashboard (user request, 2026-09-26): the page
+  // frame comes from the dashboard's own emailShell (teal header band, pale
+  // teal card, footer), and the panels use the dashboard's glass treatment:
+  // translucent white with a soft white edge and a gentle teal shadow. Mail
+  // apps have no real backdrop blur, so a solid white background-color
+  // precedes the translucent one as the fallback.
+  const glass = 'background-color:#ffffff;background-color:rgba(255,255,255,.55);border:1px solid #e3f1f1;border:1px solid rgba(255,255,255,.75);box-shadow:0 8px 24px rgba(32,114,144,.12)'
+  const sectionLabel = (text) => `<p style="margin:0 0 12px;font-family:${FONT_DATA};font-size:11px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${slate}">${text}</p>`
 
-  // Each figure gets its own card (not one shared 3-column strip) — same
-  // "one figure, one card" rule as the Leadership Report, so a reader
-  // never has to parse which number belongs to which label.
-  const statCard = (label, val, tint, border, color) => `
-    <div style="background:${tint};border:1px solid ${border};border-radius:14px;padding:14px 10px;text-align:center">
-      <p style="margin:0 0 5px;font-family:${FONT_DATA};font-size:19px;font-weight:500;color:${color}">${val}</p>
-      <p style="margin:0;font-family:${FONT_DATA};font-size:8.5px;color:${slate};text-transform:uppercase;letter-spacing:.06em">${label}</p>
+  // A bar with any progress always shows at least a small sliver, so 0.4%
+  // isn't rendered as an empty track. Every number is also text.
+  const meter = ({ label, valueText, ofText, pct, hasProgress, footText }) => {
+    const shown = Math.min(Math.max(pct, 0), 100)
+    const fillPct = shown > 0 ? Math.max(shown, 3) : hasProgress ? 3 : 0
+    const fill = shown >= 100 ? success : teal
+    return `
+    <div style="padding:22px 36px 0">
+      <div style="${glass};border-radius:16px;padding:18px 20px">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td style="font-family:${FONT_DATA};font-size:11px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${slate}">${label}</td>
+            <td align="right" style="font-family:${FONT_DATA};font-size:14px;font-weight:500;color:${shown >= 100 ? success : deep}">${shown}%</td>
+          </tr>
+        </table>
+        <p style="margin:8px 0 0;font-family:${FONT_DATA};font-size:26px;line-height:1.15;font-weight:500;color:${ink};letter-spacing:-.02em">${valueText}<span style="font-family:${FONT_BODY};font-size:14px;font-weight:400;letter-spacing:0;color:${slate}"> ${ofText}</span></p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;border-collapse:separate">
+          <tr>
+            ${fillPct > 0 ? `<td width="${fillPct}%" height="8" bgcolor="${fill}" style="background-color:${fill};height:8px;line-height:8px;font-size:1px;border-radius:4px">&nbsp;</td>` : ''}
+            ${fillPct < 100 ? `<td width="${100 - fillPct}%" height="8" bgcolor="#eef2f1" style="background-color:#eef2f1;height:8px;line-height:8px;font-size:1px;border-radius:4px">&nbsp;</td>` : ''}
+          </tr>
+        </table>
+        <p style="margin:10px 0 0;font-size:13px;line-height:1.5;color:${slate}">${footText}</p>
+      </div>
     </div>`
-
-  const cardRow = (cards) => {
-    const width = (100 / cards.length - 2).toFixed(2)
-    return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-      ${cards.map((c, i) => `${i > 0 ? `<td width="2%"></td>` : ''}<td width="${width}%" style="vertical-align:top">${c}</td>`).join('')}
-    </tr></table>`
   }
 
-  // 0-1 red (behind pace), 2-3 yellow (making progress), 4+ green (on/near
-  // goal) — same red/yellow/green tiers this template already uses
-  // elsewhere (the amber status-ribbon warning, the green/red submitted
-  // pills), just applied to a count instead of a boolean.
-  const newDoctorTier = (count) => count <= 1
-    ? { tint: '#fef2f2', border: '#fecaca', color: danger }
-    : count <= 3
-      ? { tint: '#fefaf1', border: '#fde68a', color: '#b45309' }
-      : { tint: '#ecfdf5', border: '#a7f3d0', color: success }
-  const newDoctorCardColor = newDoctorTier(goal.current)
+  const daysLeftText = daysLeft > 0 ? ` &nbsp;·&nbsp; ${daysLeft} business day${daysLeft === 1 ? '' : 's'} left this month` : ''
+  const salesMeter = salesGoal ? meter({
+    label: 'Monthly Sales',
+    valueText: fmtMoney(salesGoal.current_value),
+    ofText: `of ${fmtMoney(salesGoal.target).replace('.00', '')} goal`,
+    pct: salesGoal.progress_pct || 0,
+    hasProgress: Number(salesGoal.current_value) > 0,
+    footText: Number(salesGoal.current_value) >= Number(salesGoal.target)
+      ? `Goal reached. Amazing work, ${escapeHtml(firstName)}!`
+      : `${fmtMoney(Number(salesGoal.target) - Number(salesGoal.current_value))} to go${daysLeftText}`,
+  }) : ''
 
-  // A small rounded badge beside each doctor's name, replacing the old
-  // two-list (Submitted / Did not Submit) split with one unified list —
-  // easier to scan the whole roster at a glance, status right next to
-  // each name instead of inferred from which section it's in.
-  const statusPill = (submittedToday) => submittedToday
-    ? `<span style="display:inline-block;padding:3px 10px;border-radius:999px;background:#ecfdf5;border:1px solid #a7f3d0;font-family:${FONT_DATA};font-size:9.5px;font-weight:500;color:${success};text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">Submitted</span>`
-    : `<span style="display:inline-block;padding:3px 10px;border-radius:999px;background:#fef2f2;border:1px solid #fecaca;font-family:${FONT_DATA};font-size:9.5px;font-weight:500;color:${danger};text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">Not Submitted</span>`
+  const doctorsMeter = doctorsGoal ? meter({
+    label: 'New Doctors This Month',
+    valueText: String(doctorsGoal.current_value),
+    ofText: `of ${doctorsGoal.target} doctors`,
+    pct: doctorsGoal.progress_pct || 0,
+    hasProgress: Number(doctorsGoal.current_value) > 0,
+    footText: Number(doctorsGoal.current_value) >= Number(doctorsGoal.target)
+      ? `Goal reached. Fantastic, ${escapeHtml(firstName)}!`
+      : `${Number(doctorsGoal.target) - Number(doctorsGoal.current_value)} to go. Every new doctor counts.`,
+  }) : ''
 
-  const doctorListItem = (d) => `
+  // The animated bars (user request, 2026-09-28: count up together, hold
+  // 15s) replace BOTH static meters with one image when a GIF was
+  // actually rendered and uploaded this run (goalBarGifRenderer.js,
+  // best-effort — returns null on any failure). barsGifUrl is null far
+  // more often than it should be until that pipeline is proven reliable
+  // in production, so the static bars below are not dead code — they are
+  // the real fallback path, not just a placeholder.
+  const barsBlock = barsGifUrl
+    ? `<div style="padding:22px 36px 0"><img src="${escapeHtml(barsGifUrl)}" width="100%" alt="Progress toward this month's goals" style="display:block;width:100%;height:auto;border-radius:16px"></div>`
+    : `${salesMeter}${doctorsMeter}`
+
+  // "Reach out" (soft amber) instead of a red "Not Submitted": with dozens of
+  // doctors on a list, a wall of red reads as blame, while an amber
+  // "Reach out" says what to do next.
+  const statusPill = (submittedToday, firstCasePending) => submittedToday
+    ? `<span style="display:inline-block;padding:4px 11px;border-radius:999px;background-color:#ecfdf5;border:1px solid #a7f3d0;font-family:${FONT_DATA};font-size:11px;font-weight:500;color:${success};text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">Submitted</span>`
+    : firstCasePending
+      ? `<span style="display:inline-block;padding:4px 11px;border-radius:999px;background-color:#eaf3f7;border:1px solid #a9cfe3;font-family:${FONT_DATA};font-size:11px;font-weight:500;color:${deep};text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">First case</span>`
+      : `<span style="display:inline-block;padding:4px 11px;border-radius:999px;background-color:#fefaf1;border:1px solid #fde68a;font-family:${FONT_DATA};font-size:11px;font-weight:500;color:#92400e;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">Reach out</span>`
+
+  // Two containers (user request, 2026-09-26): doctors who sent a case this
+  // week get their own panel, and one combined panel shows at most 10
+  // doctors to reach out to. Doctors the rep already works with come first,
+  // then those waiting on a first case, rotated by day of the month so the
+  // rep sees different first-case doctors across the week instead of the
+  // same alphabetical ten every morning.
+  const byName = (a, b) => String(a.doctor_name).localeCompare(String(b.doctor_name))
+  const submitted = doctors.filter((d) => d.submitted_this_week).sort(byName)
+  const active = doctors.filter((d) => !d.submitted_this_week && !d.first_case_pending).sort(byName)
+  const firstCase = doctors.filter((d) => !d.submitted_this_week && d.first_case_pending).sort(byName)
+  const MAX_REACH_OUT = 10
+  const rotated = firstCase.length > 0
+    ? [...firstCase.slice((new Date().getDate() * 5) % firstCase.length), ...firstCase.slice(0, (new Date().getDate() * 5) % firstCase.length)]
+    : []
+  const reachOutAll = [...active, ...rotated]
+  const reachOut = reachOutAll.slice(0, MAX_REACH_OUT)
+
+  const doctorRow = (d, i) => `
     <tr>
-      <td style="padding:10px 0;${d.isFirst ? '' : `border-top:1px solid ${hairline}`}">
+      <td style="padding:10px 0;${i === 0 ? '' : `border-top:1px solid ${hairline}`}">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-          <td style="vertical-align:middle">
-            <p style="margin:0;font-size:13.5px;font-weight:600;color:${ink}">${d.doctor_name}</p>
-            ${d.clinic_name ? `<p style="margin:2px 0 0;font-size:12px;color:${slate}">${d.clinic_name}</p>` : ''}
+          <td valign="middle">
+            <p style="margin:0;font-size:14.5px;font-weight:600;color:${ink}">${escapeHtml(d.doctor_name)}</p>
+            ${d.clinic_name ? `<p style="margin:2px 0 0;font-size:13px;color:${slate}">${escapeHtml(d.clinic_name)}</p>` : ''}
           </td>
-          <td width="1%" style="vertical-align:middle;text-align:right;padding-left:12px">${statusPill(d.submitted_this_week)}</td>
+          <td width="1%" valign="middle" align="right" style="padding-left:12px">${statusPill(d.submitted_this_week, d.first_case_pending)}</td>
         </tr></table>
       </td>
     </tr>`
 
-  // No cap/limit anywhere in computeDailyDoctorStatus's query, so this is
-  // every assigned doctor, not a top-N sample.
-  const activeDoctorsSection = doctors.length > 0 ? `
-    <div style="padding:26px 36px 0">
-      <p style="margin:0 0 12px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${slate}">Active Doctors List &nbsp;(${doctors.length})</p>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${doctors.map((d, i) => doctorListItem({ ...d, isFirst: i === 0 })).join('')}</table>
-    </div>` : ''
-
-  const goalPct = goal.target > 0 ? Math.min(Math.round((goal.current / goal.target) * 100), 100) : 0
-
-  // Sourced from Evident's own per-rep "Daily Booked Cases" reports,
-  // summed across this week (Monday through today) — the same per-day
-  // figures the Leadership Report reads, so these numbers can never drift
-  // from what leadership sees. Widened from "today only" to "this week"
-  // 2026-09-17, matching the same change to Submitted status, so both
-  // sections describe the same window. Shows real $0s on a week with
-  // genuinely no bookings (a report still arrived, it just had nothing in
-  // it) — only omitted entirely when no report arrived at all this week,
-  // or this rep isn't one Evident tracks. See
-  // fetchRepBookedThisWeek's own comment for how it tells those two cases
-  // apart.
-  const bookedThisWeekSection = bookedThisWeek && bookedThisWeek.hasData ? `
+  const doctorPanel = (title, list, footer = '') => `
     <div style="padding:22px 36px 0">
-      ${sectionLabel("This Week's Cases")}
-      ${cardRow([
-        statCard('Cases Booked', bookedThisWeek.count, '#f7faf9', '#e5e7eb', ink),
-        statCard('Booked Value', '$' + Number(bookedThisWeek.value).toLocaleString(), '#f7faf9', '#e5e7eb', ink),
-        statCard('Billed', '$' + Number(bookedThisWeek.billed).toLocaleString(), '#f7faf9', '#e5e7eb', ink),
-      ])}
+      <div style="${glass};border-radius:16px;padding:18px 20px 16px">
+        ${sectionLabel(title)}
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${list.map(doctorRow).join('')}</table>
+        ${footer}
+      </div>
+    </div>`
+
+  const moreCount = reachOutAll.length - reachOut.length
+  const submittedPanel = submitted.length > 0
+    ? doctorPanel(`Sent a case this week (${submitted.length})`, submitted)
+    : ''
+  const reachOutPanel = reachOut.length > 0
+    ? doctorPanel(
+        `Doctors and prospects to follow up with`,
+        reachOut,
+        moreCount > 0 ? `<p style="margin:12px 0 0;font-size:13px;line-height:1.5;color:${slate}">Showing ${reachOut.length} of ${reachOutAll.length}. You can see the rest of your list in the CRM.</p>` : ''
+      )
+    : ''
+  const doctorsSection = doctors.length > 0 ? `${submittedPanel}${reachOutPanel}` : `
+    <div style="padding:22px 36px 0">
+      <div style="${glass};border-radius:16px;padding:18px 20px">
+        ${sectionLabel('Your doctors')}
+        <p style="margin:0;font-size:14px;color:${slate}">No doctors assigned yet.</p>
+      </div>
+    </div>`
+
+  // One friendly, concrete action for today, grounded in real data.
+  const focusBox = totalCount === 0 ? '' : notSubmittedCount > 0
+    ? `<div style="padding:22px 36px 0">
+         <div style="padding:16px 19px;background:#fefaf1;border:1px solid #fde68a;border-left:3px solid #b45309;border-radius:4px 12px 12px 4px">
+           <p style="margin:0 0 6px;font-size:14.5px;line-height:1.55;color:${ink}">${notSubmittedCount > 5
+             ? `<b>Your 1% today:</b> pick 3 doctors from your list and reach out about a case. Small steps add up.`
+             : `<b>Your 1% today:</b> check in with ${notSubmittedCount} doctor${notSubmittedCount === 1 ? '' : 's'} who ${notSubmittedCount === 1 ? "hasn't" : "haven't"} sent a case this week.`}</p>
+           <p style="margin:0;font-size:13px;line-height:1.5;color:${slate}">A quick call or message is often all it takes.</p>
+         </div>
+       </div>`
+    : `<div style="padding:22px 36px 0">
+         <div style="padding:16px 19px;background:#ecfdf5;border:1px solid #a7f3d0;border-left:3px solid ${success};border-radius:4px 12px 12px 4px">
+           <p style="margin:0 0 6px;font-size:14.5px;line-height:1.55;color:${ink}"><b>All caught up, ${escapeHtml(firstName)}.</b> Every doctor has sent a case this week.</p>
+           <p style="margin:0;font-size:13px;line-height:1.5;color:${slate}">Your 1% today: reach out to a new doctor.</p>
+         </div>
+       </div>`
+
+  const coachText = repCoachMessage({ firstName, salesGoal, doctorsGoal, daysLeft, dayOfMonth: new Date().getDate() })
+  const coachBox = coachText ? `
+    <div style="padding:22px 36px 0">
+      <div style="${glass};border-radius:16px;padding:18px 20px">
+        ${sectionLabel('Keep going')}
+        <p style="margin:0;font-size:15.5px;line-height:1.6;color:${ink}">${escapeHtml(coachText)}</p>
+      </div>
     </div>` : ''
 
-  // Status ribbon carries two things: which real doctors are outstanding
-  // (not a generic reminder), and a concrete "1% today" action grounded in
-  // that same real data — reusing the "1% rule" framing from the weekly
-  // report's pushHeadline(), scaled down to a single daily-appropriate
-  // move rather than a tiered 2-3 item list.
-  const statusRibbon = totalCount === 0 ? '' : notSubmittedCount > 0
-    ? `<div style="margin:30px 36px 0;padding:16px 19px;background:#fefaf1;border:1px solid #fde68a;border-left:3px solid #b45309;border-radius:4px 12px 12px 4px">
-         <p style="margin:0 0 6px;font-size:13.5px;line-height:1.55;color:${ink}"><b>${repName}</b>, ${notSubmittedCount} of ${totalCount} doctor${totalCount === 1 ? '' : 's'} ${notSubmittedCount === 1 ? "hasn't" : "haven't"} submitted a case this week yet.</p>
-         <p style="margin:0;font-size:12.5px;line-height:1.5;color:${slate}">Your 1% today: reach out to the ${notSubmittedCount} doctor${notSubmittedCount === 1 ? '' : 's'} below before end of day. A quick check-in is often all it takes.</p>
-       </div>`
-    : `<div style="margin:30px 36px 0;padding:16px 19px;background:#ecfdf5;border:1px solid #a7f3d0;border-left:3px solid ${success};border-radius:4px 12px 12px 4px">
-         <p style="margin:0 0 6px;font-size:13.5px;line-height:1.55;color:${ink}">All caught up, <b>${repName}</b>. Every doctor has submitted this week.</p>
-         <p style="margin:0;font-size:12.5px;line-height:1.5;color:${slate}">Your 1% today: use the extra time to work toward this week's new-doctor goal (${goal.current} of ${goal.target} so far).</p>
-       </div>`
+  const preheader = salesGoal
+    ? `${firstName}, you're ${salesGoal.progress_pct || 0}% of the way to your monthly sales goal. Here's your day.`
+    : `${firstName}, here's your Daily Sales Report.`
 
-  return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-</head>
-<body style="margin:0;padding:0;background-color:${BRAND.deep};background-image:linear-gradient(160deg,${BRAND.skyBlue} 0%,${BRAND.deep} 100%);font-family:${FONT_BODY}">
-<div style="max-width:600px;margin:40px auto;background:#fff;border-radius:24px;overflow:hidden;box-shadow:0 6px 28px rgba(32,114,144,.16)">
-
-  ${test ? `
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-    <tr>
-      <td bgcolor="#fbbf24" style="background-color:#fbbf24;padding:10px 20px;text-align:center">
-        <p style="margin:0;font-family:${FONT_DATA};font-size:11.5px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#78350f">Test send — not a real daily report</p>
-      </td>
-    </tr>
-  </table>
-  ` : ''}
-
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-    <tr>
-      <td bgcolor="${teal}" style="background-color:${teal};background-image:linear-gradient(135deg,${teal},${deep});padding:34px 36px 28px">
-        <h1 style="color:#fff;margin:0;font-family:${FONT_DISPLAY};font-size:30px;font-weight:700;letter-spacing:-.01em">Daily Sales Report</h1>
-        <p style="color:rgba(255,255,255,.92);margin:10px 0 0;font-family:${FONT_DISPLAY};font-size:16px;font-style:italic;font-weight:600">"${quote}"</p>
-        <p style="color:rgba(255,255,255,.72);margin:12px 0 0;font-size:13px">${repName} &nbsp;·&nbsp; ${dateLabel}</p>
-      </td>
-    </tr>
-  </table>
-
-  ${statusRibbon}
-
-  <div style="padding:26px 36px 0">
-    ${cardRow([
-      statCard('Assigned', totalCount, '#f7faf9', '#e5e7eb', ink),
-      statCard('New Doctors This Week', goal.current, newDoctorCardColor.tint, newDoctorCardColor.border, newDoctorCardColor.color),
-    ])}
+  const body = `
+  <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden">${escapeHtml(preheader)}</div>
+  ${test ? `<div style="background:#fbbf24;padding:10px 20px;text-align:center"><p style="margin:0;font-family:${FONT_DATA};font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#78350f">Test send — not a real daily report</p></div>` : ''}
+  <div style="padding:22px 36px 0">
+    <p style="margin:0;font-family:${FONT_DISPLAY};font-size:22px;line-height:1.3;font-style:italic;font-weight:600;color:${ink}">"${quote}"</p>
   </div>
-
-  ${bookedThisWeekSection}
-
-  <div style="margin:26px 36px 0;padding:20px 22px;background:${BRAND.tealMist};border:1px solid rgba(6,186,190,.2);border-radius:16px">
-    ${sectionLabel('Weekly Goal — New Doctors')}
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-      <td><p style="margin:0;font-family:${FONT_DATA};font-size:24px;font-weight:500;color:${ink}">${goal.current} <span style="font-size:14px;color:${slate}">of ${goal.target} doctors this week</span></p></td>
-      <td style="text-align:right"><p style="margin:0;font-family:${FONT_DATA};font-size:14px;color:${teal}">${goalPct}%</p></td>
+  ${barsBlock}
+  ${coachBox}
+  ${focusBox}
+  ${doctorsSection}
+  <div style="padding:26px 36px 0">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td bgcolor="${teal}" style="background-color:${teal};background-image:linear-gradient(135deg,${teal},${deep});border-radius:12px">
+        <a href="${primaryFrontendUrl()}/clients" target="_blank" style="display:inline-block;padding:14px 28px;color:#ffffff;background-color:${deep};text-decoration:none;font-weight:600;font-size:14.5px;font-family:${FONT_BODY};border-radius:12px">View my doctors</a>
+      </td>
     </tr></table>
-    <div style="margin-top:12px;height:8px;background:#fff;border:1px solid rgba(6,186,190,.25);border-radius:999px;overflow:hidden">
-      <div style="width:${goalPct}%;height:100%;background:${teal}"></div>
-    </div>
-  </div>
+  </div>`
 
-  ${activeDoctorsSection}
-  ${doctors.length === 0 ? `
-  <div style="padding:26px 36px 0">
-    ${sectionLabel('Your Doctors')}
-    <p style="margin:0;font-size:13px;color:${slate}">No doctors assigned yet.</p>
-  </div>` : ''}
-
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:30px 0 0">
-    <tr><td style="padding:0 36px 36px">
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td bgcolor="${teal}" style="background-color:${teal};background-image:linear-gradient(135deg,${teal},${deep});border-radius:12px">
-          <a href="${primaryFrontendUrl()}/clients" style="display:inline-block;padding:12px 26px;color:#fff;text-decoration:none;font-weight:600;font-size:13.5px;font-family:${FONT_BODY}">View My Doctors →</a>
-        </td>
-      </tr></table>
-    </td></tr>
-  </table>
-
-  <div style="background:${BRAND.tealMist};padding:18px 36px;font-size:11.5px;color:${slate};border-top:1px solid ${hairline}">
-    Aim Dental Laboratory CRM &nbsp;·&nbsp; Daily report for ${repName}
-  </div>
-</div>
-</body></html>`
+  return emailShell('Daily Sales Report', `${escapeHtml(repName)} &nbsp;·&nbsp; ${dateLabel}`, body, 'Daily Sales Report')
 }
 
 // Weekly Unassigned Leads Report — sent every Monday to leadership (not
@@ -1062,6 +1146,8 @@ module.exports = {
   noActionLeadEmail,
   repReportEmail,
   salesRepDailyReportEmail,
+  repCoachMessage,
+  PUSH_QUOTES,
   unassignedLeadsReportEmail,
   pickupRequestedEmail,
   pickupDispatchedEmail,
