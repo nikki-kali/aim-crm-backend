@@ -18,8 +18,7 @@ The real Q4 monthly targets (James's and William's actual October/November/Decem
 
 **Backend:** one new endpoint, `GET /api/reports/rep-progress`.
 - Query param `rep_id` (optional). Defaults to `req.user.id`.
-- If the caller's role is scoped (`isScopedRole(req.user.role)` — `staff`/`sales_rep`, see `src/utils/roles.js`) and `rep_id` is supplied and doesn't match `req.user.id`, respond `403`. A scoped caller can only ever read their own data.
-- Otherwise (admin, or scoped caller reading their own `rep_id`), proceed.
+- Access control is a small pure function, `resolveViewableRepId(user, queryRepId)` in `src/services/repProgress.js`: if `user.role` is scoped (`isScopedRole`, `src/utils/roles.js`) and `queryRepId` is supplied and doesn't match `user.id`, it throws an `Error` with `.status = 403`. Otherwise it returns the resolved id (`queryRepId || user.id` for an admin, always `user.id` for a scoped caller). The route wraps this in a try/catch and responds with the thrown status — this repo has no supertest/route-testing infrastructure (confirmed: no such dependency, no existing route-level test file), so pulling the actual access-control decision out into a pure function is what makes it directly unit-testable without one.
 - For the resolved `rep_id`, fetch every `goals` row with `metric IN ('monthly_revenue','new_doctors')` whose `period_start`/`period_end` falls within Q4 2026 (`2026-10-01` through `2026-12-31`), grouped by calendar month.
 - For each existing row, compute progress via the existing `computeProgress` (`src/services/goalProgress.js`) — same function the email bars and Leadership Dashboard already use, so the numbers are guaranteed consistent across every surface that shows them.
 - For each of October/November/December, build a month entry: `{ month: 'October', salesGoal: <computeProgress result or null>, doctorsGoal: <computeProgress result or null> }`. `null` means no `goals` row exists yet for that metric/month — the frontend renders "Target not set yet" for it, never a fabricated $0-of-$0 bar.
@@ -40,7 +39,11 @@ The real Q4 monthly targets (James's and William's actual October/November/Decem
   }
   ```
 
-**Frontend:** one new page, `Frontend/src/pages/ProgressStatus.jsx`, routed at `/progress` in `src/App.jsx` on `ProtectedRoute` (not `AdminRoute` — reps must reach their own). Reads `?rep=<id>` from the URL (same pattern as `Leads.jsx` etc.) and passes it through to the API call when present; omitted for self-view. Added to both `STAFF_NAV` and `ADMIN_NAV` in `Layout.jsx` so it's reachable from the sidebar, not just a link inside the email. The rep's own daily email's existing "View my doctors" button area gains a second link ("View full Q4 status") pointing at `/progress` (self, no `?rep=` needed since the rep is expected to already be logged in when they click it — same assumption the existing CRM deep links already make, no new token/public-access mechanism).
+**Frontend:** one new page, `Frontend/src/pages/ProgressStatus.jsx`, routed at `/progress` in `src/App.jsx` on `ProtectedRoute` (not `AdminRoute` — reps must reach their own).
+
+**Correction to an earlier assumption in this spec:** `?rep=<userId>` is *not* currently read by any page from its own browser URL — it's only a backend query param that `RepDetail.jsx` (`/reps/:id`, admin-only) appends when calling `/api/leads`, `/api/clients`, `/api/cases`, etc. on a *different* page's behalf. No existing page reads `?rep=` from `window.location` itself. This page introduces that specific usage fresh (a plain `useSearchParams` read, from `react-router-dom`, already a dependency — no new library): `ProgressStatus.jsx` reads `?rep=<id>` from its own URL and passes it through to the API call when present; omitted for self-view. `RepDetail.jsx` gains a new "View Q4 Progress" link pointing at `/progress?rep=<id>` (`id` from its own `useParams()`), matching how it already links to other pages' rep-scoped views.
+
+`/progress` (self, no query param) is added to both `STAFF_NAV` and `ADMIN_NAV` in `Layout.jsx` so it's reachable from the sidebar, not just a link inside the email. The rep's own daily email's existing "View my doctors" button area gains a second link ("View full Q4 status") pointing at `/progress` (self, no `?rep=` needed since the rep is expected to already be logged in when they click it — same assumption the existing CRM deep links already make, no new token/public-access mechanism).
 
 ## Suggested steps logic (deterministic, not AI)
 
@@ -76,11 +79,9 @@ The GIF pipeline built for the email (Puppeteer/canvas/gifsicle, `goalBarGifRend
 
 **Backend:**
 - `test/repProgressSuggestions.test.js`: unit tests on `buildSuggestedSteps` covering — both goals null, sales met but doctors not, both met, a month with real gap numbers producing the expected $/day and doctors/week text, zero business days left in the month (no divide-by-zero).
-- `test/routes/repProgress.test.js` (or folded into an existing `reports.js` route test file if one already covers similar admin/scoped access patterns — check for one before creating a new file): access-control test that a `sales_rep` caller gets `403` on another rep's `rep_id` and `200` on their own or no `rep_id`; an admin caller gets `200` on any `rep_id`.
+- `test/repProgress.test.js`: unit tests on `resolveViewableRepId` covering — scoped user with no `queryRepId` returns their own id, scoped user with `queryRepId` equal to their own id returns it, scoped user with a *different* `queryRepId` throws with `.status === 403`, admin with no `queryRepId` returns their own id, admin with any `queryRepId` returns it unchanged.
 
-**Frontend:**
-- A test for `useCountUp` (or equivalent) confirming it reaches the exact target value and respects a mocked `prefers-reduced-motion: reduce` (renders the final value with no intermediate frames).
-- A Playwright pass at phone width (~390px) once built, confirming the three month cards and the "target not set yet" state both render correctly, following this project's established real-browser-verification practice.
+**Frontend:** this repo has no JS unit-test framework installed (confirmed: `package.json` has no `test` script, no vitest/jest/testing-library dependency) — adding one is out of scope for this feature and wasn't part of the approved design. Verification here is a real-browser Playwright pass instead, matching this project's established practice: load `/progress` for a rep with real Q4 goals, confirm the bars/numbers animate to their correct final values and the "target not set yet" state renders correctly for a rep/month with no goal row; then re-check with the browser's reduced-motion emulation on (Playwright's `page.emulateMedia({ reducedMotion: 'reduce' })`), confirming the same final values appear immediately with no animation. Done at phone width (~390px).
 
 ## Review Focus
 
