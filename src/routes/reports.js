@@ -16,6 +16,7 @@ const {
 const { runEvidentReport, sendEvidentReportForApproval } = require('../services/evidentReport')
 const { APPROVER_EMAIL, peekApprovalToken, consumeApprovalToken } = require('../services/reportApproval')
 const { getCompanyTotalRevenue } = require('../services/clientRevenue')
+const { resolveViewableRepId, fetchRepQ4Progress } = require('../services/repProgress')
 
 const router = express.Router()
 
@@ -667,6 +668,18 @@ router.get('/my-summary/csv', auth, async (req, res, next) => {
     res.setHeader('Content-Type', 'text/csv')
     res.setHeader('Content-Disposition', `attachment; filename="my-leads-${safeName}.csv"`)
     res.send(csvLines.join('\n'))
+  } catch (err) { next(err) }
+})
+
+// GET /api/reports/rep-progress?rep_id=... — a rep's own full Q4
+// progress (self by default), or any rep's when the caller is an admin.
+// See services/repProgress.js's resolveViewableRepId for the access rule.
+router.get('/rep-progress', auth, async (req, res, next) => {
+  try {
+    const repId = resolveViewableRepId(req.user, req.query.rep_id)
+    const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+    const data = await fetchRepQ4Progress(repId, todayStr)
+    res.json(data)
   } catch (err) { next(err) }
 })
 
