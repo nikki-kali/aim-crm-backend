@@ -735,6 +735,9 @@ function salesRepDailyReportEmail({ repName, dateLabel, doctors, totalCount, sub
         <a href="${primaryFrontendUrl()}/clients" target="_blank" style="display:inline-block;padding:14px 28px;color:#ffffff;background-color:${deep};text-decoration:none;font-weight:600;font-size:14.5px;font-family:${FONT_BODY};border-radius:12px">View my doctors</a>
       </td>
     </tr></table>
+  </div>
+  <div style="padding:12px 36px 0;text-align:center">
+    <a href="${primaryFrontendUrl()}/progress" target="_blank" style="color:${deep};font-size:13px;font-family:${FONT_BODY};text-decoration:underline">View full Q4 status</a>
   </div>`
 
   return emailShell('Daily Sales Report', `${escapeHtml(repName)} &nbsp;·&nbsp; ${dateLabel}`, body, 'Daily Sales Report')

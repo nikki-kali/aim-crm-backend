@@ -149,6 +149,11 @@ test('has a hidden preview line, a 600px layout, and a tappable button', () => {
   assert.match(html, /padding:14px 28px[^>]*>View my doctors</)
 })
 
+test('links to the full Q4 progress page, next to the doctors CTA', () => {
+  const html = salesRepDailyReportEmail(SAMPLE)
+  assert.match(html, /href="[^"]*\/progress"[^>]*>View full Q4 status</)
+})
+
 test('test send shows the TEST banner', () => {
   const html = salesRepDailyReportEmail({ ...SAMPLE, test: true })
   assert.match(html, /Test send/)
