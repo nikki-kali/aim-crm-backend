@@ -487,6 +487,12 @@ test('extractEviSmartTotals reads all 6 real rows from a real EviSmart Daily Sal
   });
 });
 
+test('extractEviSmartTotals reads YTD Total Sales when its cell has nested <br><span> billed-only markup (real Sept 25 email, format change)', () => {
+  const totals = extractEviSmartTotals(fixture('evismart-daily-sales-report-sep25-nested-ytd.html'));
+  assert.equal(totals.ytdTotalSalesValue, 414191.25);
+  assert.equal(totals.ytdBilledValue, 364592.55);
+});
+
 test('Report #3 shows a notice (no invented baseline) when the EviSmart email has no last-month column', () => {
   const noComparison = fixture('evismart-daily-sales-report.html').replace(/<h3[^>]*>MTD vs Last Month Comparison<\/h3>[\s\S]*?<\/table>/, '');
   const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-23' });

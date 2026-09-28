@@ -216,6 +216,14 @@ function extractRepColumns(headers, totalsRow) {
 //   MTD Billed   | — | <$amount>
 //   YTD Total Sales (incl. unbilled WIP) | — | <$amount>   (= booked YTD)
 //   YTD Billed only (through <date>)     | — | <$amount>
+// A real send (2026-09-25) merged the last two rows into one — label
+// "YTD Total Sales (2026)", amount cell "$<amount><br><span>(billed-only:
+// $<amount>)</span>" — with no separate "YTD Billed only" row at all;
+// extractEviSmartTotals below handles both layouts, the merged row's
+// primary amount via its own dedicated regex (extractEviSmartRow requires
+// a tag-free cell, which the nested <br><span> breaks) and the billed-only
+// sub-figure via the existing ytdBilledValue fallback regex, which already
+// reached into that same nested span.
 // The YTD Billed row's own label carries a dynamic "(through <date>)"
 // suffix, so it's matched by prefix, not full text. Each row is matched
 // directly by its own regex rather than via the generic parseTable()
@@ -346,10 +354,19 @@ function extractEviSmartTotals(html) {
   const dailyBilled = extractEviSmartRow(html, 'Daily Billed');
   const mtdBooked = extractEviSmartRow(html, 'MTD Booked');
   const mtdBilled = extractEviSmartRow(html, 'MTD Billed');
-  const ytdTotalSales = extractEviSmartRow(html, 'YTD Total Sales');
+  // Matched by a dedicated regex, not extractEviSmartRow, because a real
+  // send (2026-09-25) embeds a nested <br><span>(billed-only: $X)</span>
+  // inside this row's amount cell — extractEviSmartRow requires a tag-free
+  // cell and silently returned null for the whole row, which made
+  // ytdTotalSalesValue fall back to 0 and the Leadership Report's YTD
+  // figure sit at a flat, never-updating $1,243,759 (the legacy adjustment
+  // alone — see buildReport.js's companyYtdSalesValueTotal). This regex
+  // captures just the leading $amount and stops naturally at the first
+  // '<', so it reads both the old plain-cell layout and this new one.
+  const ytdTotalSalesMatch = html.match(/YTD Total Sales[^<]*<\/td>\s*<td[^>]*>[^<]*<\/td>\s*<td[^>]*>\s*(\$[\d,]+\.\d{2})/i);
   const ytdBilled = extractEviSmartRow(html, 'YTD Billed only');
 
-  if (!dailyBooked && !mtdBooked && !ytdTotalSales) return null;
+  if (!dailyBooked && !mtdBooked && !ytdTotalSalesMatch) return null;
 
   return {
     dailyBookedCount: dailyBooked ? dailyBooked.count : null,
@@ -358,7 +375,7 @@ function extractEviSmartTotals(html) {
     mtdBookedCount: mtdBooked ? mtdBooked.count : null,
     mtdBookedValue: mtdBooked ? mtdBooked.amount : 0,
     mtdBilledValue: mtdBilled ? mtdBilled.amount : 0,
-    ytdTotalSalesValue: ytdTotalSales ? ytdTotalSales.amount : 0,
+    ytdTotalSalesValue: ytdTotalSalesMatch ? toNum(ytdTotalSalesMatch[1]) : 0,
     ytdBilledValue: ytdBilled
       ? ytdBilled.amount
       : toNum((html.match(/YTD Total Sales[\s\S]{0,300}?billed-only:\s*(\$[\d,]+\.\d{2})/i) || [])[1] || '0'),
