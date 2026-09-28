@@ -63,23 +63,21 @@ function getGmailAuth() {
   return client
 }
 
-// Fetches every Evident Labs email received in roughly the last day and
-// returns them as plain {subject, html} pairs, ready for parseEvident.js.
+// Fetches every Evident Labs email from the last 5 days, each tagged with
+// its own real America/New_York calendar date (see fetchEvidentEmailsInRange
+// below), so the caller filters to the exact business day it needs instead
+// of assuming "whatever came back is today's". Previously queried
+// `newer_than:1d` and returned bare {subject, html} with no date at all —
+// on a Monday run that 1-day window only reaches back to Sunday, and
+// Evident sends nothing over the weekend, so Friday's real emails (the ones
+// the report actually needs) were silently never fetched (found for real,
+// 2026-09-28: the Monday report came back blank even though Friday's source
+// emails were sitting right there in the inbox). Same weekend-gap bug
+// already fixed once for evidentCrmSync.js and already worked around below
+// for fetchEviSmartEmails's own newer_than:5d. Delegates to
+// fetchEvidentEmailsInRange, which already does exactly this correctly.
 async function fetchEvidentEmails() {
-  const auth = getGmailAuth()
-  const gmail = google.gmail({ version: 'v1', auth })
-  const listRes = await gmail.users.messages.list({
-    userId: 'me',
-    q: 'from:support@evidentlabs.com newer_than:1d',
-  })
-  const ids = (listRes.data.messages || []).map((m) => m.id)
-
-  const messages = []
-  for (const id of ids) {
-    const res = await gmail.users.messages.get({ userId: 'me', id, format: 'full' })
-    messages.push(extractSubjectAndHtml(res.data))
-  }
-  return messages
+  return fetchEvidentEmailsInRange('newer_than:5d')
 }
 
 // Fetches the "EviSmart Daily Sales Report" email — the sole real source

@@ -102,9 +102,15 @@ async function runEvidentReport({ requireEviSmart = false } = {}) {
     throw Object.assign(new Error(`[evident-report] a report for ${runDate} was already sent today — refusing to send a duplicate`), { code: 'ALREADY_SENT' })
   }
 
-  console.log('[evident-report] fetching last night\'s Evident emails...')
-  const messages = await fetchEvidentEmails()
-  console.log(`[evident-report] found ${messages.length} Evident email(s)`)
+  console.log('[evident-report] fetching Evident emails...')
+  const allMessages = await fetchEvidentEmails()
+  // Only the messages actually dated for runDate — fetchEvidentEmails now
+  // returns up to 5 days' worth so a Monday run still reaches Friday, so
+  // this filter is what keeps the report from mixing in another day's
+  // numbers (see fetchEvidentEmails and evidentCrmSync.js's identical
+  // m.date === dateStr pattern).
+  const messages = allMessages.filter((m) => m.date === runDate)
+  console.log(`[evident-report] found ${messages.length} Evident email(s) for ${runDate} (${allMessages.length} fetched in the last 5 days)`)
 
   const aggregate = parseAndAggregate(messages, { runDate })
   if (aggregate.missing.length > 0) {
@@ -181,7 +187,7 @@ async function runEvidentReport({ requireEviSmart = false } = {}) {
 async function sendEvidentReportForApproval() {
   const runDate = lastBusinessDayEasternDateString()
   const historyRows = await getHistory()
-  const messages = await fetchEvidentEmails()
+  const messages = (await fetchEvidentEmails()).filter((m) => m.date === runDate)
   const aggregate = parseAndAggregate(messages, { runDate })
   aggregate.eviSmart = await fetchEviSmartTotals(runDate)
   const repGoals = await fetchRepGoalsWithProgress()

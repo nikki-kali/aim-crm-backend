@@ -548,6 +548,12 @@ test('eviSmartSubjectDate reads the business date from a real EviSmart subject',
   assert.equal(eviSmartSubjectDate('EviSmart Daily Sales Report - could not run (not logged in)'), null);
 });
 
+test('eviSmartSubjectDate also reads the "Month D, YYYY" subject format (real send, 2026-09-26)', () => {
+  assert.equal(eviSmartSubjectDate('EviSmart Daily Sales Report - September 25, 2026'), '2026-09-25');
+  assert.equal(eviSmartSubjectDate('EviSmart Daily Sales Report - October 2, 2026'), '2026-10-02');
+  assert.equal(eviSmartSubjectDate('EviSmart Daily Sales Report - September 25 2026'), '2026-09-25');
+});
+
 test('pickEviSmartForDate uses only an email dated for the report day and sent after that day ended (real 22/23 Sep sends)', () => {
   const at = (iso) => new Date(iso).getTime();
   const msgs = [

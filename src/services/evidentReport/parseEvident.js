@@ -298,11 +298,22 @@ function extractEviSmartCustomers(html) {
 const MONTHS = { january: '01', february: '02', march: '03', april: '04', may: '05', june: '06', july: '07', august: '08', september: '09', october: '10', november: '11', december: '12' };
 
 // "EviSmart Daily Sales Report - 23 September 2026" -> "2026-09-23"; null for
-// subjects with no date (e.g. "could not run (not logged in)").
+// subjects with no date (e.g. "could not run (not logged in)"). Also reads
+// the "September 25, 2026" (month name first) form — a real send used this
+// format on 2026-09-26 where every earlier send had used "25 September
+// 2026", and the old day-first-only regex silently failed to match it,
+// dropping that day's real EviSmart data from the report.
 function eviSmartSubjectDate(subject) {
-  const m = String(subject || '').match(/(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/);
-  if (!m || !MONTHS[m[2].toLowerCase()]) return null;
-  return `${m[3]}-${MONTHS[m[2].toLowerCase()]}-${m[1].padStart(2, '0')}`;
+  const s = String(subject || '');
+  const dayFirst = s.match(/(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/);
+  if (dayFirst && MONTHS[dayFirst[2].toLowerCase()]) {
+    return `${dayFirst[3]}-${MONTHS[dayFirst[2].toLowerCase()]}-${dayFirst[1].padStart(2, '0')}`;
+  }
+  const monthFirst = s.match(/([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})/);
+  if (monthFirst && MONTHS[monthFirst[1].toLowerCase()]) {
+    return `${monthFirst[3]}-${MONTHS[monthFirst[1].toLowerCase()]}-${monthFirst[2].padStart(2, '0')}`;
+  }
+  return null;
 }
 
 // Picks the EviSmart email to report from for `runDate`: dated for that day
