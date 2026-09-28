@@ -26,7 +26,7 @@ test('greets the rep by first name and lists their doctors with status pills', (
   assert.match(html, /James Delaney &nbsp;·&nbsp; Tuesday, September 15, 2026/)
   assert.match(html, /Tuesday, September 15, 2026/)
   assert.match(html, /Sent a case this week \(1\)/)
-  assert.match(html, /Doctors and prospects to follow up with/)
+  assert.match(html, /Active doctors not submitted this week/)
   assert.match(html, /Dr\. Brian Gold/)
   assert.match(html, /Dr\. Cecilia U\. Schneuerman/)
   assert.match(html, />Submitted</)
@@ -41,7 +41,7 @@ test('leads with a monthly sales meter: amount, goal, percent, amount to go and 
   assert.match(html, />6%</)
   assert.match(html, /\$28,219\.10 to go[^<]*4 business days left this month/)
   // The meter comes before the doctor list.
-  assert.ok(html.indexOf('Monthly Sales') < html.indexOf('Doctors and prospects to follow up with'))
+  assert.ok(html.indexOf('Monthly Sales') < html.indexOf('Active doctors not submitted this week'))
 })
 
 test('shows a new-doctors meter for the month', () => {
@@ -73,7 +73,7 @@ test('omits a meter when its goal could not be computed (no fabricated $0)', () 
   const html = salesRepDailyReportEmail({ ...SAMPLE, salesGoal: null, doctorsGoal: null })
   assert.ok(!html.includes('Monthly Sales'))
   assert.ok(!html.includes('New Doctors This Month'))
-  assert.match(html, /Doctors and prospects to follow up with/)
+  assert.match(html, /Active doctors not submitted this week/)
 })
 
 test('the old weekly cards and weekly goal bar are gone', () => {
@@ -84,15 +84,19 @@ test('the old weekly cards and weekly goal bar are gone', () => {
   assert.ok(!html.includes('Active Doctors List'))
 })
 
-test('a long roster shows at most 10 doctors to reach out to, with a "showing 10 of N" note and the small pick-3 step', () => {
+test('a long roster caps each section at 10 independently, each with its own "showing N of M" note', () => {
+  // 4 active (not first-case, not dormant) + 26 prospects (first-case pending).
   const many = Array.from({ length: 30 }, (_, i) => ({ doctor_name: 'Dr. Doc ' + String(i).padStart(2, '0'), clinic_name: null, submitted_this_week: false, first_case_pending: i >= 4 }))
   const html = salesRepDailyReportEmail({ ...SAMPLE, doctors: many, totalCount: 30, notSubmittedCount: 30 })
-  assert.equal((html.match(/>Reach out</g) || []).length + (html.match(/>First case</g) || []).length, 10)
-  assert.match(html, /Showing 10 of 30\./)
+  // All 4 active doctors show (under the 10 cap), so no "showing" note for that section.
+  assert.equal((html.match(/>Reach out</g) || []).length, 4)
+  for (const n of ['00', '01', '02', '03']) assert.match(html, new RegExp('Dr\\. Doc ' + n))
+  // 26 prospects capped at 10, with its own note.
+  assert.equal((html.match(/>First case</g) || []).length, 10)
+  assert.match(html, /Prospects \(26\)/)
+  assert.match(html, /Showing 10 of 26\./)
   assert.match(html, /pick 3 doctors from your list and reach out about a case/)
   assert.doesNotMatch(html, /check in with 30 doctors/)
-  // The four active doctors always make the cut, ahead of first-case doctors.
-  for (const n of ['00', '01', '02', '03']) assert.match(html, new RegExp('Dr\\. Doc ' + n))
 })
 
 test('doctors who sent a case are in their own separate panel, above the reach-out panel', () => {
@@ -106,9 +110,9 @@ test('doctors who sent a case are in their own separate panel, above the reach-o
     totalCount: 3, notSubmittedCount: 1,
   })
   assert.match(html, /Sent a case this week \(2\)/)
-  assert.ok(html.indexOf('Sent a case this week') < html.indexOf('Doctors and prospects to follow up with'))
+  assert.ok(html.indexOf('Sent a case this week') < html.indexOf('Active doctors not submitted this week'))
   // Submitted doctors appear only in their own panel.
-  const reachPanel = html.slice(html.indexOf('Doctors and prospects to follow up with'))
+  const reachPanel = html.slice(html.indexOf('Active doctors not submitted this week'))
   assert.ok(!reachPanel.includes('Dr. Sent A'))
   // No submitted doctors: no empty submitted panel.
   const none = salesRepDailyReportEmail({ ...SAMPLE, doctors: [{ doctor_name: 'Dr. Active', clinic_name: null, submitted_this_week: false }], totalCount: 1, notSubmittedCount: 1 })
@@ -213,16 +217,37 @@ test('coach note: nothing to say without goals, and it appears under the bars in
   assert.ok(html.indexOf('Keep going') < html.indexOf('Your 1% today'))
 })
 
-test('reach-out panel lists active doctors before first-case doctors', () => {
+test('doctors are organized into Active, Prospects and Dormant sections, in that order, each with its own heading', () => {
   const html = salesRepDailyReportEmail({
     ...SAMPLE,
     doctors: [
-      { doctor_name: 'Dr. Waiting', clinic_name: null, submitted_this_week: false, first_case_pending: true },
-      { doctor_name: 'Dr. Active', clinic_name: null, submitted_this_week: false, first_case_pending: false },
+      { doctor_name: 'Dr. Waiting', clinic_name: null, submitted_this_week: false, first_case_pending: true, dormant: false },
+      { doctor_name: 'Dr. Active', clinic_name: null, submitted_this_week: false, first_case_pending: false, dormant: false },
+      { doctor_name: 'Dr. Gone Quiet', clinic_name: null, submitted_this_week: false, first_case_pending: false, dormant: true },
     ],
-    totalCount: 2, notSubmittedCount: 2,
+    totalCount: 3, notSubmittedCount: 3,
   })
+  assert.match(html, /Active doctors not submitted this week \(1\) &middot; low priority/)
+  assert.match(html, /Prospects \(1\)/)
+  assert.match(html, /Dormant clients \(1\)/)
+  // Section order: Active, then Prospects, then Dormant.
   assert.ok(html.indexOf('Dr. Active') < html.indexOf('Dr. Waiting'))
-  assert.match(html, />First case</)
+  assert.ok(html.indexOf('Dr. Waiting') < html.indexOf('Dr. Gone Quiet'))
   assert.match(html, />Reach out</)
+  assert.match(html, />First case</)
+  assert.match(html, />Dormant</)
+})
+
+test('a doctor never shows up in more than one section', () => {
+  const html = salesRepDailyReportEmail({
+    ...SAMPLE,
+    doctors: [
+      { doctor_name: 'Dr. Only Dormant', clinic_name: null, submitted_this_week: false, first_case_pending: false, dormant: true },
+    ],
+    totalCount: 1, notSubmittedCount: 1,
+  })
+  assert.ok(!html.includes('Active doctors not submitted this week'))
+  assert.ok(!html.includes('Prospects ('))
+  assert.match(html, /Dormant clients \(1\)/)
+  assert.equal((html.match(/Dr\. Only Dormant/g) || []).length, 1)
 })

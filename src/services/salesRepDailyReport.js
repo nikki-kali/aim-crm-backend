@@ -224,27 +224,46 @@ function mondayOfWeekEastern(dateStr) {
 // `::date` convention already used elsewhere in this codebase for the same
 // kind of check (weeklyRepReport.js's cold-lead query, goals.js's
 // computeProgress).
+// Doctors and prospects split into three sections (user request,
+// 2026-09-29, replacing one combined "reach out" list): a client counts
+// as "dormant" once 30+ days have passed since their most recent case
+// (threshold confirmed by the user) — DORMANT_DAYS below, not a magic
+// number inlined into the query. "Prospect" is now driven directly by
+// last_case_date IS NULL (a real doctor with zero cases ever) rather
+// than the old notes-marker heuristic (`notes ILIKE '%No case sent yet
+// at import%'`), which only caught doctors imported with that exact
+// marker and would have missed a genuine zero-case doctor added any
+// other way. A doctor who submitted this week always has a last_case_date
+// inside the current week, so submitted/dormant/prospect stay mutually
+// exclusive by construction — no separate exclusion logic needed.
+const DORMANT_DAYS = 30
+
 async function computeDailyDoctorStatus(repId, dateStr) {
   const weekStart = mondayOfWeekEastern(dateStr)
   const { rows } = await db.query(
-    `SELECT cl.doctor_name, cl.clinic_name,
-      (cl.notes ILIKE '%No case sent yet at import%'
-        AND NOT EXISTS (SELECT 1 FROM cases c2 WHERE c2.client_name = cl.doctor_name)) AS first_case_pending,
+    `SELECT cl.doctor_name, cl.clinic_name, lc.last_case_date,
+      (lc.last_case_date IS NULL) AS first_case_pending,
+      (lc.last_case_date IS NOT NULL AND lc.last_case_date < $3::date - $4::int) AS dormant,
       EXISTS (
         SELECT 1 FROM cases c
         WHERE c.client_name = cl.doctor_name
           AND c.created_at::date >= $2::date AND c.created_at::date <= $3::date
       ) AS submitted_this_week
      FROM clients cl
+     LEFT JOIN LATERAL (
+       SELECT MAX(c2.created_at::date) AS last_case_date
+       FROM cases c2 WHERE c2.client_name = cl.doctor_name
+     ) lc ON true
      WHERE cl.assigned_to = $1
      ORDER BY cl.doctor_name`,
-    [repId, weekStart, dateStr]
+    [repId, weekStart, dateStr, DORMANT_DAYS]
   )
   const doctors = rows.map(r => ({
     doctor_name: r.doctor_name,
     clinic_name: r.clinic_name,
     submitted_this_week: r.submitted_this_week,
     first_case_pending: r.first_case_pending,
+    dormant: r.dormant,
   }))
   const submittedCount = doctors.filter(d => d.submitted_this_week).length
   return {
@@ -293,10 +312,13 @@ async function buildDailyReportHtml(repName, repEmail, dateStr, status, { test =
   // fetchRepBookedDoctorNamesThisWeek's comment for why the CRM alone can
   // lag behind what actually happened.
   const liveBookedNames = await fetchRepBookedDoctorNamesThisWeek(repEmail, dateStr)
-  const doctors = status.doctors.map((d) => ({
-    ...d,
-    submitted_this_week: d.submitted_this_week || liveBookedNames.has(normalizeDoctorName(d.doctor_name)),
-  }))
+  const doctors = status.doctors.map((d) => {
+    const submitted_this_week = d.submitted_this_week || liveBookedNames.has(normalizeDoctorName(d.doctor_name))
+    // A live Evident booking this week means they're not actually
+    // dormant anymore even though the CRM's own case row hasn't landed
+    // yet — same reasoning as the submitted_this_week override above.
+    return { ...d, submitted_this_week, dormant: d.dormant && !submitted_this_week }
+  })
   const submittedCount = doctors.filter((d) => d.submitted_this_week).length
   const enrichedStatus = { ...status, doctors, submittedCount, notSubmittedCount: doctors.length - submittedCount }
 

@@ -604,28 +604,45 @@ function salesRepDailyReportEmail({ repName, dateLabel, doctors, totalCount, sub
   // "Reach out" (soft amber) instead of a red "Not Submitted": with dozens of
   // doctors on a list, a wall of red reads as blame, while an amber
   // "Reach out" says what to do next.
-  const statusPill = (submittedToday, firstCasePending) => submittedToday
+  const statusPill = (submittedToday, firstCasePending, dormant) => submittedToday
     ? `<span style="display:inline-block;padding:4px 11px;border-radius:999px;background-color:#ecfdf5;border:1px solid #a7f3d0;font-family:${FONT_DATA};font-size:11px;font-weight:500;color:${success};text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">Submitted</span>`
     : firstCasePending
       ? `<span style="display:inline-block;padding:4px 11px;border-radius:999px;background-color:#eaf3f7;border:1px solid #a9cfe3;font-family:${FONT_DATA};font-size:11px;font-weight:500;color:${deep};text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">First case</span>`
-      : `<span style="display:inline-block;padding:4px 11px;border-radius:999px;background-color:#fefaf1;border:1px solid #fde68a;font-family:${FONT_DATA};font-size:11px;font-weight:500;color:#92400e;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">Reach out</span>`
+      : dormant
+        ? `<span style="display:inline-block;padding:4px 11px;border-radius:999px;background-color:#f3f1ef;border:1px solid #d9d3cc;font-family:${FONT_DATA};font-size:11px;font-weight:500;color:#6b5f52;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">Dormant</span>`
+        : `<span style="display:inline-block;padding:4px 11px;border-radius:999px;background-color:#fefaf1;border:1px solid #fde68a;font-family:${FONT_DATA};font-size:11px;font-weight:500;color:#92400e;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">Reach out</span>`
 
-  // Two containers (user request, 2026-09-26): doctors who sent a case this
-  // week get their own panel, and one combined panel shows at most 10
-  // doctors to reach out to. Doctors the rep already works with come first,
-  // then those waiting on a first case, rotated by day of the month so the
-  // rep sees different first-case doctors across the week instead of the
-  // same alphabetical ten every morning.
+  // Four sections (user request, 2026-09-29, replacing one combined
+  // "reach out" list that mixed active clients, prospects and dormant
+  // clients together): doctors who sent a case this week, then Active
+  // doctors not submitted this week (low priority — a client with recent
+  // history, just not this particular week), Prospects (never submitted
+  // a first case), and Dormant clients (no case in DORMANT_DAYS+ —
+  // salesRepDailyReport.js's computeDailyDoctorStatus). Each section is
+  // capped independently so one large bucket (usually Prospects) can't
+  // crowd the others out of the email. Only Prospects rotates by day of
+  // the month, carried over from the original single-list design's
+  // reasoning: it's typically the largest bucket, so the rep sees a
+  // different slice across the week instead of the same alphabetical ten
+  // every morning; Active and Dormant are usually small enough that a
+  // stable alphabetical order is more useful (easy to scan day to day).
   const byName = (a, b) => String(a.doctor_name).localeCompare(String(b.doctor_name))
   const submitted = doctors.filter((d) => d.submitted_this_week).sort(byName)
-  const active = doctors.filter((d) => !d.submitted_this_week && !d.first_case_pending).sort(byName)
-  const firstCase = doctors.filter((d) => !d.submitted_this_week && d.first_case_pending).sort(byName)
-  const MAX_REACH_OUT = 10
-  const rotated = firstCase.length > 0
-    ? [...firstCase.slice((new Date().getDate() * 5) % firstCase.length), ...firstCase.slice(0, (new Date().getDate() * 5) % firstCase.length)]
-    : []
-  const reachOutAll = [...active, ...rotated]
-  const reachOut = reachOutAll.slice(0, MAX_REACH_OUT)
+  const notSubmitted = doctors.filter((d) => !d.submitted_this_week)
+  const prospects = notSubmitted.filter((d) => d.first_case_pending).sort(byName)
+  const dormantList = notSubmitted.filter((d) => !d.first_case_pending && d.dormant).sort(byName)
+  const active = notSubmitted.filter((d) => !d.first_case_pending && !d.dormant).sort(byName)
+
+  const MAX_PER_SECTION = 10
+  const capSection = (list, { rotateDaily = false } = {}) => {
+    if (list.length === 0) return { shown: [], total: 0 }
+    const offset = rotateDaily ? (new Date().getDate() * 5) % list.length : 0
+    const ordered = offset > 0 ? [...list.slice(offset), ...list.slice(0, offset)] : list
+    return { shown: ordered.slice(0, MAX_PER_SECTION), total: list.length }
+  }
+  const activeSection = capSection(active)
+  const prospectsSection = capSection(prospects, { rotateDaily: true })
+  const dormantSection = capSection(dormantList)
 
   const doctorRow = (d, i) => `
     <tr>
@@ -635,7 +652,7 @@ function salesRepDailyReportEmail({ repName, dateLabel, doctors, totalCount, sub
             <p style="margin:0;font-size:14.5px;font-weight:600;color:${ink}">${escapeHtml(d.doctor_name)}</p>
             ${d.clinic_name ? `<p style="margin:2px 0 0;font-size:13px;color:${slate}">${escapeHtml(d.clinic_name)}</p>` : ''}
           </td>
-          <td width="1%" valign="middle" align="right" style="padding-left:12px">${statusPill(d.submitted_this_week, d.first_case_pending)}</td>
+          <td width="1%" valign="middle" align="right" style="padding-left:12px">${statusPill(d.submitted_this_week, d.first_case_pending, d.dormant)}</td>
         </tr></table>
       </td>
     </tr>`
@@ -649,18 +666,22 @@ function salesRepDailyReportEmail({ repName, dateLabel, doctors, totalCount, sub
       </div>
     </div>`
 
-  const moreCount = reachOutAll.length - reachOut.length
+  const sectionFooter = ({ shown, total }) => shown.length < total
+    ? `<p style="margin:12px 0 0;font-size:13px;line-height:1.5;color:${slate}">Showing ${shown.length} of ${total}. You can see the rest of your list in the CRM.</p>`
+    : ''
   const submittedPanel = submitted.length > 0
     ? doctorPanel(`Sent a case this week (${submitted.length})`, submitted)
     : ''
-  const reachOutPanel = reachOut.length > 0
-    ? doctorPanel(
-        `Doctors and prospects to follow up with`,
-        reachOut,
-        moreCount > 0 ? `<p style="margin:12px 0 0;font-size:13px;line-height:1.5;color:${slate}">Showing ${reachOut.length} of ${reachOutAll.length}. You can see the rest of your list in the CRM.</p>` : ''
-      )
+  const activePanel = activeSection.total > 0
+    ? doctorPanel(`Active doctors not submitted this week (${activeSection.total}) &middot; low priority`, activeSection.shown, sectionFooter(activeSection))
     : ''
-  const doctorsSection = doctors.length > 0 ? `${submittedPanel}${reachOutPanel}` : `
+  const prospectsPanel = prospectsSection.total > 0
+    ? doctorPanel(`Prospects (${prospectsSection.total})`, prospectsSection.shown, sectionFooter(prospectsSection))
+    : ''
+  const dormantPanel = dormantSection.total > 0
+    ? doctorPanel(`Dormant clients (${dormantSection.total})`, dormantSection.shown, sectionFooter(dormantSection))
+    : ''
+  const doctorsSection = doctors.length > 0 ? `${submittedPanel}${activePanel}${prospectsPanel}${dormantPanel}` : `
     <div style="padding:22px 36px 0">
       <div style="${glass};border-radius:16px;padding:18px 20px">
         ${sectionLabel('Your doctors')}
