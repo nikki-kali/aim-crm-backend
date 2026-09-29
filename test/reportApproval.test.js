@@ -57,5 +57,5 @@ test('injectApprovalBanner adds the Approve & Send button to the real Sales Rep 
   });
   const bannered = injectApprovalBanner(html, { reportLabel: "James Delaney's Daily Sales Report", approveUrl: 'https://example.com/approve?token=abc' });
   assert.match(bannered, /Approve &amp; Send/);
-  assert.ok(bannered.indexOf('Approve &amp; Send') < bannered.indexOf('>Hi James!<'));
+  assert.ok(bannered.indexOf('Approve &amp; Send') < bannered.indexOf('James Delaney &nbsp;'));
 });

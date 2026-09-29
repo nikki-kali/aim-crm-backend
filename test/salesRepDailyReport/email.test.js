@@ -22,8 +22,9 @@ const SAMPLE = {
 
 test('greets the rep by first name and lists their doctors with status pills', () => {
   const html = salesRepDailyReportEmail(SAMPLE)
-  assert.match(html, />Hi James!</)
-  assert.match(html, /here is your Daily Sales Report for Tuesday, September 15, 2026/)
+  assert.match(html, /Daily Sales Report/)
+  assert.match(html, /James Delaney &nbsp;·&nbsp; Tuesday, September 15, 2026/)
+  assert.match(html, /Tuesday, September 15, 2026/)
   assert.match(html, /Sent a case this week \(1\)/)
   assert.match(html, /Active doctors not submitted this week/)
   assert.match(html, /Dr\. Brian Gold/)
@@ -31,19 +32,6 @@ test('greets the rep by first name and lists their doctors with status pills', (
   assert.match(html, />Submitted</)
   assert.match(html, />Reach out</)
   assert.doesNotMatch(html, />Not Submitted</)
-})
-
-test('the old "Rep · Date · AIM Dental Laboratory" subtitle line under the header is gone', () => {
-  const html = salesRepDailyReportEmail(SAMPLE)
-  assert.doesNotMatch(html, /James Delaney &nbsp;·&nbsp; Tuesday, September 15, 2026/)
-})
-
-test('the greeting is a short bold "Hi <Name>!" with the date/report line as a lighter subheader underneath, no brand tag', () => {
-  const html = salesRepDailyReportEmail(SAMPLE)
-  const hi = html.indexOf('>Hi James!<')
-  const sub = html.indexOf('here is your Daily Sales Report for Tuesday, September 15, 2026')
-  assert.ok(hi > -1 && sub > -1 && hi < sub, 'greeting should come before the subheader')
-  assert.doesNotMatch(html, /here is your Daily Sales Report for Tuesday, September 15, 2026 &nbsp;·&nbsp; AIM Dental Laboratory/)
 })
 
 test('the "Active doctors" heading no longer says "low priority"', () => {

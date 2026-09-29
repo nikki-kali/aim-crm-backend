@@ -165,7 +165,7 @@ const goalBar = (goal) => {
 // and by buildCombinedLeadershipEmail's single merged send. `title` is
 // the header's own line; `body` is the report's (or combined reports')
 // own section markup.
-function emailShell(title, dateLabel, body, footerLabel = 'Daily Leadership Dashboard', { showBrandTag = true } = {}) {
+function emailShell(title, dateLabel, body, footerLabel = 'Daily Leadership Dashboard') {
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -181,7 +181,7 @@ function emailShell(title, dateLabel, body, footerLabel = 'Daily Leadership Dash
     <tr>
       <td bgcolor="${BRAND.teal}" style="background-color:${BRAND.teal};background-image:linear-gradient(135deg,${BRAND.teal},${BRAND.deep});padding:34px 36px 28px">
         <h1 style="color:#fff;margin:0;font-family:${FONT_DISPLAY};font-size:30px;font-weight:700;letter-spacing:-.01em">${title}</h1>
-        ${dateLabel ? `<p style="color:rgba(255,255,255,.72);margin:12px 0 0;font-size:13px">${dateLabel}${showBrandTag ? ' &nbsp;·&nbsp; AIM Dental Laboratory' : ''}</p>` : ''}
+        ${dateLabel ? `<p style="color:rgba(255,255,255,.72);margin:12px 0 0;font-size:13px">${dateLabel} &nbsp;·&nbsp; AIM Dental Laboratory</p>` : ''}
       </td>
     </tr>
   </table>
