@@ -53,9 +53,9 @@ test('the daily motivation quote appears after "Keep going" and before "Your 1% 
   assert.ok(quote < yourOnePercent, 'quote should come before Your 1% today')
 })
 
-test('"View full Q4 status" is a real button, not a plain text link', () => {
+test('the "View full Q4 status" CTA is removed for now', () => {
   const html = salesRepDailyReportEmail(SAMPLE)
-  assert.match(html, /<td[^>]*bgcolor="[^"]*"[^>]*>\s*<a href="[^"]*\/progress"[^>]*>View full Q4 status<\/a>\s*<\/td>/)
+  assert.doesNotMatch(html, /View full Q4 status/)
 })
 
 test('leads with a monthly sales meter: amount, goal, percent, amount to go and business days left', () => {
@@ -171,11 +171,6 @@ test('has a hidden preview line, a 600px layout, and a tappable button', () => {
   assert.match(html, /display:none[^>]*>James, you&#39;re 6% of the way to your monthly sales goal/)
   assert.match(html, /max-width:600px/)
   assert.match(html, /padding:14px 28px[^>]*>View my doctors</)
-})
-
-test('links to the full Q4 progress page, next to the doctors CTA', () => {
-  const html = salesRepDailyReportEmail(SAMPLE)
-  assert.match(html, /href="[^"]*\/progress"[^>]*>View full Q4 status</)
 })
 
 test('test send shows the TEST banner', () => {
