@@ -755,7 +755,7 @@ function salesRepDailyReportEmail({ repName, dateLabel, doctors, totalCount, sub
     </tr></table>
   </div>`
 
-  return emailShell(`Hi ${escapeHtml(firstName)}, here is your Daily Sales Report for ${escapeHtml(dateLabel)}`, '', body, 'Daily Sales Report')
+  return emailShell(`Hi ${escapeHtml(firstName)}!`, `here is your Daily Sales Report for ${escapeHtml(dateLabel)}`, body, 'Daily Sales Report', { showBrandTag: false })
 }
 
 // Weekly Unassigned Leads Report — sent every Monday to leadership (not
