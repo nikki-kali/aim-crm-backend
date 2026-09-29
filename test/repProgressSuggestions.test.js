@@ -51,7 +51,10 @@ test('buildSuggestedSteps: zero business days left in the month never divides by
   const steps = buildSuggestedSteps(months, '2026-12-31')
   assert.equal(steps.length, 2)
   assert.doesNotMatch(steps.join(' '), /Infinity|NaN/)
-  assert.match(steps[1], /About \d+ new doctors? a week/)
+  // With zero business days left, the doctors line must match the sales
+  // line's "no time left" framing, not a weekly rate that implies there's
+  // still a week to work with - a real contradiction the review caught.
+  assert.match(steps[1], /December new-doctors goal: 4 short with no business days left\./)
 })
 
 test('buildSuggestedSteps: outside any Q4 month returns no steps', () => {

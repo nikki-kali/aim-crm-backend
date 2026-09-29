@@ -40,10 +40,15 @@ function buildSuggestedSteps(months, todayStr) {
     const remaining = Number(doctorsGoal.target) - Number(doctorsGoal.current_value)
     if (remaining <= 0) {
       steps.push(`${month} new-doctors goal reached. Great work.`)
-    } else {
+    } else if (daysLeft > 0) {
       const weeksLeft = Math.max(1, Math.ceil(daysLeft / 5))
       const perWeek = Math.ceil(remaining / weeksLeft)
       steps.push(`About ${perWeek} new doctor${perWeek === 1 ? '' : 's'} a week gets you to your ${month} goal.`)
+    } else {
+      // Same "no time left" framing as the sales branch above - a
+      // weekly-rate suggestion here would silently contradict that line
+      // (review finding, 2026-09-29).
+      steps.push(`${month} new-doctors goal: ${remaining} short with no business days left.`)
     }
   }
 
