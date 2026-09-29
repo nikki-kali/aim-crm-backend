@@ -1308,6 +1308,7 @@ module.exports = {
   noActionLeadEmail,
   repReportEmail,
   salesRepDailyReportEmail,
+  salesRepDailyReportEmailRedesigned,
   repCoachMessage,
   PUSH_QUOTES,
   unassignedLeadsReportEmail,
