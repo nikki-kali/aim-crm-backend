@@ -673,7 +673,7 @@ function salesRepDailyReportEmail({ repName, dateLabel, doctors, totalCount, sub
     ? doctorPanel(`Sent a case this week (${submitted.length})`, submitted)
     : ''
   const activePanel = activeSection.total > 0
-    ? doctorPanel(`Active doctors not submitted this week (${activeSection.total}) &middot; low priority`, activeSection.shown, sectionFooter(activeSection))
+    ? doctorPanel(`Active doctors not submitted this week (${activeSection.total})`, activeSection.shown, sectionFooter(activeSection))
     : ''
   const prospectsPanel = prospectsSection.total > 0
     ? doctorPanel(`Prospects (${prospectsSection.total})`, prospectsSection.shown, sectionFooter(prospectsSection))
@@ -710,23 +710,34 @@ function salesRepDailyReportEmail({ repName, dateLabel, doctors, totalCount, sub
   const coachBox = coachText ? `
     <div style="padding:22px 36px 0">
       <div style="${glass};border-radius:16px;padding:18px 20px">
-        ${sectionLabel('Keep going')}
+        <p style="margin:0 0 10px;font-family:${FONT_DISPLAY};font-size:20px;font-weight:700;color:${ink}">Keep going</p>
         <p style="margin:0;font-size:15.5px;line-height:1.6;color:${ink}">${escapeHtml(coachText)}</p>
       </div>
     </div>` : ''
+
+  const quoteBox = `
+  <div style="padding:22px 36px 0">
+    <p style="margin:0;font-family:${FONT_DISPLAY};font-size:22px;line-height:1.3;font-style:italic;font-weight:600;color:${ink}">"${quote}"</p>
+  </div>`
 
   const preheader = salesGoal
     ? `${firstName}, you're ${salesGoal.progress_pct || 0}% of the way to your monthly sales goal. Here's your day.`
     : `${firstName}, here's your Daily Sales Report.`
 
+  // Order (user request, 2026-09-29): greeting (header, below) -> progress
+  // bars -> Keep going -> daily motivation quote -> Your 1% today ->
+  // doctor sections (submitted -> active -> prospects -> dormant, already
+  // doctorsSection's own internal order). True one-by-one fade-in isn't
+  // reliable inside an email (no JS, inconsistent/no CSS animation
+  // support in most clients, same reasoning as the goal-bar GIF
+  // elsewhere) - the /progress page gets the real animated version of
+  // this instead; this email keeps this same section order but static.
   const body = `
   <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden">${escapeHtml(preheader)}</div>
   ${test ? `<div style="background:#fbbf24;padding:10px 20px;text-align:center"><p style="margin:0;font-family:${FONT_DATA};font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#78350f">Test send — not a real daily report</p></div>` : ''}
-  <div style="padding:22px 36px 0">
-    <p style="margin:0;font-family:${FONT_DISPLAY};font-size:22px;line-height:1.3;font-style:italic;font-weight:600;color:${ink}">"${quote}"</p>
-  </div>
   ${barsBlock}
   ${coachBox}
+  ${quoteBox}
   ${focusBox}
   ${doctorsSection}
   <div style="padding:26px 36px 0">
@@ -736,11 +747,15 @@ function salesRepDailyReportEmail({ repName, dateLabel, doctors, totalCount, sub
       </td>
     </tr></table>
   </div>
-  <div style="padding:12px 36px 0;text-align:center">
-    <a href="${primaryFrontendUrl()}/progress" target="_blank" style="color:${deep};font-size:13px;font-family:${FONT_BODY};text-decoration:underline">View full Q4 status</a>
+  <div style="padding:12px 36px 0">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td bgcolor="#ffffff" style="background-color:#ffffff;border:1px solid ${teal};border-radius:12px">
+        <a href="${primaryFrontendUrl()}/progress" target="_blank" style="display:inline-block;padding:14px 28px;color:${deep};text-decoration:none;font-weight:600;font-size:14.5px;font-family:${FONT_BODY};border-radius:12px">View full Q4 status</a>
+      </td>
+    </tr></table>
   </div>`
 
-  return emailShell('Daily Sales Report', `${escapeHtml(repName)} &nbsp;·&nbsp; ${dateLabel}`, body, 'Daily Sales Report')
+  return emailShell(`Hi ${escapeHtml(firstName)}, here is your Daily Sales Report for ${escapeHtml(dateLabel)}`, '', body, 'Daily Sales Report')
 }
 
 // Weekly Unassigned Leads Report — sent every Monday to leadership (not

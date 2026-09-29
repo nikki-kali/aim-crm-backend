@@ -22,9 +22,7 @@ const SAMPLE = {
 
 test('greets the rep by first name and lists their doctors with status pills', () => {
   const html = salesRepDailyReportEmail(SAMPLE)
-  assert.match(html, /Daily Sales Report/)
-  assert.match(html, /James Delaney &nbsp;·&nbsp; Tuesday, September 15, 2026/)
-  assert.match(html, /Tuesday, September 15, 2026/)
+  assert.match(html, /Hi James, here is your Daily Sales Report for Tuesday, September 15, 2026/)
   assert.match(html, /Sent a case this week \(1\)/)
   assert.match(html, /Active doctors not submitted this week/)
   assert.match(html, /Dr\. Brian Gold/)
@@ -32,6 +30,35 @@ test('greets the rep by first name and lists their doctors with status pills', (
   assert.match(html, />Submitted</)
   assert.match(html, />Reach out</)
   assert.doesNotMatch(html, />Not Submitted</)
+})
+
+test('the old "Rep · Date · AIM Dental Laboratory" subtitle line under the header is gone', () => {
+  const html = salesRepDailyReportEmail(SAMPLE)
+  assert.doesNotMatch(html, /James Delaney &nbsp;·&nbsp; Tuesday, September 15, 2026/)
+})
+
+test('the "Active doctors" heading no longer says "low priority"', () => {
+  const html = salesRepDailyReportEmail(SAMPLE)
+  assert.doesNotMatch(html, /low priority/)
+})
+
+test('"Keep going" renders as a larger, more prominent heading than the small uppercase section labels', () => {
+  const html = salesRepDailyReportEmail(SAMPLE)
+  assert.match(html, /font-size:20px;font-weight:700[^>]*>Keep going</)
+})
+
+test('the daily motivation quote appears after "Keep going" and before "Your 1% today"', () => {
+  const html = salesRepDailyReportEmail(SAMPLE)
+  const keepGoing = html.indexOf('Keep going')
+  const quote = html.indexOf('font-style:italic') // unique to the quote block's own style
+  const yourOnePercent = html.indexOf('Your 1% today')
+  assert.ok(keepGoing < quote, 'quote should come after Keep going')
+  assert.ok(quote < yourOnePercent, 'quote should come before Your 1% today')
+})
+
+test('"View full Q4 status" is a real button, not a plain text link', () => {
+  const html = salesRepDailyReportEmail(SAMPLE)
+  assert.match(html, /<td[^>]*bgcolor="[^"]*"[^>]*>\s*<a href="[^"]*\/progress"[^>]*>View full Q4 status<\/a>\s*<\/td>/)
 })
 
 test('leads with a monthly sales meter: amount, goal, percent, amount to go and business days left', () => {
@@ -232,7 +259,7 @@ test('doctors are organized into Active, Prospects and Dormant sections, in that
     ],
     totalCount: 3, notSubmittedCount: 3,
   })
-  assert.match(html, /Active doctors not submitted this week \(1\) &middot; low priority/)
+  assert.match(html, /Active doctors not submitted this week \(1\)/)
   assert.match(html, /Prospects \(1\)/)
   assert.match(html, /Dormant clients \(1\)/)
   // Section order: Active, then Prospects, then Dormant.
