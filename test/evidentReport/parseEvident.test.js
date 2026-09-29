@@ -560,6 +560,25 @@ test('eviSmartSubjectDate also reads the "Month D, YYYY" subject format (real se
   assert.equal(eviSmartSubjectDate('EviSmart Daily Sales Report - September 25 2026'), '2026-09-25');
 });
 
+test('eviSmartSubjectDate reads an abbreviated month with a "FINAL SUMMARY:" prefix (real send, 2026-09-28)', () => {
+  assert.equal(eviSmartSubjectDate('FINAL SUMMARY: EviSmart Daily Sales Report - Sep 28, 2026'), '2026-09-28');
+  assert.equal(eviSmartSubjectDate('EviSmart Daily Sales Report - Oct 2, 2026'), '2026-10-02');
+  assert.equal(eviSmartSubjectDate('EviSmart Daily Sales Report - 5 Jan 2027'), '2027-01-05');
+});
+
+test('extractEviSmartTotals reads the real "FINAL SUMMARY" consolidated layout (bold label/value cells, real send 2026-09-28)', () => {
+  const html = fixture('evismart-daily-sales-report-sep28-final-summary.html');
+  const totals = extractEviSmartTotals(html);
+  assert.equal(totals.dailyBookedValue, 5332.98);
+  assert.equal(totals.dailyBilledValue, 1518.16);
+  assert.equal(totals.mtdBookedValue, 152932.06);
+  // The real bug: MTD Billed's label/value cells are wrapped in <b>, and
+  // the label now carries "(Sep 2026, company total, Report #40)" after
+  // it - both broke the old bold-free, exact-label regex.
+  assert.equal(totals.mtdBilledValue, 154783.41);
+  assert.equal(totals.ytdTotalSalesValue, 419750.73);
+});
+
 test('pickEviSmartForDate uses only an email dated for the report day and sent after that day ended (real 22/23 Sep sends)', () => {
   const at = (iso) => new Date(iso).getTime();
   const msgs = [

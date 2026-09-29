@@ -234,15 +234,22 @@ function extractRepColumns(headers, totalsRow) {
 // send (seen for real 2026-09-19/20) has no Totals table — so a missing
 // real pull is never silently rendered as a fabricated $0 day.
 function extractEviSmartRow(html, labelPrefix) {
+  // (?:<b>)?...(?:<\/b>)? around the label and value text tolerates the
+  // "FINAL SUMMARY" layout (real send, 2026-09-28), which bolds both the
+  // label ("<b>MTD Billed (Sep 2026, company total, Report #40)</b>")
+  // and the value ("<b>$154,783.41</b>") - the old plain-text assumption
+  // (no tags between the cell's own <td> and </td>) broke on both.
   const re = new RegExp(
-    `<td[^>]*>\\s*${labelPrefix}[^<]*</td>\\s*<td[^>]*>\\s*([^<]*?)\\s*</td>\\s*<td[^>]*>\\s*([^<]*?)\\s*</td>`,
+    `<td[^>]*>\\s*(?:<b>)?\\s*${labelPrefix}[^<]*(?:</b>)?\\s*</td>\\s*` +
+    `<td[^>]*>\\s*(?:<b>)?\\s*([^<]*?)\\s*(?:</b>)?\\s*</td>\\s*` +
+    `<td[^>]*>\\s*(?:<b>)?\\s*([^<]*?)\\s*(?:</b>)?\\s*</td>`,
     'i'
   );
   const m = html.match(re);
   if (!m) return null;
   const countRaw = m[1].trim();
   return {
-    count: countRaw === '' || countRaw === '—' ? null : toNum(countRaw),
+    count: countRaw === '' || countRaw === '—' || countRaw === '-' ? null : toNum(countRaw),
     amount: toNum(m[2]),
   };
 }
@@ -303,7 +310,14 @@ function extractEviSmartCustomers(html) {
   return rows.filter((r) => !/^Total\b/i.test(r.name));
 }
 
-const MONTHS = { january: '01', february: '02', march: '03', april: '04', may: '05', june: '06', july: '07', august: '08', september: '09', october: '10', november: '11', december: '12' };
+const MONTHS = {
+  january: '01', february: '02', march: '03', april: '04', may: '05', june: '06',
+  july: '07', august: '08', september: '09', october: '10', november: '11', december: '12',
+  // Abbreviated forms - a real send (2026-09-28, subject prefixed
+  // "FINAL SUMMARY:") used "Sep 28, 2026" instead of a full month name.
+  jan: '01', feb: '02', mar: '03', apr: '04', jun: '06', jul: '07',
+  aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+};
 
 // "EviSmart Daily Sales Report - 23 September 2026" -> "2026-09-23"; null for
 // subjects with no date (e.g. "could not run (not logged in)"). Also reads
