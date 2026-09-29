@@ -300,11 +300,14 @@ async function buildDailyReportHtml(repName, repEmail, dateStr, status, { test =
   const doctorsGoal = await computeMonthlyDoctorsGoal(repEmail, dateStr)
   const daysLeft = businessDaysLeftInMonth(dateStr)
 
-  // Animated bars (user request, 2026-09-28) — best-effort: renderGoalBarsGif
-  // never throws, so a Chrome/encoding/upload failure just means barsGifUrl
-  // stays null and salesRepDailyReportEmail falls back to its existing
-  // static bars, same report either way, never a blocked or broken send.
-  const barsGifUrl = await renderGoalBarsGif({ salesGoal, doctorsGoal, casesGoal: null, repEmail, dateStr })
+  // Animated bars (user request, 2026-09-28) temporarily disabled (user
+  // request, 2026-09-29: "send the old daily sales rep report... the one
+  // without the animation") — skip the GIF render entirely rather than
+  // just hiding it client-side, so the static bars below are what both
+  // the approval preview AND the real send-on-approve show, consistently.
+  // Revert this one line (call renderGoalBarsGif({...}) again) to turn
+  // the animation back on.
+  const barsGifUrl = null
 
   // Enrich the CRM-sourced doctor list with live Evident data: a doctor
   // counts as submitted this week if EITHER the CRM has a case dated this
