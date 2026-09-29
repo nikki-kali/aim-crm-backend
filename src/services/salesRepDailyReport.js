@@ -325,7 +325,7 @@ async function buildDailyReportHtml(repName, repEmail, dateStr, status, { test =
   const submittedCount = doctors.filter((d) => d.submitted_this_week).length
   const enrichedStatus = { ...status, doctors, submittedCount, notSubmittedCount: doctors.length - submittedCount }
 
-  const html = salesRepDailyReportEmail({ repName, dateLabel, ...enrichedStatus, test, salesGoal, doctorsGoal, daysLeft, barsGifUrl })
+  const html = salesRepDailyReportEmail({ repName, dateLabel, dateStr, ...enrichedStatus, test, salesGoal, doctorsGoal, daysLeft, barsGifUrl })
   return { html, dateLabel }
 }
 

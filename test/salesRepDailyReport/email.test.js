@@ -20,6 +20,39 @@ const SAMPLE = {
   daysLeft: 4,
 }
 
+test('a report for a September date uses the classic (original, Sep 16) layout, no coaching note or reach-out sections', () => {
+  const html = salesRepDailyReportEmail({ ...SAMPLE, dateStr: '2026-09-28' })
+  assert.match(html, /Doctors Assigned/)
+  assert.match(html, /Submitted This Week/)
+  assert.match(html, /Monthly Goal — Sales/)
+  assert.match(html, /Monthly Goal — New Doctors/)
+  assert.match(html, /&#9650; Submitted</)
+  assert.match(html, /&#9660; Not submitted</)
+  assert.doesNotMatch(html, /Keep going/)
+  assert.doesNotMatch(html, /Your 1% today/)
+  assert.doesNotMatch(html, /Active doctors not submitted this week/)
+  assert.doesNotMatch(html, /Prospects \(/)
+  assert.doesNotMatch(html, /View my doctors/)
+})
+
+test('a report for an October date (or no dateStr at all) uses the current redesigned layout', () => {
+  const oct = salesRepDailyReportEmail({ ...SAMPLE, dateStr: '2026-10-01' })
+  assert.match(oct, /Keep going/)
+  assert.match(oct, /Active doctors not submitted this week/)
+  const noDateStr = salesRepDailyReportEmail(SAMPLE)
+  assert.match(noDateStr, /Keep going/)
+})
+
+test('the classic layout still HTML-escapes doctor and rep names', () => {
+  const html = salesRepDailyReportEmail({
+    ...SAMPLE, dateStr: '2026-09-28', repName: '<b>Evil</b> Rep',
+    doctors: [{ doctor_name: '<script>alert(1)</script>', clinic_name: 'A & B <i>Dental</i>', submitted_this_week: false }],
+  })
+  assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/)
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/)
+  assert.doesNotMatch(html, /<b>Evil<\/b>/)
+})
+
 test('greets the rep by first name and lists their doctors with status pills', () => {
   const html = salesRepDailyReportEmail(SAMPLE)
   assert.match(html, /Daily Sales Report/)

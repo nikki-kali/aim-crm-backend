@@ -521,7 +521,137 @@ function repCoachMessage({ firstName, salesGoal, doctorsGoal, daysLeft = 0, dayO
   return `Everyone's bars start at zero, ${name}. Your first win of the month is the hardest and the most powerful, because it gets you on the board. Today is a great day to make it happen.`
 }
 
-function salesRepDailyReportEmail({ repName, dateLabel, doctors, totalCount, submittedCount, notSubmittedCount, test, salesGoal, doctorsGoal, daysLeft, barsGifUrl }) {
+// Temporary: send the very first Daily Sales Report design (added
+// 2026-09-16, commit eee71ec) through the end of September, per explicit
+// user request 2026-09-29 — "we just need to send it to the in that
+// format but we will change it to the new one we created starting
+// October." dateStr (the report's own business date, not wall-clock
+// "now") decides which version renders, so a report for a September date
+// always looks classic even if actually sent in October, and vice
+// versa. Delete this dispatcher (and salesRepDailyReportEmailClassic)
+// once October reports are the only ones that matter.
+function salesRepDailyReportEmail(params) {
+  return params.dateStr && params.dateStr < '2026-10-01'
+    ? salesRepDailyReportEmailClassic(params)
+    : salesRepDailyReportEmailRedesigned(params)
+}
+
+// The exact original design (Sep 16 - Sep 29 2026): a single self-
+// contained document (not emailShell), a plain 3-stat row, one flat box
+// per goal (no glass/glow), a flat doctor list with a binary red/green
+// pill, no coaching note, no motivational quote, no CTA button. Field
+// names/labels are adapted from the original's "submitted_today"/single
+// weekly goal to this app's real current data (submitted_this_week,
+// separate monthly sales + doctors goals) since those aren't optional -
+// the original fields no longer exist. escapeHtml is applied throughout
+// even though the original had none, since that gap was a real,
+// deliberately-fixed XSS risk (see "doctor and rep names are
+// HTML-escaped" test) - not something worth reintroducing for nostalgia.
+function salesRepDailyReportEmailClassic({ repName, dateLabel, doctors, totalCount, submittedCount, notSubmittedCount, test, salesGoal, doctorsGoal }) {
+  const { ink, slate, teal, deep, success } = BRAND
+  const hairline = '#dcebe9'
+  const danger = '#b91c1c'
+  const fmtMoney = (n) => '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  const statRow = (cells) => `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+      <tr>
+        ${cells.map((c) => `
+        <td width="${Math.floor(100 / cells.length)}%" style="text-align:center;padding:0 6px">
+          <p style="margin:0;font-family:${FONT_DATA};font-size:21px;font-weight:500;color:${c.color || ink};letter-spacing:-.01em">${c.val}</p>
+          <p style="margin:6px 0 0;font-family:${FONT_DATA};font-size:9.5px;color:${slate};text-transform:uppercase;letter-spacing:.08em">${c.label}</p>
+        </td>`).join('')}
+      </tr>
+    </table>`
+
+  const sectionLabel = (text) => `<p style="margin:0 0 14px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${slate}">${text}</p>`
+
+  const goalBox = (label, current, target, valueText) => {
+    const pct = Number(target) > 0 ? Math.min(Math.round((Number(current) / Number(target)) * 100), 100) : 0
+    return `
+  <div style="margin:20px 36px 0;padding:20px 22px;background:${BRAND.tealMist};border-radius:16px">
+    ${sectionLabel(label)}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td><p style="margin:0;font-family:${FONT_DATA};font-size:22px;font-weight:500;color:${ink}">${valueText} <span style="font-size:14px;color:${slate}">of ${target}</span></p></td>
+      <td style="text-align:right"><p style="margin:0;font-family:${FONT_DATA};font-size:13px;color:${teal}">${pct}%</p></td>
+    </tr></table>
+    <div style="margin-top:10px;height:6px;background:#fff;border-radius:999px;overflow:hidden">
+      <div style="width:${pct}%;height:100%;background:${teal}"></div>
+    </div>
+  </div>`
+  }
+  const salesBox = salesGoal ? goalBox('Monthly Goal — Sales', salesGoal.current_value, fmtMoney(salesGoal.target).replace('.00', ''), fmtMoney(salesGoal.current_value)) : ''
+  const doctorsBox = doctorsGoal ? goalBox('Monthly Goal — New Doctors', doctorsGoal.current_value, doctorsGoal.target, String(doctorsGoal.current_value)) : ''
+
+  const doctorRows = doctors.map((d, i) => `
+    <tr>
+      <td style="padding:11px 0;${i > 0 ? `border-top:1px solid ${hairline}` : ''}">
+        <p style="margin:0;font-size:13.5px;font-weight:600;color:${ink}">${escapeHtml(d.doctor_name)}</p>
+        ${d.clinic_name ? `<p style="margin:2px 0 0;font-size:12px;color:${slate}">${escapeHtml(d.clinic_name)}</p>` : ''}
+      </td>
+      <td style="padding:11px 0;${i > 0 ? `border-top:1px solid ${hairline}` : ''}text-align:right;white-space:nowrap">
+        ${d.submitted_this_week
+          ? `<span style="font-family:${FONT_DATA};font-size:11px;font-weight:500;color:${success};background:#ecfdf5;border-radius:999px;padding:4px 10px">&#9650; Submitted</span>`
+          : `<span style="font-family:${FONT_DATA};font-size:11px;font-weight:500;color:${danger};background:#fef2f2;border-radius:999px;padding:4px 10px">&#9660; Not submitted</span>`}
+      </td>
+    </tr>`).join('')
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body style="margin:0;padding:0;background-color:${BRAND.deep};background-image:linear-gradient(160deg,${BRAND.skyBlue} 0%,${BRAND.deep} 100%);font-family:${FONT_BODY}">
+<div style="max-width:600px;margin:40px auto;background:#fff;border-radius:24px;overflow:hidden;box-shadow:0 6px 28px rgba(32,114,144,.16)">
+
+  ${test ? `
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+      <td bgcolor="#fbbf24" style="background-color:#fbbf24;padding:10px 20px;text-align:center">
+        <p style="margin:0;font-family:${FONT_DATA};font-size:11.5px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#78350f">Test send — not a real daily report</p>
+      </td>
+    </tr>
+  </table>
+  ` : ''}
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+      <td bgcolor="${teal}" style="background-color:${teal};background-image:linear-gradient(135deg,${teal},${deep});padding:34px 36px 28px">
+        <h1 style="color:#fff;margin:0;font-family:${FONT_DISPLAY};font-size:28px;font-weight:700;letter-spacing:-.01em">Daily Sales Report</h1>
+        <p style="color:rgba(255,255,255,.72);margin:12px 0 0;font-size:13px">${escapeHtml(repName)} &nbsp;·&nbsp; ${dateLabel}</p>
+      </td>
+    </tr>
+  </table>
+
+  <div style="padding:30px 36px 0">
+    ${statRow([
+      { label: 'Doctors Assigned', val: totalCount },
+      { label: 'Submitted This Week', val: submittedCount, color: submittedCount > 0 ? success : undefined },
+      { label: 'Not Submitted', val: notSubmittedCount, color: notSubmittedCount > 0 ? danger : undefined },
+    ])}
+  </div>
+
+  ${salesBox}
+  ${doctorsBox}
+
+  <div style="padding:30px 36px 36px">
+    ${sectionLabel('Your Doctors')}
+    ${doctors.length === 0
+      ? `<p style="margin:0;font-size:13px;color:${slate}">No doctors assigned yet.</p>`
+      : `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${doctorRows}</table>`}
+  </div>
+
+  <div style="background:${BRAND.tealMist};padding:18px 36px;font-size:11.5px;color:${slate};border-top:1px solid ${hairline}">
+    Aim Dental Laboratory CRM &nbsp;·&nbsp; Daily report for ${escapeHtml(repName)}
+  </div>
+</div>
+</body></html>`
+}
+
+function salesRepDailyReportEmailRedesigned({ repName, dateLabel, doctors, totalCount, submittedCount, notSubmittedCount, test, salesGoal, doctorsGoal, daysLeft, barsGifUrl }) {
   const { ink, slate, teal, deep, success } = BRAND
   const hairline = '#dcebe9'
   const firstName = String(repName).split(' ')[0]
