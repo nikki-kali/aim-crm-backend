@@ -6,9 +6,34 @@ function escapeHtml(value) {
 const SHELL_OPEN = `<div style="max-width:600px;margin:40px auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#10353f">`
 const SHELL_CLOSE = `</div>`
 
+// `pg` returns a Postgres `date` column as a JS Date object, constructed
+// from the value's own LOCAL date components (confirmed for real: a
+// stored '2026-10-15' comes back as a Date whose .getFullYear()/
+// .getMonth()/.getDate() are 2026/9/15, regardless of the Node process's
+// timezone) — NOT a plain "YYYY-MM-DD" string. Reading it back with those
+// same local getters recovers the real date correctly on any server
+// timezone; using .toISOString() instead (a pattern already used
+// elsewhere in this codebase, e.g. campaigns.js/contentPosts.js) shifts
+// the date by one day whenever the server isn't running in UTC+0 — do
+// not copy that pattern. A plain string (e.g. from a test fixture) is
+// taken as-is. Whole-branch review finding (Critical, confirmed): every
+// booking fetched from the real database hit this, showing
+// "Invalid Date" in every office-visit email.
+function toDateStr(value) {
+  if (!value) return null
+  if (value instanceof Date) {
+    const y = value.getFullYear()
+    const m = String(value.getMonth() + 1).padStart(2, '0')
+    const d = String(value.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+  return String(value).slice(0, 10)
+}
+
 function fmtDateTime(date, time) {
-  if (!date) return 'TBD'
-  const d = new Date(`${date}T${time || '00:00:00'}`)
+  const dateStr = toDateStr(date)
+  if (!dateStr) return 'TBD'
+  const d = new Date(`${dateStr}T${time || '00:00:00'}`)
   const dateLabel = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
   if (!time) return dateLabel
   const timeLabel = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
@@ -117,4 +142,5 @@ module.exports = {
   repApproveConfirmPage,
   practiceConfirmationEmail,
   practicePendingEmail,
+  toDateStr,
 }

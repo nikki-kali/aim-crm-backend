@@ -21,6 +21,14 @@ const FALLBACK_EMAIL = 'media@aimdentallab.com'
 // so it isn't restricted to the CRM frontend's origin.
 router.use(cors())
 router.use(express.json({ limit: '256kb' }))
+// The confirm pages (repApproveConfirmPage/repSuggestTimeConfirmPage) are
+// plain HTML <form method="POST"> submissions, which browsers send as
+// application/x-www-form-urlencoded, not JSON — without this, POST
+// /confirm's req.body was undefined for every real click from an email
+// (found by whole-branch review, reproduced: every Approve/Suggest-time
+// click 500'd). /request stays JSON-only (the public form's own fetch
+// call sends JSON) but accepting both here is harmless.
+router.use(express.urlencoded({ extended: false, limit: '256kb' }))
 
 const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
 function escapeHtml(value) {
@@ -124,7 +132,7 @@ router.get('/confirm', rateLimiter({ windowMs: 10 * 60 * 1000, max: 30 }), async
 // page's <form> above (never a bare link a scanner would pre-fetch).
 router.post('/confirm', rateLimiter({ windowMs: 10 * 60 * 1000, max: 30 }), async (req, res) => {
   try {
-    const { token } = req.body
+    const { token } = req.body || {}
     if (!token) return res.status(400).send(resultPage('Missing link', 'This link is missing its token.'))
 
     const claim = await consumeToken(token)

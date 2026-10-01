@@ -62,6 +62,28 @@ function get(server, path) {
   })
 }
 
+// The real confirmation pages submit a plain HTML <form method="POST">,
+// which browsers send as application/x-www-form-urlencoded — NOT JSON.
+// The post() helper above sends JSON, which is why the whole-branch
+// review's form-encoding bug (every real email-link click 500'd) wasn't
+// caught by the original test suite.
+function postForm(server, path, formFields) {
+  return new Promise((resolve, reject) => {
+    const data = new URLSearchParams(formFields).toString()
+    const req = httpClient.request(
+      { hostname: '127.0.0.1', port: server.address().port, path, method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(data) } },
+      (res) => {
+        let raw = ''
+        res.on('data', (c) => (raw += c))
+        res.on('end', () => resolve({ status: res.statusCode, body: raw }))
+      }
+    )
+    req.on('error', reject)
+    req.write(data)
+    req.end()
+  })
+}
+
 test('POST /request creates a pending booking, matches a rep by state, and returns 201', async () => {
   const server = await startServer()
   const res = await post(server, '/api/office-visits/request', {
@@ -132,6 +154,21 @@ test('POST /confirm with action=approve sets status approved and confirmed_date/
   const { rows: after } = await db.query(`SELECT status, confirmed_date FROM office_visit_bookings WHERE id = $1`, [rows[0].id])
   assert.equal(after[0].status, 'approved')
   assert.notEqual(after[0].confirmed_date, null)
+  server.close()
+})
+
+test('POST /confirm works when submitted as a real browser <form> (application/x-www-form-urlencoded), not just JSON', async () => {
+  const server = await startServer()
+  const { rows } = await db.query(
+    `INSERT INTO office_visit_bookings (source, contact_name, phone, email, status, requested_date, requested_time)
+     VALUES ('public_form','Jane','555-0100','jane@example.com','pending','2026-10-15','14:00') RETURNING id`
+  )
+  const { createToken } = require('../../src/services/officeVisitTokens')
+  const token = await createToken({ bookingId: rows[0].id, action: 'approve' })
+  const res = await postForm(server, '/api/office-visits/confirm', { token })
+  assert.equal(res.status, 200, `expected 200, got ${res.status}: ${res.body}`)
+  const { rows: after } = await db.query(`SELECT status FROM office_visit_bookings WHERE id = $1`, [rows[0].id])
+  assert.equal(after[0].status, 'approved')
   server.close()
 })
 

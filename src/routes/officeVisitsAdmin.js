@@ -2,12 +2,22 @@ const express = require('express')
 const db = require('../config/db')
 const auth = require('../middleware/auth')
 const { createToken } = require('../services/officeVisitTokens')
-const { practiceConfirmationEmail } = require('../services/officeVisitEmails')
+const { practiceConfirmationEmail, toDateStr } = require('../services/officeVisitEmails')
 const { OFFICE_VISIT_CATEGORIES } = require('../constants/officeVisitCategories')
 const { sendEmail } = require('../services/email')
 
 const router = express.Router()
 router.use(auth)
+
+// Express's res.json() serializes a `date` column's JS Date object via
+// .toISOString() (always UTC), which can shift the displayed date by one
+// day whenever this server runs in a non-UTC timezone — same root cause
+// as the email-formatting bug (see officeVisitEmails.js's toDateStr).
+// Normalizing to a plain "YYYY-MM-DD" string here means the Frontend's
+// own date formatting always receives a clean, timezone-safe value.
+function normalizeBookingDates(row) {
+  return { ...row, requested_date: toDateStr(row.requested_date), confirmed_date: toDateStr(row.confirmed_date) }
+}
 
 // GET / — list all bookings for the Office Visits tab. pending bookings
 // include their approve_token/suggest_time_token so the Frontend's inline
@@ -36,7 +46,7 @@ router.get('/', async (req, res) => {
         return acc
       }, {})
     }
-    const withTokens = rows.map((r) => ({ ...r, ...(tokensByBooking[r.id] || {}) }))
+    const withTokens = rows.map((r) => normalizeBookingDates({ ...r, ...(tokensByBooking[r.id] || {}) }))
     return res.json(withTokens)
   } catch (err) {
     console.error('[office-visits-admin] GET / failed:', err)
@@ -78,7 +88,7 @@ router.post('/', async (req, res) => {
       await sendEmail({ to: [booking.email], subject, html })
     }
 
-    return res.status(201).json(booking)
+    return res.status(201).json(normalizeBookingDates(booking))
   } catch (err) {
     console.error('[office-visits-admin] POST / failed:', err)
     return res.status(500).json({ error: 'Failed to create office visit' })
@@ -108,7 +118,7 @@ router.put('/:id/reschedule', async (req, res) => {
       const { subject, html } = practiceConfirmationEmail({ booking, rep })
       await sendEmail({ to: [booking.email], subject, html })
     }
-    return res.json(booking)
+    return res.json(normalizeBookingDates(booking))
   } catch (err) {
     console.error('[office-visits-admin] PUT /:id/reschedule failed:', err)
     return res.status(500).json({ error: 'Failed to reschedule' })
