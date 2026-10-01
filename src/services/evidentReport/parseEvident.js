@@ -266,6 +266,17 @@ function extractEviSmartLastMonth(html) {
   const nl = html.match(rowRe('Billed'));
   if (nb && nl) return { monthName: nb[1], booked: toNum(nb[2]), billed: toNum(nl[2]) };
 
+  // Real 2026-09-29 "(corrected)" resend: same figures, but the metric word
+  // comes AFTER the parenthetical month instead of before it — "Last month
+  // (August 2026) booked" / "Last month (August 2026) billed" — and "month"
+  // is lowercase. Without this, the whole row silently failed to match and
+  // the Leadership Report's month-over-month comparison showed as
+  // unavailable despite the source email actually having the data.
+  const rowRe2 = (label) => new RegExp(`<td[^>]*>\\s*Last month\\s*\\(\\s*([A-Za-z]+)\\s+\\d{4}\\s*\\)\\s*${label}\\s*</td>\\s*<td[^>]*>[^<]*</td>\\s*<td[^>]*>\\s*(\\$[\\d,]+\\.\\d{2})`, 'i');
+  const nb2 = html.match(rowRe2('booked'));
+  const nl2 = html.match(rowRe2('billed'));
+  if (nb2 && nl2) return { monthName: nb2[1], booked: toNum(nb2[2]), billed: toNum(nl2[2]) };
+
   const header = html.match(/MTD vs Last Month Comparison[\s\S]*?<th[^>]*>[^<]*<\/th>\s*<th[^>]*>[^<]*<\/th>\s*<th[^>]*>\s*([A-Za-z]+)\s*\(full month\)/i);
   if (!header) return null;
   const table = html.slice(header.index);
@@ -390,9 +401,20 @@ function extractEviSmartTotals(html) {
     mtdBookedValue: mtdBooked ? mtdBooked.amount : 0,
     mtdBilledValue: mtdBilled ? mtdBilled.amount : 0,
     ytdTotalSalesValue: ytdTotalSalesMatch ? toNum(ytdTotalSalesMatch[1]) : 0,
+    // Three real layouts seen for the billed-only YTD figure: a dedicated
+    // "YTD Billed only" row (ytdBilled above), a "(billed-only: $X)" phrase
+    // inside the YTD Total Sales cell, or — the real 2026-09-29 "(corrected)"
+    // resend — a bare "$main ($billed-only)" bracket with no label text at
+    // all right after the main YTD dollar amount. Checked in that order;
+    // without the third pattern this silently fell back to 0 (a real,
+    // never-updating billed-only YTD figure on that send).
     ytdBilledValue: ytdBilled
       ? ytdBilled.amount
-      : toNum((html.match(/YTD Total Sales[\s\S]{0,300}?billed-only:\s*(\$[\d,]+\.\d{2})/i) || [])[1] || '0'),
+      : toNum(
+          (html.match(/YTD Total Sales[\s\S]{0,300}?billed-only:\s*(\$[\d,]+\.\d{2})/i) || [])[1]
+          || (html.match(/YTD Total Sales[^<]*<\/td>\s*<td[^>]*>[^<]*<\/td>\s*<td[^>]*>\s*\$[\d,]+\.\d{2}\s*\(\s*(\$[\d,]+\.\d{2})\s*\)/i) || [])[1]
+          || '0'
+        ),
     lastMonth: extractEviSmartLastMonth(html),
     dailyCustomers: extractEviSmartCustomers(html),
     cumulativeAsOf: (html.match(/\(\s*(?:MTD )?through (\d{1,2} [A-Za-z]{3})/) || [])[1] || null,

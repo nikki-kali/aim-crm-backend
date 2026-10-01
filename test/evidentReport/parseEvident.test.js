@@ -508,6 +508,28 @@ test('extractEviSmartTotals returns null (not fabricated zeros) when the Totals 
   assert.equal(totals, null);
 });
 
+test('Report #3 shows no "surpassed last month" note when combined booked+billed MTD is actually behind last month (real Sept 23 fixture)', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-23' });
+  agg.eviSmart = extractEviSmartTotals(fixture('evismart-daily-sales-report.html'));
+  // Sanity check this fixture really is a decline: $121,610.28 + $124,786.97
+  // MTD vs. $157,654.32 + $145,872.42 last month.
+  assert.ok(agg.eviSmart.mtdBookedValue + agg.eviSmart.mtdBilledValue < agg.eviSmart.lastMonth.booked + agg.eviSmart.lastMonth.billed);
+  const { html } = buildReport3Email(agg);
+  assert.doesNotMatch(html, /surpassed last month/);
+});
+
+test('Report #3 shows a happy, business-formal "surpassed last month" note with the real $ and % when combined booked+billed MTD genuinely grew (real Sept 29 "corrected" fixture)', () => {
+  const agg = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-29' });
+  agg.eviSmart = extractEviSmartTotals(fixture('evismart-daily-sales-report-sep29-corrected.html'));
+  const current = agg.eviSmart.mtdBookedValue + agg.eviSmart.mtdBilledValue; // 161203.71 + 162294.86
+  const previous = agg.eviSmart.lastMonth.booked + agg.eviSmart.lastMonth.billed; // 157169.21 + 145509.42
+  assert.ok(current > previous, 'fixture should be a real, genuine surplus');
+  const { html } = buildReport3Email(agg);
+  assert.match(html, /We have now surpassed last month by/);
+  assert.match(html, /\$20,819\.94/); // current - previous, to the cent
+  assert.match(html, /6\.9%/); // real pct change, one decimal
+});
+
 test('combined email explains where the numbers come from, and flags cumulative figures dated after the report day', () => {
   const sep22 = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-22' });
   sep22.eviSmart = extractEviSmartTotals(fixture('evismart-daily-sales-report-sep22-populated.html'));
@@ -546,6 +568,19 @@ test('extractEviSmartTotals reads the newer end-of-day EviSmart layout (real Sep
   assert.ok(totals.dailyCustomers.every((c) => !/^Total/i.test(c.name)));
   assert.equal(totals.dailyCustomers.reduce((n, c) => n + c.count, 0), 108);
   assert.equal(Math.round(totals.dailyCustomers.reduce((n, c) => n + c.value, 0) * 100) / 100, 9800.62);
+});
+
+test('extractEviSmartTotals reads a real "(corrected)" resend layout (Sep 29 2026): "Last month (August 2026) booked/billed" row order, and a bare "$X ($Y)" YTD billed-only bracket with no "billed-only:" label text', () => {
+  const totals = extractEviSmartTotals(fixture('evismart-daily-sales-report-sep29-corrected.html'));
+  assert.equal(totals.dailyBookedCount, 97);
+  assert.equal(totals.dailyBookedValue, 7562.31);
+  assert.equal(totals.dailyBilledValue, 7896.45);
+  assert.equal(totals.mtdBookedCount, 1767);
+  assert.equal(totals.mtdBookedValue, 161203.71);
+  assert.equal(totals.mtdBilledValue, 162294.86);
+  assert.equal(totals.ytdTotalSalesValue, 428022.38);
+  assert.equal(totals.ytdBilledValue, 373694.16);
+  assert.deepEqual(totals.lastMonth, { monthName: 'August', booked: 157169.21, billed: 145509.42 });
 });
 
 test('eviSmartSubjectDate reads the business date from a real EviSmart subject', () => {
