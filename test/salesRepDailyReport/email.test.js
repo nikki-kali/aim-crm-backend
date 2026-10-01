@@ -63,7 +63,7 @@ test('greets the rep by first name and lists their doctors with status pills', (
   assert.match(html, /Dr\. Brian Gold/)
   assert.match(html, /Dr\. Cecilia U\. Schneuerman/)
   assert.match(html, />Submitted</)
-  assert.match(html, />Reach out</)
+  assert.match(html, />Follow up</)
   assert.doesNotMatch(html, />Not Submitted</)
 })
 
@@ -146,10 +146,10 @@ test('a long roster caps each section at 10 independently, each with its own "sh
   const many = Array.from({ length: 30 }, (_, i) => ({ doctor_name: 'Dr. Doc ' + String(i).padStart(2, '0'), clinic_name: null, submitted_this_week: false, first_case_pending: i >= 4 }))
   const html = salesRepDailyReportEmail({ ...SAMPLE, doctors: many, totalCount: 30, notSubmittedCount: 30 })
   // All 4 active doctors show (under the 10 cap), so no "showing" note for that section.
-  assert.equal((html.match(/>Reach out</g) || []).length, 4)
+  assert.equal((html.match(/>Follow up</g) || []).length, 4)
   for (const n of ['00', '01', '02', '03']) assert.match(html, new RegExp('Dr\\. Doc ' + n))
   // 26 prospects capped at 10, with its own note.
-  assert.equal((html.match(/>First case</g) || []).length, 10)
+  assert.equal((html.match(/>Reach out</g) || []).length, 10)
   assert.match(html, /Prospects \(26\)/)
   assert.match(html, /Showing 10 of 26\./)
   assert.match(html, /pick 3 doctors from your list and reach out about a case/)
@@ -290,8 +290,8 @@ test('doctors are organized into Active, Prospects and Dormant sections, in that
   // Section order: Active, then Prospects, then Dormant.
   assert.ok(html.indexOf('Dr. Active') < html.indexOf('Dr. Waiting'))
   assert.ok(html.indexOf('Dr. Waiting') < html.indexOf('Dr. Gone Quiet'))
+  assert.match(html, />Follow up</)
   assert.match(html, />Reach out</)
-  assert.match(html, />First case</)
   assert.match(html, />Dormant</)
 })
 
@@ -307,4 +307,50 @@ test('a doctor never shows up in more than one section', () => {
   assert.ok(!html.includes('Prospects ('))
   assert.match(html, /Dormant clients \(1\)/)
   assert.equal((html.match(/Dr\. Only Dormant/g) || []).length, 1)
+})
+
+test('shows today\'s 3 real cards: Daily Booked, Daily Billed, New Doctors Today with a short color-coded weekly pace', () => {
+  const html = salesRepDailyReportEmail({
+    ...SAMPLE, dateStr: '2026-10-01',
+    dailyStats: {
+      dailyBookedCount: 5, dailyBookedValue: 412.5, dailyBilledCount: 3, dailyBilledValue: 380,
+      dailyNewDoctors: 1, doctorsThisWeek: 1, weeklyDoctorsTarget: 4,
+    },
+  })
+  assert.match(html, /Daily Booked/)
+  assert.match(html, /\$412\.50/)
+  assert.match(html, /5 cases booked/)
+  assert.match(html, /Daily Billed/)
+  assert.match(html, /\$380\.00/)
+  assert.match(html, /3 cases billed/)
+  assert.match(html, /New Doctors Today/)
+  assert.match(html, />1</)
+  assert.match(html, /1\/4 this week/)
+  // 1/4 = 25%, under half the weekly target, so it should render red.
+  assert.match(html, /color:#b91c1c[^>]*>1\/4 this week/)
+  assert.match(html, /doctors currently assigned to you in the CRM/)
+})
+
+test('a weekly pace at or above half the target renders green, not red', () => {
+  const html = salesRepDailyReportEmail({
+    ...SAMPLE, dateStr: '2026-10-01',
+    dailyStats: { dailyBookedCount: 0, dailyBookedValue: 0, dailyBilledCount: 0, dailyBilledValue: 0, dailyNewDoctors: 2, doctorsThisWeek: 2, weeklyDoctorsTarget: 4 },
+  })
+  assert.match(html, /2\/4 this week/)
+  assert.match(html, /color:#059669[^>]*>2\/4 this week/)
+})
+
+test('a daily card shows "—" instead of a fabricated $0 when that figure did not come through', () => {
+  const html = salesRepDailyReportEmail({
+    ...SAMPLE, dateStr: '2026-10-01',
+    dailyStats: { dailyBookedCount: null, dailyBookedValue: null, dailyBilledCount: null, dailyBilledValue: null, dailyNewDoctors: null, doctorsLeftForWeeklyGoal: null },
+  })
+  const cardsSection = html.slice(html.indexOf('Daily Booked'), html.indexOf('doctors currently assigned'))
+  assert.equal((cardsSection.match(/>—</g) || []).length, 3, 'all three daily headline figures should show —')
+})
+
+test('the daily cards are omitted entirely when no dailyStats is passed (e.g. an old caller)', () => {
+  const html = salesRepDailyReportEmail({ ...SAMPLE, dateStr: '2026-10-01' })
+  assert.doesNotMatch(html, /Daily Booked</)
+  assert.doesNotMatch(html, /New Doctors Today/)
 })

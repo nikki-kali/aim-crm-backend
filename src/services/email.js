@@ -651,8 +651,9 @@ function salesRepDailyReportEmailClassic({ repName, dateLabel, doctors, totalCou
 </body></html>`
 }
 
-function salesRepDailyReportEmailRedesigned({ repName, dateLabel, doctors, totalCount, submittedCount, notSubmittedCount, test, salesGoal, doctorsGoal, daysLeft, barsGifUrl }) {
+function salesRepDailyReportEmailRedesigned({ repName, dateLabel, doctors, totalCount, submittedCount, notSubmittedCount, test, salesGoal, doctorsGoal, daysLeft, barsGifUrl, dailyStats }) {
   const { ink, slate, teal, deep, success } = BRAND
+  const danger = '#b91c1c'
   const hairline = '#dcebe9'
   const firstName = String(repName).split(' ')[0]
   // Quote picked by day-of-month, same pattern already used for this
@@ -731,16 +732,60 @@ function salesRepDailyReportEmailRedesigned({ repName, dateLabel, doctors, total
     ? `<div style="padding:22px 36px 0"><img src="${escapeHtml(barsGifUrl)}" width="100%" alt="Progress toward this month's goals" style="display:block;width:100%;height:auto;border-radius:16px"></div>`
     : `${salesMeter}${doctorsMeter}`
 
-  // "Reach out" (soft amber) instead of a red "Not Submitted": with dozens of
-  // doctors on a list, a wall of red reads as blame, while an amber
-  // "Reach out" says what to do next.
+  // Today's real figures (user request, 2026-09-30) - separate from the
+  // monthly running totals the bars above show. A card reads "—" rather
+  // than a fabricated $0 when its source didn't come through for the day
+  // (dailyStats' fields are null on any failure, see
+  // computeRepDailyEvidentStats/countNewDoctorsOnDate in
+  // salesRepDailyReport.js).
+  const dailyCard = (label, value, sub) => `
+    <td width="33.33%" valign="top" style="padding:0 5px">
+      <div style="${glass};border-radius:14px;padding:16px 10px;text-align:center">
+        <p style="margin:0 0 8px;font-family:${FONT_DATA};font-size:9px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:${slate}">${label}</p>
+        <p style="margin:0;font-family:${FONT_DATA};font-size:19px;font-weight:500;color:${ink};letter-spacing:-.01em">${value === null || value === undefined ? '—' : value}</p>
+        ${sub ? `<p style="margin:8px 0 0;font-family:${FONT_DATA};font-size:11px;color:${sub.color || slate};font-weight:${sub.color ? 600 : 400};line-height:1.3">${sub.text}</p>` : ''}
+      </div>
+    </td>`
+  const money = (v) => (v === null || v === undefined ? null : fmtMoney(v))
+  const caseCountSub = (count, verb) =>
+    count === null || count === undefined ? null : { text: `${count} case${count === 1 ? '' : 's'} ${verb}` }
+  // Short "N/target this week" pace instead of a full sentence, so this
+  // card's subtext stays one line like the other two cards' (user
+  // request, 2026-09-30 — the old "X doctors left to reach target weekly
+  // goal" wording wrapped to 2-3 lines and made this square taller than
+  // its neighbors). Red under half the weekly target, green at or above.
+  const weeklyDoctorsSub = (thisWeek, target) => {
+    if (thisWeek === null || thisWeek === undefined || !target) return null
+    const color = thisWeek / target < 0.5 ? danger : success
+    return { text: `${thisWeek}/${target} this week`, color }
+  }
+  const dailyCardsBlock = dailyStats ? `
+  <div style="padding:22px 36px 0">
+    ${sectionLabel('Today')}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+      <tr>
+        ${dailyCard('Daily Booked', money(dailyStats.dailyBookedValue), caseCountSub(dailyStats.dailyBookedCount, 'booked'))}
+        ${dailyCard('Daily Billed', money(dailyStats.dailyBilledValue), caseCountSub(dailyStats.dailyBilledCount, 'billed'))}
+        ${dailyCard('New Doctors Today', dailyStats.dailyNewDoctors, weeklyDoctorsSub(dailyStats.doctorsThisWeek, dailyStats.weeklyDoctorsTarget))}
+      </tr>
+    </table>
+    <p style="margin:8px 0 0;font-family:${FONT_DATA};font-size:11px;color:${slate}">Booked and Billed reflect only doctors currently assigned to you in the CRM.</p>
+  </div>` : ''
+
+  // "Reach out" (blue) for Prospects who've never sent a first case, and
+  // "Follow up" (amber) for Active doctors with real case history who
+  // just didn't submit this particular week — swapped from an earlier
+  // version that had these backwards (user correction, 2026-09-30): with
+  // dozens of doctors on a list, a wall of red reads as blame, so neither
+  // pill is red, but "Reach out" vs "Follow up" now matches which bucket
+  // actually needs a first conversation vs a check-in.
   const statusPill = (submittedToday, firstCasePending, dormant) => submittedToday
     ? `<span style="display:inline-block;padding:4px 11px;border-radius:999px;background-color:#ecfdf5;border:1px solid #a7f3d0;font-family:${FONT_DATA};font-size:11px;font-weight:500;color:${success};text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">Submitted</span>`
     : firstCasePending
-      ? `<span style="display:inline-block;padding:4px 11px;border-radius:999px;background-color:#eaf3f7;border:1px solid #a9cfe3;font-family:${FONT_DATA};font-size:11px;font-weight:500;color:${deep};text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">First case</span>`
+      ? `<span style="display:inline-block;padding:4px 11px;border-radius:999px;background-color:#eaf3f7;border:1px solid #a9cfe3;font-family:${FONT_DATA};font-size:11px;font-weight:500;color:${deep};text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">Reach out</span>`
       : dormant
         ? `<span style="display:inline-block;padding:4px 11px;border-radius:999px;background-color:#f3f1ef;border:1px solid #d9d3cc;font-family:${FONT_DATA};font-size:11px;font-weight:500;color:#6b5f52;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">Dormant</span>`
-        : `<span style="display:inline-block;padding:4px 11px;border-radius:999px;background-color:#fefaf1;border:1px solid #fde68a;font-family:${FONT_DATA};font-size:11px;font-weight:500;color:#92400e;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">Reach out</span>`
+        : `<span style="display:inline-block;padding:4px 11px;border-radius:999px;background-color:#fefaf1;border:1px solid #fde68a;font-family:${FONT_DATA};font-size:11px;font-weight:500;color:#92400e;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">Follow up</span>`
 
   // Four sections (user request, 2026-09-29, replacing one combined
   // "reach out" list that mixed active clients, prospects and dormant
@@ -865,6 +910,7 @@ function salesRepDailyReportEmailRedesigned({ repName, dateLabel, doctors, total
   const body = `
   <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden">${escapeHtml(preheader)}</div>
   ${test ? `<div style="background:#fbbf24;padding:10px 20px;text-align:center"><p style="margin:0;font-family:${FONT_DATA};font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#78350f">Test send — not a real daily report</p></div>` : ''}
+  ${dailyCardsBlock}
   ${barsBlock}
   ${coachBox}
   ${quoteBox}
