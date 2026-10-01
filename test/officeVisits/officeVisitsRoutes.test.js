@@ -200,3 +200,28 @@ test('POST /confirm with an already-used token returns 410 and does not re-send'
   assert.equal(second.status, 410)
   server.close()
 })
+
+test('clicking the sibling action after one was already taken does not contradict it or overwrite the confirmed slot', async () => {
+  const server = await startServer()
+  const { rows } = await db.query(
+    `INSERT INTO office_visit_bookings (source, contact_name, phone, email, status, requested_date, requested_time)
+     VALUES ('public_form','Jane','555-0100','jane@example.com','pending','2026-10-15','14:00') RETURNING id`
+  )
+  const { createToken } = require('../../src/services/officeVisitTokens')
+  const approveToken = await createToken({ bookingId: rows[0].id, action: 'approve' })
+  const suggestToken = await createToken({ bookingId: rows[0].id, action: 'suggest_time' })
+
+  // Rep approves from the email.
+  const approveRes = await post(server, '/api/office-visits/confirm', { token: approveToken })
+  assert.equal(approveRes.status, 200)
+
+  // The OTHER token (suggest_time), from the same original email, is
+  // clicked later — it must be dead (410), not silently flip the booking
+  // back to pending and tell the practice their confirmed visit is
+  // actually "not yet confirmed".
+  const suggestRes = await post(server, '/api/office-visits/confirm', { token: suggestToken })
+  assert.equal(suggestRes.status, 410)
+  const { rows: after } = await db.query(`SELECT status FROM office_visit_bookings WHERE id = $1`, [rows[0].id])
+  assert.equal(after[0].status, 'approved', 'the booking must still be approved, not flipped to time_suggested')
+  server.close()
+})

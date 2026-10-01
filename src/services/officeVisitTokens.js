@@ -47,4 +47,18 @@ async function consumeToken(token) {
   return rows[0] || null
 }
 
-module.exports = { createToken, peekToken, consumeToken }
+// Burns every OTHER unused token for this booking once one action has
+// been taken on it — whole-branch review finding (Important, confirmed):
+// without this, the sibling token (e.g. "suggest another time" after
+// "approve" was already clicked) stays valid and can send the practice a
+// contradictory email, or re-overwrite a confirmed_date/time that was
+// since set a different way (e.g. via the CRM's reschedule flow).
+async function invalidateOtherTokens(bookingId, excludeToken) {
+  await db.query(
+    `UPDATE office_visit_tokens SET used_at = NOW()
+     WHERE booking_id = $1 AND token != $2 AND used_at IS NULL`,
+    [bookingId, excludeToken]
+  )
+}
+
+module.exports = { createToken, peekToken, consumeToken, invalidateOtherTokens }

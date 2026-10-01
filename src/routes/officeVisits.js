@@ -3,7 +3,7 @@ const cors = require('cors')
 const db = require('../config/db')
 const rateLimiter = require('../middleware/rateLimiter')
 const { matchRepByState } = require('../services/repTerritories')
-const { createToken, peekToken, consumeToken } = require('../services/officeVisitTokens')
+const { createToken, peekToken, consumeToken, invalidateOtherTokens } = require('../services/officeVisitTokens')
 const {
   repNotificationEmail, repSuggestTimeConfirmPage, repApproveConfirmPage,
   practiceConfirmationEmail, practicePendingEmail,
@@ -137,6 +137,11 @@ router.post('/confirm', rateLimiter({ windowMs: 10 * 60 * 1000, max: 30 }), asyn
 
     const claim = await consumeToken(token)
     if (!claim) return res.status(410).send(resultPage('Link expired or already used', 'This link has already been used, or is more than 7 days old.'))
+    // The sibling token (the OTHER action on this same booking) must die
+    // too, or a forwarded email / a later click can send the practice a
+    // contradictory message, or overwrite a confirmed_date/time that was
+    // since set a different way (e.g. via the CRM's reschedule flow).
+    await invalidateOtherTokens(claim.booking_id, token)
 
     const { rows } = await db.query(`SELECT * FROM office_visit_bookings WHERE id = $1`, [claim.booking_id])
     const booking = rows[0]
@@ -147,23 +152,49 @@ router.post('/confirm', rateLimiter({ windowMs: 10 * 60 * 1000, max: 30 }), asyn
       : { name: 'Your AIM Dental rep', email: FALLBACK_EMAIL }
 
     if (claim.action === 'approve') {
-      await db.query(
-        `UPDATE office_visit_bookings SET status='approved', confirmed_date=requested_date, confirmed_time=requested_time, updated_at=NOW() WHERE id=$1`,
+      // status='pending' guard: if this booking was already handled a
+      // different way since this token was issued (e.g. rescheduled in
+      // the CRM after "suggest another time"), a stale Approve click must
+      // not silently overwrite the real confirmed_date/time back to the
+      // original request.
+      const { rows: updatedRows } = await db.query(
+        `UPDATE office_visit_bookings SET status='approved', confirmed_date=requested_date, confirmed_time=requested_time, updated_at=NOW()
+         WHERE id=$1 AND status='pending' RETURNING *`,
         [booking.id]
       )
-      const updated = { ...booking, confirmed_date: booking.requested_date, confirmed_time: booking.requested_time }
-      if (booking.email) {
-        const { subject, html } = practiceConfirmationEmail({ booking: updated, rep })
-        await sendEmail({ to: [booking.email], subject, html })
+      if (updatedRows.length === 0) {
+        return res.send(resultPage('Already handled', 'This booking was already updated another way — no changes were made.'))
+      }
+      const updated = updatedRows[0]
+      if (updated.email) {
+        try {
+          const { subject, html } = practiceConfirmationEmail({ booking: updated, rep })
+          await sendEmail({ to: [updated.email], subject, html })
+        } catch (emailErr) {
+          // The booking IS confirmed — a transporter failure must not make
+          // this look like nothing happened (that invites a duplicate
+          // booking on retry). Log and still report success.
+          console.error('[office-visits] confirmation email failed to send (booking is still confirmed):', emailErr)
+        }
       }
       return res.send(resultPage('Approved!', 'The office visit has been confirmed and the practice has been emailed.'))
     }
 
-    // suggest_time
-    await db.query(`UPDATE office_visit_bookings SET status='time_suggested', updated_at=NOW() WHERE id=$1`, [booking.id])
+    // suggest_time — same status='pending' guard as approve above.
+    const { rows: suggestedRows } = await db.query(
+      `UPDATE office_visit_bookings SET status='time_suggested', updated_at=NOW() WHERE id=$1 AND status='pending' RETURNING *`,
+      [booking.id]
+    )
+    if (suggestedRows.length === 0) {
+      return res.send(resultPage('Already handled', 'This booking was already updated another way — no changes were made.'))
+    }
     if (booking.email) {
-      const { subject, html } = practicePendingEmail({ booking, rep })
-      await sendEmail({ to: [booking.email], subject, html, headers: { 'In-Reply-To': `<office-visit-${booking.id}@aimdentallab.com>`, References: `<office-visit-${booking.id}@aimdentallab.com>` } })
+      try {
+        const { subject, html } = practicePendingEmail({ booking, rep })
+        await sendEmail({ to: [booking.email], subject, html, headers: { 'In-Reply-To': `<office-visit-${booking.id}@aimdentallab.com>`, References: `<office-visit-${booking.id}@aimdentallab.com>` } })
+      } catch (emailErr) {
+        console.error('[office-visits] pending email failed to send (booking is still marked time_suggested):', emailErr)
+      }
     }
     return res.send(resultPage('Marked pending', 'The practice has been told you will reach out directly.'))
   } catch (err) {
