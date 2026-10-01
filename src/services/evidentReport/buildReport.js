@@ -547,6 +547,25 @@ function buildReport3Body(agg, historyRows = [], repGoals = []) {
     ]);
   };
 
+  // Celebratory line under the MoM cards (user request, 2026-09-30):
+  // combined Booked+Billed this MTD vs. last month's combined total, shown
+  // ONLY when that combined figure genuinely grew — this month-to-date is
+  // partial, so a real surplus over a completed prior month is a real
+  // milestone worth calling out; a decline or flat combined total gets no
+  // note at all rather than a forced positive spin on a real shortfall.
+  const surpassedNote = (es, lastMonth) => {
+    const current = es.mtdBookedValue + es.mtdBilledValue;
+    const previous = lastMonth.booked + lastMonth.billed;
+    const change = current - previous;
+    if (change <= 0) return '';
+    const pct = pctChange(current, previous);
+    const pctText = pct == null ? '' : ` (${pct.toFixed(1)}%)`;
+    return `
+    <div style="margin:14px 36px 0;padding:14px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:14px;box-shadow:${BRAND.glassShadow}">
+      <p style="margin:0;font-size:13px;color:${BRAND.ink}">We have now surpassed last month by <span style="color:${BRAND.success};font-weight:600">${fmtMoney(change)}${pctText}</span> in combined booked and billed sales — strong month-to-date momentum for the team.</p>
+    </div>`;
+  };
+
   // No fabricated comparison when today's EviSmart pull (or its last-month
   // column) is unavailable — a compact notice instead of the chart/cards.
   const kpiNotice = (text) => `
@@ -572,6 +591,7 @@ function buildReport3Body(agg, historyRows = [], repGoals = []) {
       momCard(`Booked - ${thisMonthShort}`, es.mtdBookedValue, lastMonth.booked),
       momCard(`Billed - ${thisMonthShort}`, es.mtdBilledValue, lastMonth.billed),
     ])}
+    ${surpassedNote(es, lastMonth)}
   </div>`;
 
   const hasGoals = repGoals.length > 0 && repGoals.some((r) => r.goals.length > 0);
