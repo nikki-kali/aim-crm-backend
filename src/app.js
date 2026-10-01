@@ -17,6 +17,7 @@ const scanSubmissionRoutes = require('./routes/scanSubmission')
 const verifyEmailRoutes = require('./routes/verifyEmail')
 const implantIntakeRoutes = require('./routes/implantIntake')
 const officeVisitsRoutes = require('./routes/officeVisits')
+const officeVisitsAdminRoutes = require('./routes/officeVisitsAdmin')
 const newsletterRoutes = require('./routes/newsletter')
 const userRoutes = require('./routes/users')
 const clinicRoutes = require('./routes/clinics')
@@ -69,6 +70,7 @@ app.use(cors({
   credentials: true,
 }))
 app.use(express.json({ limit: '5mb' }))
+app.use('/api/office-visits-admin', officeVisitsAdminRoutes)
 app.use('/api/cron', require('./routes/cron')) // secret-protected trigger for the daily jobs (external timer)
 app.use('/api/report-hold', require('./routes/reportHold')) // signed "hold today's send" link from the daily preview email
 // Only needed by the plain HTML <form method="POST"> on the report-approval

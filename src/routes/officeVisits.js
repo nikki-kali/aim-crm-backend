@@ -135,8 +135,8 @@ router.post('/confirm', rateLimiter({ windowMs: 10 * 60 * 1000, max: 30 }), asyn
     if (!booking) return res.status(404).send(resultPage('Not found', 'This booking no longer exists.'))
 
     const rep = booking.assigned_rep_id
-      ? (await db.query(`SELECT name, email, phone FROM users WHERE id = $1`, [booking.assigned_rep_id])).rows[0]
-      : { name: 'Your AIM Dental rep', email: FALLBACK_EMAIL, phone: null }
+      ? (await db.query(`SELECT name, email FROM users WHERE id = $1`, [booking.assigned_rep_id])).rows[0]
+      : { name: 'Your AIM Dental rep', email: FALLBACK_EMAIL }
 
     if (claim.action === 'approve') {
       await db.query(
