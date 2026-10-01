@@ -302,3 +302,44 @@ test('clicking the sibling action after one was already taken does not contradic
     await cleanupBooking(bookingId)
   }
 })
+
+test('GET /book serves a public HTML form page with the request fields and category checkboxes', async () => {
+  const server = await startServer()
+  try {
+    const res = await get(server, '/api/office-visits/book')
+    assert.equal(res.status, 200)
+    assert.match(res.body, /<form/)
+    assert.match(res.body, /name="practice_name"/)
+    assert.match(res.body, /name="contact_name"/)
+    assert.match(res.body, /name="phone"/)
+    assert.match(res.body, /name="email"/)
+    assert.match(res.body, /name="requested_date"/)
+    assert.match(res.body, /name="requested_time"/)
+    assert.match(res.body, /Crowns &amp; Bridges/)
+    assert.match(res.body, /value="Aim Dental"/)
+  } finally {
+    server.close()
+  }
+})
+
+test('GET /book?brand=Kings%20Highway pre-selects the Kings Highway brand in the hidden field', async () => {
+  const server = await startServer()
+  try {
+    const res = await get(server, '/api/office-visits/book?brand=Kings%20Highway')
+    assert.equal(res.status, 200)
+    assert.match(res.body, /value="Kings Highway"/)
+  } finally {
+    server.close()
+  }
+})
+
+test('GET /book ignores an invalid brand query param and falls back to Aim Dental', async () => {
+  const server = await startServer()
+  try {
+    const res = await get(server, '/api/office-visits/book?brand=Nonsense')
+    assert.equal(res.status, 200)
+    assert.match(res.body, /value="Aim Dental"/)
+  } finally {
+    server.close()
+  }
+})

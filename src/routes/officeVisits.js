@@ -45,6 +45,128 @@ function resultPage(title, message) {
   </body></html>`
 }
 
+// GET /api/office-visits/book — public. The actual page behind "the
+// booking link" handed to the marketing sites — /request above is JSON-only
+// and has nothing a browser can load directly. One shared link for both
+// reps: the form collects the practice's address and POSTs to /request,
+// which auto-assigns James or William by state (repTerritories.js) — there
+// is no per-rep link. ?brand= lets either marketing site pre-tag which
+// brand the submission is for without the dentist seeing or choosing it;
+// an unrecognized/missing value falls back to Aim Dental (the same default
+// /request itself applies) rather than exposing a broken brand field.
+router.get('/book', (req, res) => {
+  const brand = VALID_BRANDS.includes(req.query.brand) ? req.query.brand : 'Aim Dental'
+  const categoryCheckboxes = OFFICE_VISIT_CATEGORIES.map((cat) => `
+        <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:#10353f;padding:8px 0">
+          <input type="checkbox" name="service_interests" value="${escapeHtml(cat)}" style="width:17px;height:17px">
+          ${escapeHtml(cat)}
+        </label>`).join('')
+
+  return res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Schedule an Office Visit — AIM Dental Laboratory</title></head>
+<body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7faf9;padding:40px 16px">
+  <div style="max-width:480px;margin:0 auto">
+    <h1 style="font-size:20px;color:#10353f;margin:0 0 6px">Schedule an Office Visit</h1>
+    <p style="font-size:14px;color:#5b7a86;margin:0 0 24px">Tell us a bit about your practice and a preferred time — a rep from AIM Dental Laboratory will confirm or suggest another time shortly.</p>
+
+    <form id="ov-form" style="background:#fff;border-radius:16px;padding:24px;box-shadow:0 4px 20px rgba(0,0,0,.06)">
+      <input type="hidden" name="brand" value="${escapeHtml(brand)}">
+
+      <label style="display:block;font-size:13px;color:#10353f;font-weight:600;margin:0 0 4px">Practice name</label>
+      <input type="text" name="practice_name" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;margin-bottom:14px;font-size:14px">
+
+      <label style="display:block;font-size:13px;color:#10353f;font-weight:600;margin:0 0 4px">Your name *</label>
+      <input type="text" name="contact_name" required style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;margin-bottom:14px;font-size:14px">
+
+      <label style="display:block;font-size:13px;color:#10353f;font-weight:600;margin:0 0 4px">Your role</label>
+      <input type="text" name="contact_role" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;margin-bottom:14px;font-size:14px">
+
+      <label style="display:block;font-size:13px;color:#10353f;font-weight:600;margin:0 0 4px">Phone *</label>
+      <input type="tel" name="phone" required style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;margin-bottom:14px;font-size:14px">
+
+      <label style="display:block;font-size:13px;color:#10353f;font-weight:600;margin:0 0 4px">Email *</label>
+      <input type="email" name="email" required style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;margin-bottom:14px;font-size:14px">
+
+      <label style="display:block;font-size:13px;color:#10353f;font-weight:600;margin:0 0 4px">Address</label>
+      <input type="text" name="address_line1" placeholder="Street address" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;margin-bottom:8px;font-size:14px">
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <input type="text" name="city" placeholder="City" style="flex:2;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;font-size:14px">
+        <input type="text" name="state" placeholder="State" maxlength="2" style="flex:1;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;font-size:14px">
+        <input type="text" name="zip" placeholder="Zip" style="flex:1;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;font-size:14px">
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <div style="flex:1">
+          <label style="display:block;font-size:13px;color:#10353f;font-weight:600;margin:0 0 4px">Preferred date *</label>
+          <input type="date" name="requested_date" required style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;font-size:14px">
+        </div>
+        <div style="flex:1">
+          <label style="display:block;font-size:13px;color:#10353f;font-weight:600;margin:0 0 4px">Preferred time *</label>
+          <input type="time" name="requested_time" required style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;font-size:14px">
+        </div>
+      </div>
+
+      <label style="display:block;font-size:13px;color:#10353f;font-weight:600;margin:0 0 4px">Interested in</label>
+      <div style="margin-bottom:14px">${categoryCheckboxes}</div>
+
+      <label style="display:block;font-size:13px;color:#10353f;font-weight:600;margin:0 0 4px">Anything else?</label>
+      <textarea name="message" rows="3" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;margin-bottom:18px;font-size:14px;font-family:inherit"></textarea>
+
+      <button type="submit" style="width:100%;padding:13px;background:#06babe;color:#fff;border:none;border-radius:999px;font-size:15px;font-weight:600;cursor:pointer">Request Office Visit</button>
+      <p id="ov-error" style="display:none;color:#b91c1c;font-size:13px;margin:10px 0 0"></p>
+    </form>
+    <div id="ov-success" style="display:none;background:#fff;border-radius:16px;padding:28px;box-shadow:0 4px 20px rgba(0,0,0,.06);text-align:center">
+      <h2 style="font-size:17px;color:#10353f;margin:0 0 8px">Request sent!</h2>
+      <p style="font-size:14px;color:#5b7a86;margin:0">A rep from AIM Dental Laboratory will confirm your visit shortly.</p>
+    </div>
+  </div>
+
+  <script>
+    document.getElementById('ov-form').addEventListener('submit', async function (e) {
+      e.preventDefault()
+      var form = e.target
+      var errorEl = document.getElementById('ov-error')
+      errorEl.style.display = 'none'
+      var data = new FormData(form)
+      var payload = {
+        practice_name: data.get('practice_name'),
+        contact_name: data.get('contact_name'),
+        contact_role: data.get('contact_role'),
+        phone: data.get('phone'),
+        email: data.get('email'),
+        address_line1: data.get('address_line1'),
+        city: data.get('city'),
+        state: data.get('state'),
+        zip: data.get('zip'),
+        requested_date: data.get('requested_date'),
+        requested_time: data.get('requested_time'),
+        message: data.get('message'),
+        brand: data.get('brand'),
+        service_interests: data.getAll('service_interests'),
+      }
+      try {
+        var res = await fetch('/api/office-visits/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!res.ok) {
+          var body = await res.json().catch(function () { return {} })
+          errorEl.textContent = body.error || 'Something went wrong. Please try again.'
+          errorEl.style.display = 'block'
+          return
+        }
+        form.style.display = 'none'
+        document.getElementById('ov-success').style.display = 'block'
+      } catch (err) {
+        errorEl.textContent = 'Something went wrong. Please check your connection and try again.'
+        errorEl.style.display = 'block'
+      }
+    })
+  </script>
+</body></html>`)
+})
+
 // POST /api/office-visits/request — public. A dental practice's website
 // form submits here. Matches a rep by state (repTerritories.js); no match
 // falls back to media@aimdentallab.com rather than silently dropping the
