@@ -4,7 +4,7 @@
   "description": "",
   "main": "src/index.js",
   "scripts": {
-    "test": "node --test test/evidentReport/*.test.js test/salesRepDailyReport/*.test.js test/goalBarAnimation.test.js test/evidentCrmSync.test.js test/reportApproval.test.js test/repProgressSuggestions.test.js test/repProgress.test.js test/goalProgress.test.js test/officeVisits/*.test.js",
+    "test": "node --test test/evidentReport/*.test.js test/salesRepDailyReport/*.test.js test/goalBarAnimation.test.js test/evidentCrmSync.test.js test/reportApproval.test.js test/repProgressSuggestions.test.js test/repProgress.test.js test/goalProgress.test.js test/officeVisits/*.test.js test/whatsappDailyPost.test.js",
     "dev": "node --watch src/index.js",
     "start": "node src/index.js"
   },

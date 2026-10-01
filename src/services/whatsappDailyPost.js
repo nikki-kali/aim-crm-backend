@@ -5,6 +5,7 @@ const {
   computeMonthlyDoctorsGoal,
   businessDaysLeftInMonth,
   lastBusinessDayEasternDateString,
+  listNewDoctorNamesOnDate,
 } = require('./salesRepDailyReport')
 const { PUSH_QUOTES } = require('./email')
 const { buildTeamProgressChartUrl } = require('./evidentReport/chart')
@@ -21,20 +22,22 @@ const pctOf = (cur, target) => (target > 0 ? Math.min(Math.round((Number(cur) / 
 // positive and team-first; no rep is singled out negatively.
 async function buildWhatsappDailyPost(dateStr = lastBusinessDayEasternDateString(), dayOfMonth = new Date().getDate()) {
   const { rows: users } = await db.query(
-    `SELECT name, email FROM users WHERE email = ANY($1::text[]) ORDER BY name`,
+    `SELECT id, name, email FROM users WHERE email = ANY($1::text[]) ORDER BY name`,
     [DAILY_REPORT_REP_EMAILS]
   )
   const reps = []
   for (const u of users) {
-    const [sales, doctors] = await Promise.all([
+    const [sales, doctors, wonToday] = await Promise.all([
       computeMonthlySalesGoal(u.email, dateStr),
       computeMonthlyDoctorsGoal(u.email, dateStr),
+      listNewDoctorNamesOnDate(u.id, dateStr),
     ])
     if (!sales || !doctors) continue
     reps.push({
       firstName: u.name.split(' ')[0],
       salesCur: Number(sales.current_value), salesTarget: Number(sales.target),
       docsCur: Number(doctors.current_value), docsTarget: Number(doctors.target),
+      wonToday,
     })
   }
   if (reps.length === 0) return null
@@ -47,7 +50,15 @@ async function buildWhatsappDailyPost(dateStr = lastBusinessDayEasternDateString
   const monthName = new Date(`${dateStr}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' })
   const daysLeft = businessDaysLeftInMonth(dateStr)
   const quote = PUSH_QUOTES[dayOfMonth % PUSH_QUOTES.length]
-  const line = (r) => `*${r.firstName}*\nSales: ${whole(r.salesCur)} of ${whole(r.salesTarget)} (${pctOf(r.salesCur, r.salesTarget)}%)\nNew doctors: ${r.docsCur} of ${r.docsTarget} (${pctOf(r.docsCur, r.docsTarget)}%)`
+  // "Won today" names (Ben's request, 2026-10-01) — only for today's real
+  // wins, not a month-to-date list, so it's omitted entirely on a quiet
+  // day rather than padded out with repeated names.
+  const line = (r) => [
+    `*${r.firstName}*`,
+    `Sales: ${whole(r.salesCur)} of ${whole(r.salesTarget)} (${pctOf(r.salesCur, r.salesTarget)}%)`,
+    `New doctors: ${r.docsCur} of ${r.docsTarget} (${pctOf(r.docsCur, r.docsTarget)}%)`,
+    ...(r.wonToday.length ? [`Won today: ${r.wonToday.join(', ')}`] : []),
+  ].join('\n')
 
   const caption = [
     `*Good morning, team!* Here is where we stand for ${monthName}.`,

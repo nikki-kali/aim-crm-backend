@@ -95,12 +95,22 @@ async function cleanupBooking(bookingId) {
   // concurrently in a different test file against this same real
   // database, per node:test's default of running files in parallel)
   // lazily re-issues a fresh token for any 'pending' booking missing one.
-  // Without this, that re-issue can race between the two deletes below
-  // and insert a new token row right after we've already cleared them,
-  // leaving a dangling FK that fails the booking delete.
+  // That closes most of the window, but a GET / that already read this
+  // booking as 'pending' a moment earlier can still insert a token right
+  // after our status flip (a genuine check-then-act race across two
+  // processes, not fully closeable without a DB-level lock) — so the
+  // final delete retries a few times, re-clearing tokens each attempt,
+  // rather than assuming one clean pass is enough.
   await db.query(`UPDATE office_visit_bookings SET status='declined' WHERE id = $1`, [bookingId])
-  await db.query(`DELETE FROM office_visit_tokens WHERE booking_id = $1`, [bookingId])
-  await db.query(`DELETE FROM office_visit_bookings WHERE id = $1`, [bookingId])
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await db.query(`DELETE FROM office_visit_tokens WHERE booking_id = $1`, [bookingId])
+    try {
+      await db.query(`DELETE FROM office_visit_bookings WHERE id = $1`, [bookingId])
+      return
+    } catch (err) {
+      if (err.code !== '23503' || attempt === 4) throw err
+    }
+  }
 }
 
 test('POST /request creates a pending booking, matches a rep by state, and returns 201', async () => {

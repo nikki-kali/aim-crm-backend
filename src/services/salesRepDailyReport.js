@@ -230,6 +230,23 @@ async function countNewDoctorsOnDate(repId, dateStr) {
   return Number(r.n)
 }
 
+// Same first-case-date logic as countNewDoctorsOnDate, but returns the
+// real doctor/practice names instead of just a count — backs the
+// WhatsApp team post's "won today" line (Ben's request, 2026-10-01).
+async function listNewDoctorNamesOnDate(repId, dateStr) {
+  const { rows } = await db.query(
+    `SELECT doctor_name FROM (
+       SELECT cl.doctor_name, MIN(c.created_at::date) AS first_case
+       FROM clients cl JOIN cases c ON c.client_name = cl.doctor_name
+       WHERE cl.assigned_to = $1
+       GROUP BY cl.doctor_name
+     ) x WHERE first_case = $2::date
+     ORDER BY doctor_name`,
+    [repId, dateStr]
+  )
+  return rows.map((r) => r.doctor_name)
+}
+
 // Same first-case-date logic as countNewDoctorsOnDate above, but summed
 // across the whole week (Monday through dateStr) rather than one day —
 // feeds the "Today" cards' weekly new-doctors pacing line (user request,
@@ -519,6 +536,7 @@ module.exports = {
   REPORT_CC,
   computeRepDailyEvidentStats,
   countNewDoctorsOnDate,
+  listNewDoctorNamesOnDate,
   countNewDoctorsThisWeek,
   weeksInMonth,
 }

@@ -58,11 +58,21 @@ async function cleanupBooking(bookingId) {
   if (!bookingId) return
   // Flip off 'pending' FIRST — GET /'s lazy token-reissue (I2) runs
   // concurrently against this same real database from a different test
-  // file (node:test's default), and can race between the two deletes
-  // below, inserting a fresh token right after we've cleared them.
+  // file (node:test's default). That closes most of the window, but a
+  // GET / that already read this booking as 'pending' a moment earlier
+  // can still insert a token right after our status flip (a genuine
+  // check-then-act race across two processes) — so the final delete
+  // retries a few times, re-clearing tokens each attempt.
   await db.query(`UPDATE office_visit_bookings SET status='declined' WHERE id = $1`, [bookingId])
-  await db.query(`DELETE FROM office_visit_tokens WHERE booking_id = $1`, [bookingId])
-  await db.query(`DELETE FROM office_visit_bookings WHERE id = $1`, [bookingId])
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await db.query(`DELETE FROM office_visit_tokens WHERE booking_id = $1`, [bookingId])
+    try {
+      await db.query(`DELETE FROM office_visit_bookings WHERE id = $1`, [bookingId])
+      return
+    } catch (err) {
+      if (err.code !== '23503' || attempt === 4) throw err
+    }
+  }
 }
 
 test('GET / requires auth', async () => {
