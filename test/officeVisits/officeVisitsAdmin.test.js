@@ -56,6 +56,11 @@ function call(server, method, path, { body, token } = {}) {
 // up exactly what it created.
 async function cleanupBooking(bookingId) {
   if (!bookingId) return
+  // Flip off 'pending' FIRST — GET /'s lazy token-reissue (I2) runs
+  // concurrently against this same real database from a different test
+  // file (node:test's default), and can race between the two deletes
+  // below, inserting a fresh token right after we've cleared them.
+  await db.query(`UPDATE office_visit_bookings SET status='declined' WHERE id = $1`, [bookingId])
   await db.query(`DELETE FROM office_visit_tokens WHERE booking_id = $1`, [bookingId])
   await db.query(`DELETE FROM office_visit_bookings WHERE id = $1`, [bookingId])
 }
@@ -158,6 +163,35 @@ test('GET / returns pending bookings with their approve/suggest-time tokens', as
     assert.ok(pending, 'the pending booking should be in the list')
     assert.ok(pending.approve_token)
     assert.ok(pending.suggest_time_token)
+  } finally {
+    server.close()
+    await cleanupBooking(bookingId)
+  }
+})
+
+test('GET / re-issues tokens for a pending booking whose original tokens expired (I2)', async () => {
+  const server = await startServer()
+  let bookingId
+  try {
+    const { rows: [james] } = await db.query(`SELECT id, email FROM users WHERE email='james@aimdentallab.com'`)
+    const { rows: [booking] } = await db.query(
+      `INSERT INTO office_visit_bookings (source, contact_name, phone, status, assigned_rep_id) VALUES ('public_form','Old Pending','555-0171','pending',$1) RETURNING id`,
+      [james.id]
+    )
+    bookingId = booking.id
+    // Simulate a token that expired 7+ days ago — same shape createToken
+    // produces, just already-expired, instead of waiting a real week.
+    await db.query(
+      `INSERT INTO office_visit_tokens (token, booking_id, action, expires_at) VALUES ('expired-approve-token',$1,'approve',NOW() - interval '1 day')`,
+      [bookingId]
+    )
+
+    const token = authedToken({ id: james.id, email: james.email, role: 'sales_rep' })
+    const res = await call(server, 'GET', '/api/office-visits-admin', { token })
+    const pending = res.body.find((b) => b.id === bookingId)
+    assert.ok(pending.approve_token, 'a fresh approve_token must be issued')
+    assert.notEqual(pending.approve_token, 'expired-approve-token', 'must be a NEW token, not the dead one')
+    assert.ok(pending.suggest_time_token, 'a fresh suggest_time_token must be issued too')
   } finally {
     server.close()
     await cleanupBooking(bookingId)

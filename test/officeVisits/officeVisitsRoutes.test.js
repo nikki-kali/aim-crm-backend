@@ -21,6 +21,7 @@ require.cache[emailModulePath] = {
 }
 
 const officeVisitsRoutes = require('../../src/routes/officeVisits')
+const { createToken, peekToken } = require('../../src/services/officeVisitTokens')
 
 function startServer() {
   const app = express()
@@ -84,144 +85,210 @@ function postForm(server, path, formFields) {
   })
 }
 
+// Whole-branch review finding (I7): these tests previously left every
+// synthetic booking/token row behind in the only database this project
+// has. Standing project rule: no staging DB exists, so a test must clean
+// up exactly what it created.
+async function cleanupBooking(bookingId) {
+  if (!bookingId) return
+  // Flip off 'pending' FIRST — officeVisitsAdmin.js's GET / (running
+  // concurrently in a different test file against this same real
+  // database, per node:test's default of running files in parallel)
+  // lazily re-issues a fresh token for any 'pending' booking missing one.
+  // Without this, that re-issue can race between the two deletes below
+  // and insert a new token row right after we've already cleared them,
+  // leaving a dangling FK that fails the booking delete.
+  await db.query(`UPDATE office_visit_bookings SET status='declined' WHERE id = $1`, [bookingId])
+  await db.query(`DELETE FROM office_visit_tokens WHERE booking_id = $1`, [bookingId])
+  await db.query(`DELETE FROM office_visit_bookings WHERE id = $1`, [bookingId])
+}
+
 test('POST /request creates a pending booking, matches a rep by state, and returns 201', async () => {
   const server = await startServer()
-  const res = await post(server, '/api/office-visits/request', {
-    practice_name: 'Smile Dental', contact_name: 'Jane Doe', phone: '555-0100',
-    email: 'jane@smiledental.com', address_line1: '123 Main St', city: 'Brooklyn', state: 'NY', zip: '11201',
-    requested_date: '2026-10-15', requested_time: '14:00', service_interests: ['Crowns & Bridges'],
-  })
-  assert.equal(res.status, 201)
-  const { rows } = await db.query(`SELECT * FROM office_visit_bookings WHERE id = $1`, [res.body.id])
-  assert.equal(rows[0].status, 'pending')
-  assert.equal(rows[0].source, 'public_form')
-  const { rows: repRows } = await db.query(`SELECT email FROM users WHERE id = $1`, [rows[0].assigned_rep_id])
-  assert.equal(repRows[0].email, 'james@aimdentallab.com')
-  server.close()
+  let bookingId
+  try {
+    const res = await post(server, '/api/office-visits/request', {
+      practice_name: 'Smile Dental', contact_name: 'Jane Doe', phone: '555-0100',
+      email: 'jane@smiledental.com', address_line1: '123 Main St', city: 'Brooklyn', state: 'NY', zip: '11201',
+      requested_date: '2026-10-15', requested_time: '14:00', service_interests: ['Crowns & Bridges'],
+    })
+    bookingId = res.body.id
+    assert.equal(res.status, 201)
+    const { rows } = await db.query(`SELECT * FROM office_visit_bookings WHERE id = $1`, [bookingId])
+    assert.equal(rows[0].status, 'pending')
+    assert.equal(rows[0].source, 'public_form')
+    const { rows: repRows } = await db.query(`SELECT email FROM users WHERE id = $1`, [rows[0].assigned_rep_id])
+    assert.equal(repRows[0].email, 'james@aimdentallab.com')
+  } finally {
+    server.close()
+    await cleanupBooking(bookingId)
+  }
 })
 
 test('POST /request with a state that matches no territory leaves assigned_rep_id null', async () => {
   const server = await startServer()
-  const res = await post(server, '/api/office-visits/request', {
-    contact_name: 'No Match', phone: '555-0199', email: 'nomatch@example.com', state: 'TX',
-    requested_date: '2026-10-15', requested_time: '14:00',
-  })
-  assert.equal(res.status, 201)
-  const { rows } = await db.query(`SELECT assigned_rep_id FROM office_visit_bookings WHERE id = $1`, [res.body.id])
-  assert.equal(rows[0].assigned_rep_id, null)
-  server.close()
+  let bookingId
+  try {
+    const res = await post(server, '/api/office-visits/request', {
+      contact_name: 'No Match', phone: '555-0199', email: 'nomatch@example.com', state: 'TX',
+      requested_date: '2026-10-15', requested_time: '14:00',
+    })
+    bookingId = res.body.id
+    assert.equal(res.status, 201)
+    const { rows } = await db.query(`SELECT assigned_rep_id FROM office_visit_bookings WHERE id = $1`, [bookingId])
+    assert.equal(rows[0].assigned_rep_id, null)
+  } finally {
+    server.close()
+    await cleanupBooking(bookingId)
+  }
 })
 
 test('POST /request rejects a missing required field', async () => {
   const server = await startServer()
-  const res = await post(server, '/api/office-visits/request', { contact_name: 'Missing Phone' })
-  assert.equal(res.status, 400)
-  server.close()
+  try {
+    const res = await post(server, '/api/office-visits/request', { contact_name: 'Missing Phone' })
+    assert.equal(res.status, 400)
+  } finally {
+    server.close()
+  }
 })
 
 test('GET /confirm shows a confirmation page for a valid approve token without consuming it', async () => {
   const server = await startServer()
-  const { rows } = await db.query(
-    `INSERT INTO office_visit_bookings (source, contact_name, phone, status) VALUES ('public_form','Jane','555-0100','pending') RETURNING id`
-  )
-  const { createToken, peekToken } = require('../../src/services/officeVisitTokens')
-  const token = await createToken({ bookingId: rows[0].id, action: 'approve' })
-  const res = await get(server, `/api/office-visits/confirm?token=${token}`)
-  assert.equal(res.status, 200)
-  assert.match(res.body, /Approve/)
-  const stillUsable = await peekToken(token)
-  assert.notEqual(stillUsable, null, 'GET must not consume the token')
-  server.close()
+  let bookingId
+  try {
+    const { rows } = await db.query(
+      `INSERT INTO office_visit_bookings (source, contact_name, phone, status) VALUES ('public_form','Jane','555-0100','pending') RETURNING id`
+    )
+    bookingId = rows[0].id
+    const token = await createToken({ bookingId, action: 'approve' })
+    const res = await get(server, `/api/office-visits/confirm?token=${token}`)
+    assert.equal(res.status, 200)
+    assert.match(res.body, /Approve/)
+    const stillUsable = await peekToken(token)
+    assert.notEqual(stillUsable, null, 'GET must not consume the token')
+  } finally {
+    server.close()
+    await cleanupBooking(bookingId)
+  }
 })
 
 test('GET /confirm with an unknown token returns 410', async () => {
   const server = await startServer()
-  const res = await get(server, '/api/office-visits/confirm?token=not-real')
-  assert.equal(res.status, 410)
-  server.close()
+  try {
+    const res = await get(server, '/api/office-visits/confirm?token=not-real')
+    assert.equal(res.status, 410)
+  } finally {
+    server.close()
+  }
 })
 
 test('POST /confirm with action=approve sets status approved and confirmed_date/time', async () => {
   const server = await startServer()
-  const { rows } = await db.query(
-    `INSERT INTO office_visit_bookings (source, contact_name, phone, email, status, requested_date, requested_time)
-     VALUES ('public_form','Jane','555-0100','jane@example.com','pending','2026-10-15','14:00') RETURNING id`
-  )
-  const { createToken } = require('../../src/services/officeVisitTokens')
-  const token = await createToken({ bookingId: rows[0].id, action: 'approve' })
-  const res = await post(server, '/api/office-visits/confirm', { token })
-  assert.equal(res.status, 200)
-  const { rows: after } = await db.query(`SELECT status, confirmed_date FROM office_visit_bookings WHERE id = $1`, [rows[0].id])
-  assert.equal(after[0].status, 'approved')
-  assert.notEqual(after[0].confirmed_date, null)
-  server.close()
+  let bookingId
+  try {
+    const { rows } = await db.query(
+      `INSERT INTO office_visit_bookings (source, contact_name, phone, email, status, requested_date, requested_time)
+       VALUES ('public_form','Jane','555-0100','jane@example.com','pending','2026-10-15','14:00') RETURNING id`
+    )
+    bookingId = rows[0].id
+    const token = await createToken({ bookingId, action: 'approve' })
+    const res = await post(server, '/api/office-visits/confirm', { token })
+    assert.equal(res.status, 200)
+    const { rows: after } = await db.query(`SELECT status, confirmed_date FROM office_visit_bookings WHERE id = $1`, [bookingId])
+    assert.equal(after[0].status, 'approved')
+    assert.notEqual(after[0].confirmed_date, null)
+  } finally {
+    server.close()
+    await cleanupBooking(bookingId)
+  }
 })
 
 test('POST /confirm works when submitted as a real browser <form> (application/x-www-form-urlencoded), not just JSON', async () => {
   const server = await startServer()
-  const { rows } = await db.query(
-    `INSERT INTO office_visit_bookings (source, contact_name, phone, email, status, requested_date, requested_time)
-     VALUES ('public_form','Jane','555-0100','jane@example.com','pending','2026-10-15','14:00') RETURNING id`
-  )
-  const { createToken } = require('../../src/services/officeVisitTokens')
-  const token = await createToken({ bookingId: rows[0].id, action: 'approve' })
-  const res = await postForm(server, '/api/office-visits/confirm', { token })
-  assert.equal(res.status, 200, `expected 200, got ${res.status}: ${res.body}`)
-  const { rows: after } = await db.query(`SELECT status FROM office_visit_bookings WHERE id = $1`, [rows[0].id])
-  assert.equal(after[0].status, 'approved')
-  server.close()
+  let bookingId
+  try {
+    const { rows } = await db.query(
+      `INSERT INTO office_visit_bookings (source, contact_name, phone, email, status, requested_date, requested_time)
+       VALUES ('public_form','Jane','555-0100','jane@example.com','pending','2026-10-15','14:00') RETURNING id`
+    )
+    bookingId = rows[0].id
+    const token = await createToken({ bookingId, action: 'approve' })
+    const res = await postForm(server, '/api/office-visits/confirm', { token })
+    assert.equal(res.status, 200, `expected 200, got ${res.status}: ${res.body}`)
+    const { rows: after } = await db.query(`SELECT status FROM office_visit_bookings WHERE id = $1`, [bookingId])
+    assert.equal(after[0].status, 'approved')
+  } finally {
+    server.close()
+    await cleanupBooking(bookingId)
+  }
 })
 
 test('POST /confirm with action=suggest_time sets status time_suggested', async () => {
   const server = await startServer()
-  const { rows } = await db.query(
-    `INSERT INTO office_visit_bookings (source, contact_name, phone, email, status)
-     VALUES ('public_form','Jane','555-0100','jane@example.com','pending') RETURNING id`
-  )
-  const { createToken } = require('../../src/services/officeVisitTokens')
-  const token = await createToken({ bookingId: rows[0].id, action: 'suggest_time' })
-  const res = await post(server, '/api/office-visits/confirm', { token })
-  assert.equal(res.status, 200)
-  const { rows: after } = await db.query(`SELECT status FROM office_visit_bookings WHERE id = $1`, [rows[0].id])
-  assert.equal(after[0].status, 'time_suggested')
-  server.close()
+  let bookingId
+  try {
+    const { rows } = await db.query(
+      `INSERT INTO office_visit_bookings (source, contact_name, phone, email, status)
+       VALUES ('public_form','Jane','555-0100','jane@example.com','pending') RETURNING id`
+    )
+    bookingId = rows[0].id
+    const token = await createToken({ bookingId, action: 'suggest_time' })
+    const res = await post(server, '/api/office-visits/confirm', { token })
+    assert.equal(res.status, 200)
+    const { rows: after } = await db.query(`SELECT status FROM office_visit_bookings WHERE id = $1`, [bookingId])
+    assert.equal(after[0].status, 'time_suggested')
+  } finally {
+    server.close()
+    await cleanupBooking(bookingId)
+  }
 })
 
 test('POST /confirm with an already-used token returns 410 and does not re-send', async () => {
   const server = await startServer()
-  const { rows } = await db.query(
-    `INSERT INTO office_visit_bookings (source, contact_name, phone, email, status)
-     VALUES ('public_form','Jane','555-0100','jane@example.com','pending') RETURNING id`
-  )
-  const { createToken } = require('../../src/services/officeVisitTokens')
-  const token = await createToken({ bookingId: rows[0].id, action: 'approve' })
-  await post(server, '/api/office-visits/confirm', { token })
-  const second = await post(server, '/api/office-visits/confirm', { token })
-  assert.equal(second.status, 410)
-  server.close()
+  let bookingId
+  try {
+    const { rows } = await db.query(
+      `INSERT INTO office_visit_bookings (source, contact_name, phone, email, status)
+       VALUES ('public_form','Jane','555-0100','jane@example.com','pending') RETURNING id`
+    )
+    bookingId = rows[0].id
+    const token = await createToken({ bookingId, action: 'approve' })
+    await post(server, '/api/office-visits/confirm', { token })
+    const second = await post(server, '/api/office-visits/confirm', { token })
+    assert.equal(second.status, 410)
+  } finally {
+    server.close()
+    await cleanupBooking(bookingId)
+  }
 })
 
 test('clicking the sibling action after one was already taken does not contradict it or overwrite the confirmed slot', async () => {
   const server = await startServer()
-  const { rows } = await db.query(
-    `INSERT INTO office_visit_bookings (source, contact_name, phone, email, status, requested_date, requested_time)
-     VALUES ('public_form','Jane','555-0100','jane@example.com','pending','2026-10-15','14:00') RETURNING id`
-  )
-  const { createToken } = require('../../src/services/officeVisitTokens')
-  const approveToken = await createToken({ bookingId: rows[0].id, action: 'approve' })
-  const suggestToken = await createToken({ bookingId: rows[0].id, action: 'suggest_time' })
+  let bookingId
+  try {
+    const { rows } = await db.query(
+      `INSERT INTO office_visit_bookings (source, contact_name, phone, email, status, requested_date, requested_time)
+       VALUES ('public_form','Jane','555-0100','jane@example.com','pending','2026-10-15','14:00') RETURNING id`
+    )
+    bookingId = rows[0].id
+    const approveToken = await createToken({ bookingId, action: 'approve' })
+    const suggestToken = await createToken({ bookingId, action: 'suggest_time' })
 
-  // Rep approves from the email.
-  const approveRes = await post(server, '/api/office-visits/confirm', { token: approveToken })
-  assert.equal(approveRes.status, 200)
+    // Rep approves from the email.
+    const approveRes = await post(server, '/api/office-visits/confirm', { token: approveToken })
+    assert.equal(approveRes.status, 200)
 
-  // The OTHER token (suggest_time), from the same original email, is
-  // clicked later — it must be dead (410), not silently flip the booking
-  // back to pending and tell the practice their confirmed visit is
-  // actually "not yet confirmed".
-  const suggestRes = await post(server, '/api/office-visits/confirm', { token: suggestToken })
-  assert.equal(suggestRes.status, 410)
-  const { rows: after } = await db.query(`SELECT status FROM office_visit_bookings WHERE id = $1`, [rows[0].id])
-  assert.equal(after[0].status, 'approved', 'the booking must still be approved, not flipped to time_suggested')
-  server.close()
+    // The OTHER token (suggest_time), from the same original email, is
+    // clicked later — it must be dead (410), not silently flip the booking
+    // back to pending and tell the practice their confirmed visit is
+    // actually "not yet confirmed".
+    const suggestRes = await post(server, '/api/office-visits/confirm', { token: suggestToken })
+    assert.equal(suggestRes.status, 410)
+    const { rows: after } = await db.query(`SELECT status FROM office_visit_bookings WHERE id = $1`, [bookingId])
+    assert.equal(after[0].status, 'approved', 'the booking must still be approved, not flipped to time_suggested')
+  } finally {
+    server.close()
+    await cleanupBooking(bookingId)
+  }
 })

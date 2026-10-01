@@ -55,6 +55,20 @@ router.get('/', async (req, res) => {
         acc[t.booking_id][t.action === 'approve' ? 'approve_token' : 'suggest_time_token'] = t.token
         return acc
       }, {})
+      // Any pending booking older than the 7-day token TTL has no live
+      // token for one or both actions — without this, the CRM's own
+      // inline Approve/Suggest-time buttons silently stop working and
+      // the booking is stuck in `pending` forever, since the public
+      // email links expired too. Whole-branch review finding
+      // (Important): re-issue whichever action is missing, right here,
+      // so a booking a rep hasn't gotten to in a week is never
+      // unreachable from the CRM.
+      for (const id of pendingIds) {
+        const existing = tokensByBooking[id] || {}
+        if (!existing.approve_token) existing.approve_token = await createToken({ bookingId: id, action: 'approve' })
+        if (!existing.suggest_time_token) existing.suggest_time_token = await createToken({ bookingId: id, action: 'suggest_time' })
+        tokensByBooking[id] = existing
+      }
     }
     const withTokens = rows.map((r) => normalizeBookingDates({ ...r, ...(tokensByBooking[r.id] || {}) }))
     return res.json(withTokens)
