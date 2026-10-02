@@ -3,7 +3,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const crypto = require('crypto')
 const db = require('../../src/config/db')
-const { listNewDoctorNamesOnDate } = require('../../src/services/salesRepDailyReport')
+const { listNewDoctorNamesOnDate, listNewDoctorNamesThisWeek } = require('../../src/services/salesRepDailyReport')
 
 async function makeTestDoctor(repId, firstCaseDate, nameSuffix) {
   const doctorName = `TEST DOCTOR WHATSAPP ${nameSuffix} ${crypto.randomBytes(3).toString('hex')}`
@@ -56,4 +56,30 @@ test('listNewDoctorNamesOnDate returns an empty array for a rep with no new doct
   const { rows: [james] } = await db.query(`SELECT id FROM users WHERE email='james@aimdentallab.com'`)
   const names = await listNewDoctorNamesOnDate(james.id, '1999-01-01')
   assert.deepEqual(names, [])
+})
+
+test('listNewDoctorNamesThisWeek returns real doctor names whose first case fell Monday-through-dateStr', async () => {
+  const { rows: [james] } = await db.query(`SELECT id FROM users WHERE email='james@aimdentallab.com'`)
+  const dateStr = '2026-09-24' // Thursday; week start (Monday) is 2026-09-21
+  const before = await listNewDoctorNamesThisWeek(james.id, dateStr)
+  const name = await makeTestDoctor(james.id, '2026-09-22', 'THISWEEK')
+  try {
+    const after = await listNewDoctorNamesThisWeek(james.id, dateStr)
+    assert.equal(after.length, before.length + 1)
+    assert.ok(after.includes(name))
+  } finally {
+    await cleanup(name)
+  }
+})
+
+test('listNewDoctorNamesThisWeek excludes a doctor whose first case was the prior week', async () => {
+  const { rows: [james] } = await db.query(`SELECT id FROM users WHERE email='james@aimdentallab.com'`)
+  const dateStr = '2026-09-24'
+  const name = await makeTestDoctor(james.id, '2026-09-18', 'PRIORWEEK')
+  try {
+    const names = await listNewDoctorNamesThisWeek(james.id, dateStr)
+    assert.ok(!names.includes(name))
+  } finally {
+    await cleanup(name)
+  }
 })

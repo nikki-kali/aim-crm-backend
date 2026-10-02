@@ -265,6 +265,25 @@ async function countNewDoctorsThisWeek(repId, dateStr) {
   return Number(r.n)
 }
 
+// Same Monday-through-dateStr window as countNewDoctorsThisWeek above, but
+// returns the real doctor/practice names instead of a count — backs the
+// WhatsApp team post's "acquired this week" line (user request,
+// 2026-10-02).
+async function listNewDoctorNamesThisWeek(repId, dateStr) {
+  const weekStart = mondayOfWeekEastern(dateStr)
+  const { rows } = await db.query(
+    `SELECT doctor_name FROM (
+       SELECT cl.doctor_name, MIN(c.created_at::date) AS first_case
+       FROM clients cl JOIN cases c ON c.client_name = cl.doctor_name
+       WHERE cl.assigned_to = $1
+       GROUP BY cl.doctor_name
+     ) x WHERE first_case BETWEEN $2::date AND $3::date
+     ORDER BY doctor_name`,
+    [repId, weekStart, dateStr]
+  )
+  return rows.map((r) => r.doctor_name)
+}
+
 // Rough weekly pace for a monthly new-doctors target: the month's target
 // spread evenly across its calendar weeks (Math.ceil so a partial week at
 // the target's tail still counts as a full week to hit, e.g. an 18-doctor
@@ -538,5 +557,6 @@ module.exports = {
   countNewDoctorsOnDate,
   listNewDoctorNamesOnDate,
   countNewDoctorsThisWeek,
+  listNewDoctorNamesThisWeek,
   weeksInMonth,
 }
