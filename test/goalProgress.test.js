@@ -16,6 +16,11 @@ const { computeProgress } = require('../src/services/goalProgress')
 // old metric missed her as a September new doctor entirely). The fix
 // counts by the doctor's real first case date instead, matching
 // salesRepDailyReport.js's countNewDoctorsOnDate exactly.
+// March 2025 on purpose: a closed month no other test file counts. These
+// tests compare James's whole-month count before/after one insert, and
+// other files run in parallel inserting James test doctors dated
+// mid-September 2026, which made a September period here flaky. Same
+// scenario as the real Dr. Lopez case, shifted to a quiet month.
 async function makeTestDoctor(repId, { firstCaseDate, clientCreatedAt }) {
   const doctorName = `TEST DOCTOR GOALPROGRESS ${crypto.randomBytes(4).toString('hex')}`
   await db.query(
@@ -37,13 +42,13 @@ async function cleanupTestDoctor(doctorName) {
 
 test('computeProgress new_doctors counts a doctor by real first-case date, not when the client row was created', async () => {
   const { rows: [james] } = await db.query(`SELECT id FROM users WHERE email='james@aimdentallab.com'`)
-  const period = { period_start: '2026-09-01', period_end: '2026-09-30' }
+  const period = { period_start: '2025-03-01', period_end: '2025-03-31' }
   const before = await computeProgress({ rep_id: james.id, metric: 'new_doctors', target: 100, ...period })
 
   // First case Sept 30 (inside the goal period), client row created Oct 1
   // (outside it) — exactly the real Lopez scenario.
   const doctorName = await makeTestDoctor(james.id, {
-    firstCaseDate: '2026-09-30', clientCreatedAt: '2026-10-01',
+    firstCaseDate: '2025-03-31', clientCreatedAt: '2025-04-01',
   })
   try {
     const after = await computeProgress({ rep_id: james.id, metric: 'new_doctors', target: 100, ...period })
@@ -56,14 +61,14 @@ test('computeProgress new_doctors counts a doctor by real first-case date, not w
 
 test('computeProgress new_doctors does NOT count a doctor whose first case falls outside the period, even if the client row was created inside it', async () => {
   const { rows: [james] } = await db.query(`SELECT id FROM users WHERE email='james@aimdentallab.com'`)
-  const period = { period_start: '2026-09-01', period_end: '2026-09-30' }
+  const period = { period_start: '2025-03-01', period_end: '2025-03-31' }
   const before = await computeProgress({ rep_id: james.id, metric: 'new_doctors', target: 100, ...period })
 
   // Inverse of the real bug scenario: first case in August, but the
   // client row happens to have been created in September. A real
   // September new-doctors goal must NOT count her.
   const doctorName = await makeTestDoctor(james.id, {
-    firstCaseDate: '2026-08-15', clientCreatedAt: '2026-09-05',
+    firstCaseDate: '2025-02-15', clientCreatedAt: '2025-03-05',
   })
   try {
     const after = await computeProgress({ rep_id: james.id, metric: 'new_doctors', target: 100, ...period })

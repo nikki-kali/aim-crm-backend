@@ -1,7 +1,7 @@
 const db = require('../config/db')
 const { sendEmail, salesRepDailyReportEmail } = require('./email')
 const { fetchEvidentEmailsInRange } = require('./evidentReport/gmailFetch')
-const { extractDailyBookedCustomerNames, extractBookingRows, extractBilledRows } = require('./evidentReport/parseEvident')
+const { extractDailyBookedCustomerNames, extractBookingRows, extractBilledRows, parseTable, rowToObj, extractRepColumns } = require('./evidentReport/parseEvident')
 const { computeProgress } = require('./goalProgress')
 const { APPROVER_EMAIL, createApprovalToken, buildApproveUrl, injectApprovalBanner } = require('./reportApproval')
 const { renderGoalBarsGif } = require('./goalBarGifRenderer')
@@ -68,6 +68,97 @@ async function computeMonthlySalesGoal(repEmail, dateStr) {
     console.error(`[sales-rep-daily-report] failed to compute monthly sales goal for ${repEmail}:`, err.message)
     return null
   }
+}
+
+// Monthly Sales = BILLED (invoiced) for the month — Elizabeth, 2026-10-02:
+// "sales should always use billed... booked just means we've secured the
+// business." Taken straight from Evident's own per-rep MTD emails (billed:
+// "Daily MTD Total Billed", matches EviSmart Report #40; booked: "MTD Booked
+// Daily Update", matches Report #12), never summed from CRM case dates — a
+// case booked in September but billed Oct 1 is created in the CRM on Oct 1
+// (real case #6252), which made that sum misattribute months.
+const MTD_SUBJECT = { billed: /^Daily MTD Total Billed/i, booked: /^MTD Booked Daily Update/i }
+const MTD_QUERY = { billed: 'Daily MTD Total Billed', booked: 'MTD Booked Daily Update' }
+
+// Picks the latest MTD email of `kind` dated on or before `dateStr` in the
+// same calendar month, and returns its per-rep totals. Pure, so the month
+// boundary is testable without Gmail.
+function pickMtdByRepAsOf(messages, dateStr, kind = 'billed') {
+  const monthStart = `${dateStr.slice(0, 7)}-01`
+  const candidates = messages
+    .filter((m) => MTD_SUBJECT[kind].test(m.subject || '') && m.date >= monthStart && m.date <= dateStr)
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+  for (const m of candidates) {
+    const t = parseTable(m.html || '')
+    if (!t || t.rows.length === 0) continue
+    const byRep = extractRepColumns(t.headers, rowToObj(t.headers, t.rows[t.rows.length - 1]))
+    if (byRep) return byRep
+  }
+  return null
+}
+
+const gmailDate = (dateStr, addDays) => {
+  const d = new Date(`${dateStr}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + addDays)
+  return d.toISOString().slice(0, 10).replace(/-/g, '/')
+}
+
+// Short-lived cache: every rep (and the WhatsApp post's "last month" line)
+// asks about the same date, and each Gmail fetch is throttled per message.
+// Expires so a later re-run the same day still sees a newer email.
+const mtdCache = new Map()
+const MTD_CACHE_MS = 10 * 60 * 1000
+
+async function fetchMtdByRepAsOf(dateStr, kind) {
+  const cacheKey = `${kind}|${dateStr}`
+  const hit = mtdCache.get(cacheKey)
+  if (hit && Date.now() - hit.at < MTD_CACHE_MS) return hit.promise
+  const monthStart = `${dateStr.slice(0, 7)}-01`
+  const promise = fetchEvidentEmailsInRange(
+    `subject:"${MTD_QUERY[kind]}" after:${gmailDate(monthStart, -1)} before:${gmailDate(dateStr, 2)}`
+  ).then((msgs) => pickMtdByRepAsOf(msgs, dateStr, kind))
+  mtdCache.set(cacheKey, { at: Date.now(), promise })
+  promise.catch(() => mtdCache.delete(cacheKey))
+  return promise
+}
+
+// The rep's real month-to-date total (billed by default) for dateStr's
+// month, or null when Evident's email isn't available (callers show "—",
+// never a guess).
+async function evidentMtdForRep(repEmail, dateStr, kind = 'billed') {
+  const key = EVIDENT_REP_KEY_BY_EMAIL[repEmail]
+  if (!key) return null
+  try {
+    const byRep = await fetchMtdByRepAsOf(dateStr, kind)
+    return byRep ? byRep[key] : null
+  } catch (err) {
+    console.error(`[sales-rep-daily-report] failed to fetch Evident MTD ${kind} for ${repEmail} as of ${dateStr}:`, err.message)
+    return null
+  }
+}
+
+// Company month-to-date total (every rep plus N/A) from the same email.
+async function evidentMtdCompanyTotal(dateStr, kind) {
+  try {
+    const byRep = await fetchMtdByRepAsOf(dateStr, kind)
+    return byRep ? Math.round((byRep.na + byRep.james + byRep.william) * 100) / 100 : null
+  } catch (err) {
+    console.error(`[sales-rep-daily-report] failed to fetch Evident company MTD ${kind} as of ${dateStr}:`, err.message)
+    return null
+  }
+}
+
+function lastDayOfPriorMonth(dateStr) {
+  const [y, m] = dateStr.split('-').map(Number)
+  const d = new Date(Date.UTC(y, m - 1, 0))
+  return d.toISOString().slice(0, 10)
+}
+
+function applySalesFromEvidentMtd(goal, mtdValue) {
+  if (!goal || mtdValue === null || mtdValue === undefined) return null
+  const target = Number(goal.target)
+  const pct = target > 0 ? Math.min(Math.round((mtdValue / target) * 100), 100) : 0
+  return { ...goal, current_value: mtdValue, progress_pct: pct }
 }
 
 // Calendar-month fallback new-doctors targets — only used when a rep has no
@@ -426,7 +517,10 @@ async function buildDailyReportHtml(repName, repEmail, dateStr, status, { test =
   const dateLabel = new Date(`${dateStr}T12:00:00`).toLocaleDateString('en-US', {
     weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
   })
-  const salesGoal = await computeMonthlySalesGoal(repEmail, dateStr)
+  const salesGoal = applySalesFromEvidentMtd(
+    await computeMonthlySalesGoal(repEmail, dateStr),
+    await evidentMtdForRep(repEmail, dateStr, 'billed')
+  )
   const doctorsGoal = await computeMonthlyDoctorsGoal(repEmail, dateStr)
   const daysLeft = businessDaysLeftInMonth(dateStr)
 
@@ -559,4 +653,9 @@ module.exports = {
   countNewDoctorsThisWeek,
   listNewDoctorNamesThisWeek,
   weeksInMonth,
+  pickMtdByRepAsOf,
+  evidentMtdForRep,
+  evidentMtdCompanyTotal,
+  lastDayOfPriorMonth,
+  applySalesFromEvidentMtd,
 }

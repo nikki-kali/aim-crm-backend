@@ -60,6 +60,7 @@ function classify(subject) {
   if (/^Daily Billed Report\s*-\s*Nadine/i.test(s)) return { type: 'companyDailyBilled' };
   if (/^Daily MTD Total Billed/i.test(s)) return { type: 'companyMtdBilled' };
   if (/^MTD Booked Daily Update/i.test(s)) return { type: 'companyMtdBooked' };
+  if (/^YTD Billed Cases\s*-\s*Nadine/i.test(s)) return { type: 'companyYtdBilled' };
   return { type: 'other' };
 }
 
@@ -188,16 +189,17 @@ function extractBilledRows(html) {
 // this exactly matches whatever total Evident itself considers each rep's
 // MTD share to be. Returns null if any column is missing (report's shape
 // changed) rather than silently returning zeros.
+// Evident leaves a rep's column out entirely when that rep has nothing for
+// the period (real 2026-10-01 MTD Booked Daily Update: no "Delaney, James"
+// column because James had $0 booked) — so a missing column is $0 for that
+// rep, not a reason to throw away every rep's figure.
 function extractRepColumns(headers, totalsRow) {
   const naCol = findCol(headers, 'N/A');
   const jamesCol = findCol(headers, 'Delaney');
   const williamCol = findCol(headers, 'Alexander');
-  if (!naCol || !jamesCol || !williamCol) return null;
-  return {
-    na: toNum(totalsRow[naCol]),
-    james: toNum(totalsRow[jamesCol]),
-    william: toNum(totalsRow[williamCol]),
-  };
+  if (!naCol && !jamesCol && !williamCol) return null;
+  const val = (col) => (col ? toNum(totalsRow[col]) : 0);
+  return { na: val(naCol), james: val(jamesCol), william: val(williamCol) };
 }
 
 // Reads the "Totals" table from a real "EviSmart Daily Sales Report"
@@ -437,12 +439,24 @@ function extractEviSmartTotals(html) {
 // it, since agg.companyMtdBooked/Billed default to 0 when their EXPECTED
 // entry is missing. Returns null unchanged when EviSmart itself has no
 // usable pull that day (nothing to overlay onto).
+// Elizabeth, 2026-10-02: use only Reports #12 (booked), #40 (billed) and
+// #41 (booked cross-check) — not EviSmart's #92 (MTD booked), #97 (daily
+// booked) or #94 (YTD). So booked figures come from Evident's own emails
+// that match #12, billed MTD from the email matching #40, and YTD from
+// "YTD Billed Cases" (sales = billed). EviSmart still supplies Daily Billed
+// (Financials > Customer Activity, which she named as a reliable source).
+// A missing Evident email shows "N/A", never an EviSmart #92/#97/#94 value.
 function applyEmailMtdTotals(eviSmart, agg) {
   if (!eviSmart) return null;
+  const has = (label) => !agg.missing.includes(label);
   return {
     ...eviSmart,
-    mtdBookedValue: agg.missing.includes('MTD Booked Daily Update') ? eviSmart.mtdBookedValue : agg.companyMtdBooked,
-    mtdBilledValue: agg.missing.includes('Daily MTD Total Billed') ? eviSmart.mtdBilledValue : agg.companyMtdBilled,
+    dailyBookedValue: has('Daily Booking Report - Nadine') ? agg.companyDailyBooked : null,
+    dailyBookedCount: has('Daily Booking Report - Nadine') ? agg.companyDailyBookedCount : null,
+    mtdBookedValue: has('MTD Booked Daily Update') ? agg.companyMtdBooked : null,
+    mtdBookedCount: null,
+    mtdBilledValue: has('Daily MTD Total Billed') ? agg.companyMtdBilled : eviSmart.mtdBilledValue,
+    ytdTotalSalesValue: agg.companyYtdBilled,
   };
 }
 
@@ -468,6 +482,7 @@ function parseAndAggregate(messages, { runDate } = {}) {
   const found = {
     dailyBooked: {}, mtdBooked: {}, ytdBooked: {}, wip: null,
     companyDailyBooked: null, companyDailyBilled: null, companyMtdBilled: null, companyMtdBooked: null,
+    companyYtdBilled: null, companyYtdBilledByRep: null,
   };
 
   for (const msg of messages) {
@@ -555,6 +570,19 @@ function parseAndAggregate(messages, { runDate } = {}) {
     // Value (Total)"). New as of 2026-09-16; before this, no automated
     // report gave a true company-wide MTD Booked figure at all, so
     // buildReport.js fell back to self-accumulating from daily totals.
+    // Company YTD billed (invoice date Jan 1 to date) — the YTD Total Sales
+    // figure since "sales = billed" (Elizabeth/user, 2026-10-02), replacing
+    // EviSmart's Report #94 row. Not in EXPECTED: its absence just shows
+    // "N/A" for YTD rather than gating the day's log write.
+    if (cls.type === 'companyYtdBilled') {
+      if (!table || table.rows.length === 0) continue;
+      const { headers, rows } = table;
+      const totalsRow = rowToObj(headers, rows[rows.length - 1]);
+      found.companyYtdBilled = toNum(totalsRow[findCol(headers, 'Sales Value (Total Billed)')]);
+      found.companyYtdBilledByRep = extractRepColumns(headers, totalsRow);
+      continue;
+    }
+
     if (cls.type === 'companyMtdBooked') {
       if (!table || table.rows.length === 0) { found.companyMtdBooked = 0; found.companyMtdBookedByRep = null; continue; }
       const { headers, rows } = table;
@@ -639,6 +667,8 @@ function parseAndAggregate(messages, { runDate } = {}) {
     companyMtdBilledByRep: found.companyMtdBilledByRep || null,
     companyMtdBooked: found.companyMtdBooked || 0,
     companyMtdBookedByRep: found.companyMtdBookedByRep || null,
+    companyYtdBilled: found.companyYtdBilled,
+    companyYtdBilledByRep: found.companyYtdBilledByRep,
     missing,
   };
 }

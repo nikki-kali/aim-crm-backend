@@ -660,16 +660,17 @@ test('applyEmailMtdTotals: company MTD Booked/Billed come from the two Evident e
   const out = applyEmailMtdTotals(eviSmart, agg);
   assert.equal(out.mtdBilledValue, 153193.25);
   assert.equal(out.mtdBookedValue, 147242.08);
-  // everything else stays EviSmart's, including the MTD case count (the emails have none)
-  assert.equal(out.mtdBookedCount, 1399);
+  // No MTD case count: EviSmart's comes from Report #92, which Elizabeth
+  // said not to use (2026-10-02), and the Evident emails carry none.
+  assert.equal(out.mtdBookedCount, null);
   assert.deepEqual(out.lastMonth, { booked: 9, billed: 9 });
   assert.equal(eviSmart.mtdBilledValue, 151750.25, 'input is not mutated');
 });
 
-test('applyEmailMtdTotals: an email that did not arrive keeps EviSmart figure for just that metric', () => {
+test('applyEmailMtdTotals: a missing booked email shows N/A (never EviSmart #92); a missing billed email keeps EviSmart #40', () => {
   const eviSmart = { mtdBookedValue: 100, mtdBilledValue: 200 };
   const out = applyEmailMtdTotals(eviSmart, { companyMtdBooked: 0, companyMtdBilled: 250, missing: ['MTD Booked Daily Update'] });
-  assert.equal(out.mtdBookedValue, 100);
+  assert.equal(out.mtdBookedValue, null);
   assert.equal(out.mtdBilledValue, 250);
   const out2 = applyEmailMtdTotals(eviSmart, { companyMtdBooked: 150, companyMtdBilled: 0, missing: ['Daily MTD Total Billed'] });
   assert.equal(out2.mtdBookedValue, 150);

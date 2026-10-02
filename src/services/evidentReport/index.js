@@ -1,5 +1,5 @@
 const { fetchEvidentEmails, fetchEviSmartEmails } = require('./gmailFetch')
-const { parseAndAggregate, pickEviSmartForDate, applyEmailMtdTotals } = require('./parseEvident')
+const { parseAndAggregate, pickEviSmartForDate, applyEmailMtdTotals, repKeyFromSalesperson } = require('./parseEvident')
 const { buildCombinedLeadershipEmail } = require('./buildReport')
 const { getHistory, appendRow } = require('./log')
 const { sendEmail } = require('../email')
@@ -8,7 +8,7 @@ const { buildHoldUrl } = require('../reportHold')
 const { todayEt } = require('../cronRuns')
 const db = require('../../config/db')
 const { computeProgress } = require('../goalProgress')
-const { DAILY_REPORT_REP_EMAILS } = require('../salesRepDailyReport')
+const { DAILY_REPORT_REP_EMAILS, evidentMtdCompanyTotal, lastDayOfPriorMonth } = require('../salesRepDailyReport')
 
 const RECIPIENTS = ['ben@aimdentallab.com', 'execassistant@aimdentallab.com', 'yoel@khdentallab.com']
 
@@ -19,7 +19,7 @@ const RECIPIENTS = ['ben@aimdentallab.com', 'execassistant@aimdentallab.com', 'y
 // purpose: that file stays a pure function of (agg, historyRows, ...) with
 // no DB access, so its existing tests never need a database. Same reason
 // overrides/repGoals are both passed in rather than queried inside it.
-async function fetchRepGoalsWithProgress() {
+async function fetchRepGoalsWithProgress(runDate) {
   const { rows: reps } = await db.query(
     `SELECT id, name, email FROM users WHERE email = ANY($1::text[]) ORDER BY name`,
     [DAILY_REPORT_REP_EMAILS]
@@ -27,13 +27,44 @@ async function fetchRepGoalsWithProgress() {
   const result = []
   for (const rep of reps) {
     const { rows: goals } = await db.query(
-      `SELECT * FROM goals WHERE rep_id=$1 AND period_start <= CURRENT_DATE AND period_end >= CURRENT_DATE ORDER BY created_at`,
-      [rep.id]
+      `SELECT * FROM goals WHERE rep_id=$1 AND period_start <= $2::date AND period_end >= $2::date ORDER BY created_at`,
+      [rep.id, runDate]
     )
     const withProgress = await Promise.all(goals.map(computeProgress))
     result.push({ repName: rep.name || rep.email, goals: withProgress })
   }
   return result
+}
+
+// Each rep's Revenue goal = BILLED for the month (Elizabeth, 2026-10-02:
+// "sales = billed"), taken from the same day's "Daily MTD Total Billed" the
+// report's MTD Billed card shows — so the bar and the card can never
+// disagree. Without that email the Revenue bar is left out rather than
+// filled from the CRM, whose case dates count a September case billed in
+// October as an October sale.
+// Last month for the month-over-month section: booked from the prior
+// month's final "MTD Booked Daily Update" (#12), billed from its final
+// "Daily MTD Total Billed" (#40) — per Elizabeth, not EviSmart's #92 row.
+async function evidentLastMonth(runDate) {
+  const prior = lastDayOfPriorMonth(runDate)
+  const [booked, billed] = await Promise.all([evidentMtdCompanyTotal(prior, 'booked'), evidentMtdCompanyTotal(prior, 'billed')])
+  if (booked == null || billed == null) return null
+  return { monthName: new Date(`${prior}T12:00:00Z`).toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' }), booked, billed }
+}
+
+function applyEvidentMtdToGoals(repGoals, mtdByRep) {
+  return repGoals.map((rep) => {
+    const key = repKeyFromSalesperson(rep.repName)
+    const goals = rep.goals.flatMap((g) => {
+      if (g.metric !== 'monthly_revenue') return [g]
+      if (!mtdByRep || !key) return []
+      const current = mtdByRep[key]
+      const target = Number(g.target)
+      const pct = target > 0 ? Math.min(Math.round((current / target) * 100), 100) : 0
+      return [{ ...g, current_value: current, progress_pct: pct }]
+    })
+    return { ...rep, goals }
+  })
 }
 
 // Fetches the real "EviSmart Daily Sales Report" and returns its parsed
@@ -119,6 +150,7 @@ async function runEvidentReport({ requireEviSmart = false } = {}) {
 
   console.log('[evident-report] fetching EviSmart Daily Sales Report...')
   aggregate.eviSmart = applyEmailMtdTotals(await fetchEviSmartTotals(runDate), aggregate)
+  if (aggregate.eviSmart) aggregate.eviSmart.lastMonth = await evidentLastMonth(runDate)
   if (!aggregate.eviSmart) {
     console.warn('[evident-report] EviSmart Daily Sales Report unavailable — Daily/MTD/YTD Booked/Billed will show as "—"')
   }
@@ -127,7 +159,7 @@ async function runEvidentReport({ requireEviSmart = false } = {}) {
     throw Object.assign(new Error(`[evident-report] no usable EviSmart Daily Sales Report for ${runDate}, not sending to leadership`), { code: 'EVISMART_UNAVAILABLE' })
   }
 
-  const repGoals = await fetchRepGoalsWithProgress()
+  const repGoals = applyEvidentMtdToGoals(await fetchRepGoalsWithProgress(runDate), aggregate.companyMtdBilledByRep)
   const { subject, html, sheetRow } = buildCombinedLeadershipEmail(aggregate, historyRows, repGoals, {})
 
   // One combined email (leadership request, 2026-09-23 — supersedes Ben
@@ -190,7 +222,8 @@ async function sendEvidentReportForApproval() {
   const messages = (await fetchEvidentEmails()).filter((m) => m.date === runDate)
   const aggregate = parseAndAggregate(messages, { runDate })
   aggregate.eviSmart = applyEmailMtdTotals(await fetchEviSmartTotals(runDate), aggregate)
-  const repGoals = await fetchRepGoalsWithProgress()
+  if (aggregate.eviSmart) aggregate.eviSmart.lastMonth = await evidentLastMonth(runDate)
+  const repGoals = applyEvidentMtdToGoals(await fetchRepGoalsWithProgress(runDate), aggregate.companyMtdBilledByRep)
   const { subject, html } = buildCombinedLeadershipEmail(aggregate, historyRows, repGoals, {})
 
   const token = await createApprovalToken({ reportType: 'evident-report', reportDate: runDate })
@@ -208,4 +241,4 @@ async function sendEvidentReportForApproval() {
   return { subject, approveUrl }
 }
 
-module.exports = { runEvidentReport, sendEvidentReportForApproval }
+module.exports = { runEvidentReport, sendEvidentReportForApproval, applyEvidentMtdToGoals }

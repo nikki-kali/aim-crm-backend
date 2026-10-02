@@ -60,9 +60,9 @@ test('listNewDoctorNamesOnDate returns an empty array for a rep with no new doct
 
 test('listNewDoctorNamesThisWeek returns real doctor names whose first case fell Monday-through-dateStr', async () => {
   const { rows: [james] } = await db.query(`SELECT id FROM users WHERE email='james@aimdentallab.com'`)
-  const dateStr = '2026-09-24' // Thursday; week start (Monday) is 2026-09-21
+  const dateStr = '2025-06-12' // Thursday; week start (Monday) is 2025-06-09. A past week no other test counts — September/October dates here raced goalProgress.test.js and whatsappDailyPost.test.js, which run in parallel against the same database
   const before = await listNewDoctorNamesThisWeek(james.id, dateStr)
-  const name = await makeTestDoctor(james.id, '2026-09-22', 'THISWEEK')
+  const name = await makeTestDoctor(james.id, '2025-06-10', 'THISWEEK')
   try {
     const after = await listNewDoctorNamesThisWeek(james.id, dateStr)
     assert.equal(after.length, before.length + 1)
@@ -74,8 +74,8 @@ test('listNewDoctorNamesThisWeek returns real doctor names whose first case fell
 
 test('listNewDoctorNamesThisWeek excludes a doctor whose first case was the prior week', async () => {
   const { rows: [james] } = await db.query(`SELECT id FROM users WHERE email='james@aimdentallab.com'`)
-  const dateStr = '2026-09-24'
-  const name = await makeTestDoctor(james.id, '2026-09-18', 'PRIORWEEK')
+  const dateStr = '2025-06-12'
+  const name = await makeTestDoctor(james.id, '2025-06-06', 'PRIORWEEK')
   try {
     const names = await listNewDoctorNamesThisWeek(james.id, dateStr)
     assert.ok(!names.includes(name))

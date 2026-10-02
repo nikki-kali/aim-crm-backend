@@ -3,6 +3,11 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const crypto = require('crypto')
 const db = require('../src/config/db')
+// Sales figures come from Evident's MTD billed email; tests have no Gmail
+// access, so stub that one lookup BEFORE whatsappDailyPost reads it.
+const salesRepDailyReport = require('../src/services/salesRepDailyReport')
+let mtdStub = async () => 1000
+salesRepDailyReport.evidentMtdForRep = (...args) => mtdStub(...args)
 const { buildWhatsappDailyPost, buildWhatsappImageHtml, pickDailyMessage } = require('../src/services/whatsappDailyPost')
 
 async function makeTestDoctor(repId, firstCaseDate) {
@@ -55,16 +60,19 @@ test('each rep carries a real last-month sales/doctors summary computed from the
 })
 
 test('a new doctor whose first case fell in the prior month counts toward that rep\'s lastMonth doctors, not the current month', async () => {
-  const { rows: [james] } = await db.query(`SELECT id FROM users WHERE email='james@aimdentallab.com'`)
+  // William, not James: other test files insert September test doctors for
+  // James concurrently (node:test runs files in parallel against the one
+  // real database), which made this before/after count flaky.
+  const { rows: [william] } = await db.query(`SELECT id FROM users WHERE email='williama@aimdentallab.com'`)
   const priorMonthDate = '2026-09-14'
   const before = await buildWhatsappDailyPost('2026-10-01', 1)
-  const jamesBefore = before.reps.find((r) => r.firstName === 'James')
-  const doctorName = await makeTestDoctor(james.id, priorMonthDate)
+  const williamBefore = before.reps.find((r) => r.firstName === 'William')
+  const doctorName = await makeTestDoctor(william.id, priorMonthDate)
   try {
     const after = await buildWhatsappDailyPost('2026-10-01', 1)
-    const jamesAfter = after.reps.find((r) => r.firstName === 'James')
-    assert.equal(jamesAfter.lastMonth.docsCur, jamesBefore.lastMonth.docsCur + 1)
-    assert.equal(jamesAfter.docsCur, jamesBefore.docsCur, 'a prior-month doctor must not also bump the current month count')
+    const williamAfter = after.reps.find((r) => r.firstName === 'William')
+    assert.equal(williamAfter.lastMonth.docsCur, williamBefore.lastMonth.docsCur + 1)
+    assert.equal(williamAfter.docsCur, williamBefore.docsCur, 'a prior-month doctor must not also bump the current month count')
   } finally {
     await cleanup(doctorName)
   }
@@ -107,4 +115,31 @@ test('pickDailyMessage returns the normal rotating quote after the first 5 days 
   const { PUSH_QUOTES } = require('../src/services/email')
   const msg = pickDailyMessage(20)
   assert.ok(PUSH_QUOTES.includes(msg))
+})
+
+test('monthly sales come from Evident MTD billed (sales = billed), not the CRM case sum', async () => {
+  mtdStub = async (email, dateStr, kind) => (kind === 'billed' && email === 'williama@aimdentallab.com' && dateStr === '2026-10-01' ? 569.96 : 0)
+  try {
+    const post = await buildWhatsappDailyPost('2026-10-01', 2)
+    const william = post.reps.find((r) => r.firstName === 'William')
+    assert.equal(william.salesCur, 569.96)
+    assert.match(post.caption, /\*William\*\nSales: \$570 of \$15,000/)
+  } finally {
+    mtdStub = async () => 1000
+  }
+})
+
+test('when the Evident MTD billed email is unavailable, sales show "—" instead of a made-up number', async () => {
+  mtdStub = async () => null
+  try {
+    const post = await buildWhatsappDailyPost('2026-10-01', 2)
+    assert.ok(post.reps.every((r) => r.salesCur === null))
+    assert.equal(post.team.salesCur, null)
+    assert.match(post.caption, /Sales: — of/)
+    const html = buildWhatsappImageHtml(post, 'msg')
+    assert.match(html, />—</)
+    assert.doesNotMatch(html, /NaN/)
+  } finally {
+    mtdStub = async () => 1000
+  }
 })

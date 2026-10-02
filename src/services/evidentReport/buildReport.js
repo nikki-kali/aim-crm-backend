@@ -237,7 +237,7 @@ function buildReport1Body(agg, historyRows = [], overrides = {}) {
   // real historical revenue from AIM/Kings Highway's previous system
   // (before this CRM/Evident/EviSmart tracking existed), which EviSmart's
   // own YTD figure has no way to already include.
-  const companyYtdSalesValueTotal = es ? es.ytdTotalSalesValue + LEGACY_YTD_REVENUE_ADJUSTMENT : null;
+  const companyYtdSalesValueTotal = es && es.ytdTotalSalesValue != null ? es.ytdTotalSalesValue + LEGACY_YTD_REVENUE_ADJUSTMENT : null;
   // 'N/A', not an em dash — this file's own copy rules forbid em dashes
   // (see the "no em dashes" test), and '-' alone reads as a hyphen glued
   // to nothing rather than a clear "not available" signal.
