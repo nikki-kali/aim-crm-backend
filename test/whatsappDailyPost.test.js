@@ -47,62 +47,20 @@ test('the caption omits "Won today" entirely for a rep with no real wins that da
   if (post) assert.doesNotMatch(post.caption, /Won today:/)
 })
 
-test('each rep carries a real last-month sales/doctors summary computed from the prior calendar month', async () => {
-  const post = await buildWhatsappDailyPost('2026-10-01', 1)
-  assert.ok(post, 'post should build successfully')
-  for (const r of post.reps) {
-    assert.ok(r.lastMonth, `${r.firstName} should have a lastMonth summary`)
-    assert.equal(typeof r.lastMonth.salesCur, 'number')
-    assert.equal(typeof r.lastMonth.salesTarget, 'number')
-    assert.equal(typeof r.lastMonth.docsCur, 'number')
-    assert.equal(typeof r.lastMonth.docsTarget, 'number')
-  }
-})
-
-test('a new doctor whose first case fell in the prior month counts toward that rep\'s lastMonth doctors, not the current month', async () => {
-  // William, not James: other test files insert September test doctors for
-  // James concurrently (node:test runs files in parallel against the one
-  // real database), which made this before/after count flaky.
-  const { rows: [william] } = await db.query(`SELECT id FROM users WHERE email='williama@aimdentallab.com'`)
-  const priorMonthDate = '2026-09-14'
-  const before = await buildWhatsappDailyPost('2026-10-01', 1)
-  const williamBefore = before.reps.find((r) => r.firstName === 'William')
-  const doctorName = await makeTestDoctor(william.id, priorMonthDate)
+test('the image has no last-month section, and no last-month figures are fetched', async () => {
+  const calls = []
+  mtdStub = async (email, dateStr, kind) => { calls.push(dateStr); return 100 }
   try {
-    const after = await buildWhatsappDailyPost('2026-10-01', 1)
-    const williamAfter = after.reps.find((r) => r.firstName === 'William')
-    assert.equal(williamAfter.lastMonth.docsCur, williamBefore.lastMonth.docsCur + 1)
-    assert.equal(williamAfter.docsCur, williamBefore.docsCur, 'a prior-month doctor must not also bump the current month count')
+    const post = await buildWhatsappDailyPost('2026-10-02', 2)
+    assert.ok(post.reps.every((r) => r.lastMonth === undefined))
+    assert.deepEqual([...new Set(calls)], ['2026-10-02'], 'only this month\'s figure is requested')
+    const html = buildWhatsappImageHtml(post, 'msg')
+    assert.doesNotMatch(html, /Last month/i)
+    assert.match(html, /This month/)
+    assert.match(html, /Acquired this week/)
   } finally {
-    await cleanup(doctorName)
+    mtdStub = async () => 1000
   }
-})
-
-test('buildWhatsappImageHtml renders a last-month summary line under each rep card', () => {
-  const post = {
-    dateStr: '2026-10-01',
-    team: { salesCur: 1000, salesTarget: 65000, docsCur: 1, docsTarget: 30 },
-    reps: [
-      { firstName: 'James', salesCur: 500, salesTarget: 50000, docsCur: 1, docsTarget: 18, wonToday: [], lastMonth: { salesCur: 42000, salesTarget: 50000, docsCur: 14, docsTarget: 16 } },
-      { firstName: 'William', salesCur: 500, salesTarget: 15000, docsCur: 0, docsTarget: 12, wonToday: [], lastMonth: { salesCur: 9000, salesTarget: 15000, docsCur: 8, docsTarget: 12 } },
-    ],
-  }
-  const html = buildWhatsappImageHtml(post, 'Test message')
-  assert.match(html, /Last month/)
-  assert.match(html, /\$42,000/)
-  assert.match(html, /\$9,000/)
-})
-
-test('buildWhatsappImageHtml omits the last-month strip for a rep with no lastMonth data rather than showing fabricated numbers', () => {
-  const post = {
-    dateStr: '2026-10-01',
-    team: { salesCur: 0, salesTarget: 65000, docsCur: 0, docsTarget: 30 },
-    reps: [
-      { firstName: 'James', salesCur: 0, salesTarget: 50000, docsCur: 0, docsTarget: 18, wonToday: [], lastMonth: null },
-    ],
-  }
-  const html = buildWhatsappImageHtml(post, 'Test message')
-  assert.doesNotMatch(html, /Last month/)
 })
 
 test('pickDailyMessage returns a start-of-month themed message for the first 5 days of the month', () => {

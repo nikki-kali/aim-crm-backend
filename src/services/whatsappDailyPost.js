@@ -41,19 +41,6 @@ function pickDailyMessage(dayOfMonth) {
   return PUSH_QUOTES[dayOfMonth % PUSH_QUOTES.length]
 }
 
-// First/last day of the calendar month BEFORE the one dateStr falls in —
-// e.g. '2026-10-05' -> '2026-09-30'. Reuses computeMonthlySalesGoal /
-// computeMonthlyDoctorsGoal's own month-resolution (they key off whatever
-// calendar month a date falls in), so passing this date back into them
-// computes last month's real totals with no separate code path.
-function lastMonthDateStr(dateStr) {
-  const [y, m] = dateStr.split('-').map(Number)
-  const prevMonth = m === 1 ? 12 : m - 1
-  const prevYear = m === 1 ? y - 1 : y
-  const lastDay = new Date(Date.UTC(prevYear, prevMonth, 0)).getUTCDate()
-  return `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
-}
-
 // The daily team post for the reps' WhatsApp group (Elizabeth relaying Ben,
 // 2026-09-26): one picture with the team's combined progress plus each rep,
 // and a short caption with a little motivation. Pure text and a picture URL,
@@ -66,22 +53,18 @@ async function buildWhatsappDailyPost(dateStr = lastBusinessDayEasternDateString
     `SELECT id, name, email FROM users WHERE email = ANY($1::text[]) ORDER BY name`,
     [DAILY_REPORT_REP_EMAILS]
   )
-  const priorMonthDateStr = lastMonthDateStr(dateStr)
   const reps = []
   for (const u of users) {
     // The CRM goal rows supply only the TARGETS; the sales figures
     // themselves are Evident's MTD billed — "sales = billed" (Elizabeth,
     // 2026-10-02) — the same number the Leadership Dashboard and the reps'
     // own daily report show.
-    const [sales, doctors, wonToday, doctorsThisWeek, lastMonthSales, lastMonthDoctors, salesBilled, lastMonthBilled] = await Promise.all([
+    const [sales, doctors, wonToday, doctorsThisWeek, salesBilled] = await Promise.all([
       computeMonthlySalesGoal(u.email, dateStr),
       computeMonthlyDoctorsGoal(u.email, dateStr),
       listNewDoctorNamesOnDate(u.id, dateStr),
       listNewDoctorNamesThisWeek(u.id, dateStr),
-      computeMonthlySalesGoal(u.email, priorMonthDateStr),
-      computeMonthlyDoctorsGoal(u.email, priorMonthDateStr),
       evidentMtdForRep(u.email, dateStr, 'billed'),
-      evidentMtdForRep(u.email, priorMonthDateStr, 'billed'),
     ])
     if (!sales || !doctors) continue
     reps.push({
@@ -90,12 +73,6 @@ async function buildWhatsappDailyPost(dateStr = lastBusinessDayEasternDateString
       docsCur: Number(doctors.current_value), docsTarget: Number(doctors.target),
       wonToday,
       doctorsThisWeek,
-      // Best-effort, like every other figure here: a failed lookup omits
-      // the whole summary for that rep rather than showing a fabricated 0.
-      lastMonth: (lastMonthSales && lastMonthDoctors) ? {
-        salesCur: lastMonthBilled, salesTarget: Number(lastMonthSales.target),
-        docsCur: Number(lastMonthDoctors.current_value), docsTarget: Number(lastMonthDoctors.target),
-      } : null,
     })
   }
   if (reps.length === 0) return null
@@ -146,16 +123,12 @@ const esc = (str) => String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<'
 // A screenshot-ready card for the WhatsApp group: frosted-glass panels over
 // a deep teal backdrop with soft glowing light, thin rounded bars and one
 // light sans-serif family (Manrope). Text carries every number (white on
-// deep teal), so nothing depends on color alone. Each rep's card has three
-// clearly separated, independently labeled zones so "this month" (the live
-// bars), "this week" (recent acquisitions) and "last month" (a closed,
-// historical recap) never blur into one confusing block (user feedback,
-// 2026-10-02) — each gets its own eyebrow label, and "Last month" is set
-// off with a dashed divider and dimmer styling to read as past, not
-// current. The canvas height is no longer a fixed square: with up to three
-// sections per card it would otherwise clip or overlap content, so the
-// body sizes to its real content and the caller screenshots the full page
-// rather than a fixed viewport.
+// deep teal), so nothing depends on color alone. Each rep's card has two
+// clearly separated, independently labeled zones: "this month" (the live
+// bars) and "this week" (recent acquisitions). A "last month" recap was
+// shown only while the month was turning over and removed 2026-10-05 at the
+// user's request. The canvas height is not a fixed square: the body sizes
+// to its real content and the caller screenshots the full page.
 function buildWhatsappImageHtml(post, message) {
   const dateLabel = new Date(`${post.dateStr}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
   const glass = 'background:linear-gradient(145deg,rgba(255,255,255,.26),rgba(255,255,255,.10));backdrop-filter:blur(22px) saturate(140%);-webkit-backdrop-filter:blur(22px) saturate(140%);border:1px solid rgba(255,255,255,.42);box-shadow:0 14px 32px rgba(4,32,45,.28),inset 0 1px 0 rgba(255,255,255,.55)'
@@ -171,11 +144,6 @@ function buildWhatsappImageHtml(post, message) {
       ${eyebrow('Acquired this week')}
       <div style="margin-top:6px;font:400 13px/1.5 'Manrope',sans-serif;color:#fff">${esc(r.doctorsThisWeek.join(', '))}</div>
     </div>` : ''
-  const lastMonthSection = (r) => r.lastMonth ? `
-    <div style="margin-top:18px;padding-top:14px;border-top:1px dashed rgba(255,255,255,.35)">
-      ${eyebrow('Last month', .55)}
-      <div style="margin-top:6px;font:400 13px/1.5 'Manrope',sans-serif;color:rgba(255,255,255,.85)">${money(r.lastMonth.salesCur)} sales &middot; ${r.lastMonth.docsCur} new doctor${r.lastMonth.docsCur === 1 ? '' : 's'}</div>
-    </div>` : ''
   const card = (r) => `
     <div style="${glass};flex:1;border-radius:26px;padding:22px 22px 24px">
       <div style="font:600 17px 'Manrope',sans-serif;color:#fff;letter-spacing:.01em">${esc(r.firstName)}</div>
@@ -184,7 +152,6 @@ function buildWhatsappImageHtml(post, message) {
       ${metric('Monthly sales', money(r.salesCur), `of ${whole(r.salesTarget)}`, pctText(r.salesCur, r.salesTarget), pctOf(r.salesCur, r.salesTarget))}
       ${metric('New doctors', String(r.docsCur), `of ${r.docsTarget}`, `${pctOf(r.docsCur, r.docsTarget)}%`, pctOf(r.docsCur, r.docsTarget))}
       ${thisWeekSection(r)}
-      ${lastMonthSection(r)}
     </div>`
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&display=swap" rel="stylesheet">
