@@ -677,8 +677,15 @@ test('applyEmailMtdTotals: a missing booked email shows N/A (never EviSmart #92)
   assert.equal(out2.mtdBilledValue, 200);
 });
 
-test('applyEmailMtdTotals: null EviSmart stays null, and a real $0 from the emails is respected', () => {
-  assert.equal(applyEmailMtdTotals(null, { companyMtdBooked: 5, companyMtdBilled: 5, missing: [] }), null);
+test('applyEmailMtdTotals: with no EviSmart email, every Evident-sourced figure still shows and only Daily Billed is unavailable; a real $0 from the emails is respected', () => {
+  const noEs = applyEmailMtdTotals(null, { companyMtdBooked: 14362.31, companyDailyBooked: 4775.97, companyDailyBookedCount: 9, companyMtdBilled: 12850.78, companyYtdBilled: 395713.21, missing: [] });
+  assert.equal(noEs.dailyBilledMissing, true);
+  assert.equal(noEs.dailyBilledValue, null);
+  assert.equal(noEs.mtdBookedValue, 14362.31);
+  assert.equal(noEs.mtdBilledValue, 12850.78);
+  assert.equal(noEs.dailyBookedValue, 4775.97);
+  assert.equal(noEs.ytdTotalSalesValue, 395713.21);
+  assert.equal(applyEmailMtdTotals({ dailyBilledValue: 1 }, { companyMtdBooked: 1, companyMtdBilled: 1, missing: [] }).dailyBilledMissing, undefined);
   const out = applyEmailMtdTotals({ mtdBookedValue: 100, mtdBilledValue: 200 }, { companyMtdBooked: 0, companyMtdBilled: 0, missing: [] });
   assert.equal(out.mtdBookedValue, 0);
   assert.equal(out.mtdBilledValue, 0);

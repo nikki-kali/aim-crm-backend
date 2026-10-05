@@ -243,7 +243,11 @@ function buildReport1Body(agg, historyRows = [], overrides = {}) {
   // to nothing rather than a clear "not available" signal.
   const fmtOrDash = (v) => (v == null ? 'N/A' : fmtMoney(v));
 
-  const eviSmartMissingBanner = !es
+  const eviSmartMissingBanner = es && es.dailyBilledMissing
+    ? `<div style="margin:30px 36px 0;padding:16px 19px;background:#fefaf1;border:1px solid #fde68a;border-left:3px solid #b45309;border-radius:4px 12px 12px 4px">
+         <p style="margin:0;font-size:13.5px;line-height:1.55;color:${BRAND.ink}">Heads up: today's EviSmart Daily Sales Report pull didn't come through, so Daily Billed isn't available. Every other figure below comes from Evident's own reports.</p>
+       </div>`
+    : !es
     ? `<div style="margin:30px 36px 0;padding:16px 19px;background:#fefaf1;border:1px solid #fde68a;border-left:3px solid #b45309;border-radius:4px 12px 12px 4px">
          <p style="margin:0;font-size:13.5px;line-height:1.55;color:${BRAND.ink}">Heads up: today's EviSmart Daily Sales Report pull didn't come through, so Daily/MTD/YTD Booked and Billed figures below aren't available.</p>
        </div>`
@@ -578,6 +582,8 @@ function buildReport3Body(agg, historyRows = [], repGoals = []) {
 
   const kpiSection = !es
     ? kpiNotice("Today's EviSmart Daily Sales Report pull didn't come through, so this month's comparison isn't available.")
+    : (es.mtdBookedValue == null || es.mtdBilledValue == null)
+      ? kpiNotice("This month's booked or billed total wasn't available from Evident's reports, so the month-over-month comparison isn't available.")
     : !lastMonth
       ? kpiNotice("Last month's totals weren't included in today's EviSmart Daily Sales Report, so the month-over-month comparison isn't available.")
       : `

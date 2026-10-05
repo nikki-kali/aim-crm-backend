@@ -447,10 +447,13 @@ function extractEviSmartTotals(html) {
 // (Financials > Customer Activity, which she named as a reliable source).
 // A missing Evident email shows "N/A", never an EviSmart #92/#97/#94 value.
 function applyEmailMtdTotals(eviSmart, agg) {
-  if (!eviSmart) return null;
   const has = (label) => !agg.missing.includes(label);
+  // EviSmart now supplies ONLY Daily Billed. When its pull didn't come
+  // through, every other figure still comes from the Evident emails, so the
+  // report is built anyway with Daily Billed unavailable (found 2026-10-05:
+  // an absent EviSmart email blanked the whole company section).
   return {
-    ...eviSmart,
+    ...(eviSmart || { dailyBilledValue: null, mtdBilledValue: null, dailyBilledMissing: true }),
     dailyBookedValue: has('Daily Booking Report - Nadine') ? agg.companyDailyBooked : null,
     dailyBookedCount: has('Daily Booking Report - Nadine') ? agg.companyDailyBookedCount : null,
     mtdBookedValue: has('MTD Booked Daily Update') ? agg.companyMtdBooked : null,

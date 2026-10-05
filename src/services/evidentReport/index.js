@@ -149,13 +149,16 @@ async function runEvidentReport({ requireEviSmart = false } = {}) {
   }
 
   console.log('[evident-report] fetching EviSmart Daily Sales Report...')
-  aggregate.eviSmart = applyEmailMtdTotals(await fetchEviSmartTotals(runDate), aggregate)
-  if (aggregate.eviSmart) aggregate.eviSmart.lastMonth = await evidentLastMonth(runDate)
-  if (!aggregate.eviSmart) {
-    console.warn('[evident-report] EviSmart Daily Sales Report unavailable — Daily/MTD/YTD Booked/Billed will show as "—"')
+  const eviSmartRaw = await fetchEviSmartTotals(runDate)
+  aggregate.eviSmart = applyEmailMtdTotals(eviSmartRaw, aggregate)
+  aggregate.eviSmart.lastMonth = await evidentLastMonth(runDate)
+  if (!eviSmartRaw) {
+    console.warn('[evident-report] EviSmart Daily Sales Report unavailable — Daily Billed will show as N/A; every other figure comes from the Evident emails')
   }
 
-  if (requireEviSmart && !aggregate.eviSmart) {
+  // The automatic send to leadership still requires EviSmart (Daily Billed)
+  // until Elizabeth approves Evident's Daily Billed Report as the source.
+  if (requireEviSmart && !eviSmartRaw) {
     throw Object.assign(new Error(`[evident-report] no usable EviSmart Daily Sales Report for ${runDate}, not sending to leadership`), { code: 'EVISMART_UNAVAILABLE' })
   }
 
@@ -222,7 +225,7 @@ async function sendEvidentReportForApproval() {
   const messages = (await fetchEvidentEmails()).filter((m) => m.date === runDate)
   const aggregate = parseAndAggregate(messages, { runDate })
   aggregate.eviSmart = applyEmailMtdTotals(await fetchEviSmartTotals(runDate), aggregate)
-  if (aggregate.eviSmart) aggregate.eviSmart.lastMonth = await evidentLastMonth(runDate)
+  aggregate.eviSmart.lastMonth = await evidentLastMonth(runDate)
   const repGoals = applyEvidentMtdToGoals(await fetchRepGoalsWithProgress(runDate), aggregate.companyMtdBilledByRep)
   const { subject, html } = buildCombinedLeadershipEmail(aggregate, historyRows, repGoals, {})
 
