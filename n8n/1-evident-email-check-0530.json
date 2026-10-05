@@ -1,0 +1,71 @@
+{
+  "name": "AIM \u00b7 5:30 AM check Evident emails arrived",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 5 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "chk-schedule",
+      "name": "Weekdays (New York time)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://aim-crm-backend.onrender.com/api/cron/evident-email-check?alert=true",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "chk-http",
+      "name": "Check Evident emails (server alerts you if any are missing)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "AIM CRM cron secret"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000
+    }
+  ],
+  "connections": {
+    "Weekdays (New York time)": {
+      "main": [
+        [
+          {
+            "node": "Check Evident emails (server alerts you if any are missing)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "America/New_York",
+    "executionOrder": "v1"
+  },
+  "active": false
+}

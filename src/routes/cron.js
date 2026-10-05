@@ -3,6 +3,9 @@ const crypto = require('crypto')
 const { runEvidentCrmSyncJob } = require('../jobs/evidentCrmSync')
 const { runEvidentReportJob, runEvidentReportSendJob } = require('../jobs/evidentReport')
 const { runSalesRepDailyReportJob } = require('../jobs/salesRepDailyReport')
+const { checkEvidentEmails, buildMissingEmailsAlert } = require('../services/evidentReport/emailCheck')
+const { sendEmail } = require('../services/email')
+const { APPROVER_EMAIL } = require('../services/reportApproval')
 
 const router = express.Router()
 
@@ -27,6 +30,43 @@ function isAuthorized(provided, secret) {
   return a.length === b.length && crypto.timingSafeEqual(a, b)
 }
 
+// Overridable seam so tests never touch Gmail or send mail.
+const emailCheckDeps = {
+  check: () => checkEvidentEmails(),
+  sendAlert: async (result) => {
+    const { subject, html } = buildMissingEmailsAlert(result)
+    await sendEmail({ to: [APPROVER_EMAIL], subject, html })
+  },
+}
+
+// 5:30 AM completeness check (called by n8n): are the Evident emails for the
+// report day all here? Answers synchronously with JSON (unlike the job
+// triggers below, which answer 202 and run in the background). With
+// ?alert=true the server itself emails the approver when something is
+// missing, so the caller needs no email credentials. Must be registered
+// before '/:job', which would otherwise answer 404 "unknown job".
+router.post('/evident-email-check', async (req, res) => {
+  const secret = process.env.CRON_SECRET
+  if (!secret) return res.status(503).json({ error: 'cron trigger is not configured' })
+  if (!isAuthorized(req.get('x-cron-secret'), secret)) return res.status(401).json({ error: 'unauthorized' })
+  try {
+    const result = await emailCheckDeps.check()
+    if (!result.ok && req.query.alert === 'true') {
+      try {
+        await emailCheckDeps.sendAlert(result)
+        return res.json({ ...result, alerted: true })
+      } catch (err) {
+        console.error('[cron-trigger] evident-email-check alert email failed:', err)
+        return res.json({ ...result, alerted: false, alertError: err.message })
+      }
+    }
+    return res.json(result)
+  } catch (err) {
+    console.error('[cron-trigger] evident-email-check failed:', err)
+    return res.status(502).json({ ok: false, error: `Could not read the Evident emails from Gmail: ${err.message}` })
+  }
+})
+
 // POST only, secret in a header: a GET reachable from a link could be
 // triggered by an email scanner (see the approval-link GET safety rule).
 router.post('/:job', (req, res) => {
@@ -48,3 +88,4 @@ router.post('/:job', (req, res) => {
 module.exports = router
 module.exports.isAuthorized = isAuthorized
 module.exports.JOBS = JOBS
+module.exports.emailCheckDeps = emailCheckDeps

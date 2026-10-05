@@ -1,0 +1,57 @@
+{
+  "name": "AIM \u00b7 Error alert (set as Error Workflow)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "err-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "REPLACE_ME@yourdomain.com",
+        "toEmail": "adivirtuosity@gmail.com",
+        "subject": "=n8n problem: {{ $json.workflow.name }} failed",
+        "emailFormat": "text",
+        "text": "=The workflow \"{{ $json.workflow.name }}\" failed.\n\nStep: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\nRun: {{ $json.execution.url }}\n\nIf this is a 5:30/6:00 AM job, the server may be asleep or Gmail access may need renewing. Check before the 7:00 AM send."
+      },
+      "id": "err-mail",
+      "name": "Email me",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        560,
+        300
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "REPLACE_ME",
+          "name": "SMTP"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Email me",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "America/New_York",
+    "executionOrder": "v1"
+  },
+  "active": false
+}

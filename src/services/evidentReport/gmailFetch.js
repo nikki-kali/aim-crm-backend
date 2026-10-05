@@ -150,4 +150,26 @@ async function fetchEvidentEmailsInRange(extraQuery) {
   return messages
 }
 
-module.exports = { EVISMART_SENDERS, EVISMART_QUERY, fetchEvidentEmails, fetchEviSmartEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }
+// Subjects and ET dates only (Gmail "metadata" format: no email bodies), so a
+// completeness check over the last 5 days takes seconds instead of the
+// ~30s of fetchEvidentEmails — important on the free Render plan, where a
+// cold start already eats most of a request's time.
+async function fetchEvidentSubjects() {
+  const auth = getGmailAuth()
+  const gmail = google.gmail({ version: 'v1', auth })
+  const listRes = await gmail.users.messages.list({ userId: 'me', q: 'from:support@evidentlabs.com newer_than:5d', maxResults: 500 })
+  const ids = (listRes.data.messages || []).map((m) => m.id)
+  const out = []
+  for (let i = 0; i < ids.length; i += 10) {
+    const batch = await Promise.all(ids.slice(i, i + 10).map(async (id) => {
+      const res = await gmail.users.messages.get({ userId: 'me', id, format: 'metadata', metadataHeaders: ['Subject'] })
+      const subject = ((res.data.payload.headers || []).find((h) => h.name.toLowerCase() === 'subject') || {}).value || ''
+      const date = new Date(Number(res.data.internalDate)).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+      return { subject, date }
+    }))
+    out.push(...batch)
+  }
+  return out
+}
+
+module.exports = { fetchEvidentSubjects, EVISMART_SENDERS, EVISMART_QUERY, fetchEvidentEmails, fetchEviSmartEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }
