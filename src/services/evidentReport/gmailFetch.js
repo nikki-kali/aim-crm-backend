@@ -97,12 +97,20 @@ async function fetchEvidentEmails() {
 // evening's end-of-day send) lets parseEvident.js's pickEviSmartForDate see
 // both and prefer the fresher one, rather than this fetch silently
 // missing an update that landed just outside a tighter window.
+// The EviSmart report is sent by whichever account runs the browser extension:
+// media@aimdentallab.com until 2026-09-29, and valearningcenterphilippines@
+// gmail.com since (found 2026-10-05: Friday's report arrived from that
+// account and was silently ignored, blanking Daily Billed). Both are the
+// user's own accounts; any other sender is still ignored.
+const EVISMART_SENDERS = ['media@aimdentallab.com', 'valearningcenterphilippines@gmail.com']
+const EVISMART_QUERY = `from:(${EVISMART_SENDERS.join(' OR ')}) subject:"EviSmart Daily Sales Report" newer_than:5d`
+
 async function fetchEviSmartEmails() {
   const auth = getGmailAuth()
   const gmail = google.gmail({ version: 'v1', auth })
   const listRes = await gmail.users.messages.list({
     userId: 'me',
-    q: 'from:media@aimdentallab.com subject:"EviSmart Daily Sales Report" newer_than:5d',
+    q: EVISMART_QUERY,
   })
   const ids = (listRes.data.messages || []).map((m) => m.id)
 
@@ -142,4 +150,4 @@ async function fetchEvidentEmailsInRange(extraQuery) {
   return messages
 }
 
-module.exports = { fetchEvidentEmails, fetchEviSmartEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }
+module.exports = { EVISMART_SENDERS, EVISMART_QUERY, fetchEvidentEmails, fetchEviSmartEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }

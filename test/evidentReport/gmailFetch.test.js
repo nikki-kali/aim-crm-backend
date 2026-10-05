@@ -13,3 +13,9 @@ test('sleep(0) resolves immediately without hanging the test', async () => {
   await sleep(0);
   assert.ok(true);
 });
+
+test('the EviSmart search accepts both accounts that send the report, and no other sender', () => {
+  const { EVISMART_SENDERS, EVISMART_QUERY } = require('../../src/services/evidentReport/gmailFetch');
+  assert.deepEqual(EVISMART_SENDERS, ['media@aimdentallab.com', 'valearningcenterphilippines@gmail.com']);
+  assert.equal(EVISMART_QUERY, 'from:(media@aimdentallab.com OR valearningcenterphilippines@gmail.com) subject:"EviSmart Daily Sales Report" newer_than:5d');
+});
