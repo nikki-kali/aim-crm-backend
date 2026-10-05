@@ -6,7 +6,6 @@ const {
   businessDaysLeftInMonth,
   lastBusinessDayEasternDateString,
   listNewDoctorNamesOnDate,
-  listNewDoctorNamesThisWeek,
   evidentMtdForRep,
 } = require('./salesRepDailyReport')
 const { PUSH_QUOTES } = require('./email')
@@ -59,11 +58,10 @@ async function buildWhatsappDailyPost(dateStr = lastBusinessDayEasternDateString
     // themselves are Evident's MTD billed — "sales = billed" (Elizabeth,
     // 2026-10-02) — the same number the Leadership Dashboard and the reps'
     // own daily report show.
-    const [sales, doctors, wonToday, doctorsThisWeek, salesBilled] = await Promise.all([
+    const [sales, doctors, wonToday, salesBilled] = await Promise.all([
       computeMonthlySalesGoal(u.email, dateStr),
       computeMonthlyDoctorsGoal(u.email, dateStr),
       listNewDoctorNamesOnDate(u.id, dateStr),
-      listNewDoctorNamesThisWeek(u.id, dateStr),
       evidentMtdForRep(u.email, dateStr, 'billed'),
     ])
     if (!sales || !doctors) continue
@@ -72,7 +70,6 @@ async function buildWhatsappDailyPost(dateStr = lastBusinessDayEasternDateString
       salesCur: salesBilled, salesTarget: Number(sales.target),
       docsCur: Number(doctors.current_value), docsTarget: Number(doctors.target),
       wonToday,
-      doctorsThisWeek,
     })
   }
   if (reps.length === 0) return null
@@ -93,7 +90,6 @@ async function buildWhatsappDailyPost(dateStr = lastBusinessDayEasternDateString
     `Sales: ${money(r.salesCur)} of ${whole(r.salesTarget)} (${pctText(r.salesCur, r.salesTarget)})`,
     `New doctors: ${r.docsCur} of ${r.docsTarget} (${pctOf(r.docsCur, r.docsTarget)}%)`,
     ...(r.wonToday.length ? [`Won today: ${r.wonToday.join(', ')}`] : []),
-    ...(r.doctorsThisWeek.length ? [`This week: ${r.doctorsThisWeek.join(', ')}`] : []),
   ].join('\n')
 
   const caption = [
@@ -123,12 +119,12 @@ const esc = (str) => String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<'
 // A screenshot-ready card for the WhatsApp group: frosted-glass panels over
 // a deep teal backdrop with soft glowing light, thin rounded bars and one
 // light sans-serif family (Manrope). Text carries every number (white on
-// deep teal), so nothing depends on color alone. Each rep's card has two
-// clearly separated, independently labeled zones: "this month" (the live
-// bars) and "this week" (recent acquisitions). A "last month" recap was
-// shown only while the month was turning over and removed 2026-10-05 at the
-// user's request. The canvas height is not a fixed square: the body sizes
-// to its real content and the caller screenshots the full page.
+// deep teal), so nothing depends on color alone. Each rep's card is the live
+// "this month" bars only. The "last month" recap and the "acquired this
+// week" list were shown while the month was turning over and removed
+// 2026-10-05 at the user's request. The canvas height is not a fixed
+// square: the body sizes to its real content and the caller crops the
+// screenshot to it.
 function buildWhatsappImageHtml(post, message) {
   const dateLabel = new Date(`${post.dateStr}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
   const glass = 'background:linear-gradient(145deg,rgba(255,255,255,.26),rgba(255,255,255,.10));backdrop-filter:blur(22px) saturate(140%);-webkit-backdrop-filter:blur(22px) saturate(140%);border:1px solid rgba(255,255,255,.42);box-shadow:0 14px 32px rgba(4,32,45,.28),inset 0 1px 0 rgba(255,255,255,.55)'
@@ -139,11 +135,6 @@ function buildWhatsappImageHtml(post, message) {
       <div style="margin-top:6px;font:300 34px/1 'Manrope',sans-serif;color:#fff;letter-spacing:-.02em;font-variant-numeric:tabular-nums">${big}<span style="font:400 12px 'Manrope',sans-serif;color:rgba(255,255,255,.72);letter-spacing:0"> ${ofText}</span></div>
       <div style="margin-top:10px;height:6px;border-radius:99px;background:rgba(255,255,255,.22);box-shadow:inset 0 1px 2px rgba(4,32,45,.25)"><div style="width:${barPct === 0 ? 0 : Math.max(barPct, 3)}%;height:100%;border-radius:99px;background:linear-gradient(90deg,#8ff3f5,#ffffff);box-shadow:0 0 12px rgba(143,243,245,.9)"></div></div>
     </div>`
-  const thisWeekSection = (r) => (r.doctorsThisWeek || []).length ? `
-    <div style="margin-top:18px">
-      ${eyebrow('Acquired this week')}
-      <div style="margin-top:6px;font:400 13px/1.5 'Manrope',sans-serif;color:#fff">${esc(r.doctorsThisWeek.join(', '))}</div>
-    </div>` : ''
   const card = (r) => `
     <div style="${glass};flex:1;border-radius:26px;padding:22px 22px 24px">
       <div style="font:600 17px 'Manrope',sans-serif;color:#fff;letter-spacing:.01em">${esc(r.firstName)}</div>
@@ -151,7 +142,6 @@ function buildWhatsappImageHtml(post, message) {
       <div style="margin-top:14px">${eyebrow('This month', .6)}</div>
       ${metric('Monthly sales', money(r.salesCur), `of ${whole(r.salesTarget)}`, pctText(r.salesCur, r.salesTarget), pctOf(r.salesCur, r.salesTarget))}
       ${metric('New doctors', String(r.docsCur), `of ${r.docsTarget}`, `${pctOf(r.docsCur, r.docsTarget)}%`, pctOf(r.docsCur, r.docsTarget))}
-      ${thisWeekSection(r)}
     </div>`
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&display=swap" rel="stylesheet">

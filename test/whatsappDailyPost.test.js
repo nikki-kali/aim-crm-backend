@@ -47,6 +47,14 @@ test('the caption omits "Won today" entirely for a rep with no real wins that da
   if (post) assert.doesNotMatch(post.caption, /Won today:/)
 })
 
+test('the image and caption have no "acquired this week" section either', async () => {
+  const post = await buildWhatsappDailyPost('2026-10-02', 2)
+  assert.ok(post.reps.every((r) => r.doctorsThisWeek === undefined))
+  assert.doesNotMatch(post.caption, /This week:/)
+  const html = buildWhatsappImageHtml(post, 'msg')
+  assert.doesNotMatch(html, /Acquired this week/i)
+})
+
 test('the image has no last-month section, and no last-month figures are fetched', async () => {
   const calls = []
   mtdStub = async (email, dateStr, kind) => { calls.push(dateStr); return 100 }
@@ -57,7 +65,6 @@ test('the image has no last-month section, and no last-month figures are fetched
     const html = buildWhatsappImageHtml(post, 'msg')
     assert.doesNotMatch(html, /Last month/i)
     assert.match(html, /This month/)
-    assert.match(html, /Acquired this week/)
   } finally {
     mtdStub = async () => 1000
   }
