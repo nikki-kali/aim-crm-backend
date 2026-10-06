@@ -108,3 +108,43 @@ test('when the Evident MTD billed email is unavailable, sales show "—" instead
     mtdStub = async () => 1000
   }
 })
+
+test('each rep shows month-to-date BOOKED and BILLED (both from Evident) on the image and in the caption', async () => {
+  mtdStub = async (email, dateStr, kind) => {
+    const william = email === 'williama@aimdentallab.com'
+    if (kind === 'billed') return william ? 569.96 : 0
+    return william ? 532.49 : 261
+  }
+  try {
+    const post = await buildWhatsappDailyPost('2026-10-05', 6)
+    const william = post.reps.find((r) => r.firstName === 'William')
+    const james = post.reps.find((r) => r.firstName === 'James')
+    assert.equal(william.salesCur, 569.96, 'billed still drives the Monthly sales bar')
+    assert.equal(william.bookedCur, 532.49)
+    assert.equal(james.bookedCur, 261)
+    assert.equal(post.team.bookedCur, 793.49)
+    assert.match(post.caption, /\*William\*\nSales: \$570 of \$15,000 \(4%\)\nBooked: \$532 · Billed: \$570/)
+    assert.match(post.caption, /\*James\*\nSales: \$0 of \$50,000 \(0%\)\nBooked: \$261 · Billed: \$0/)
+    assert.match(post.caption, /\*Team\*\nSales: \$570 of \$65,000 \(1%\)\nBooked: \$793 · Billed: \$570/)
+    const text = buildWhatsappImageHtml(post, 'msg').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+    assert.match(text, /William Alexander|William/)
+    assert.match(text, /Booked \$532 Billed \$570/)
+    assert.match(text, /Booked \$261 Billed \$0/)
+  } finally {
+    mtdStub = async () => 1000
+  }
+})
+
+test('a booked figure Evident did not provide shows a dash, not a made-up number, and does not break the billed figure', async () => {
+  mtdStub = async (email, dateStr, kind) => (kind === 'booked' ? null : 100)
+  try {
+    const post = await buildWhatsappDailyPost('2026-10-05', 6)
+    assert.ok(post.reps.every((r) => r.bookedCur === null && r.salesCur === 100))
+    assert.equal(post.team.bookedCur, null)
+    assert.match(post.caption, /Booked: — · Billed: \$100/)
+    const html = buildWhatsappImageHtml(post, 'msg')
+    assert.doesNotMatch(html, /NaN|undefined/)
+  } finally {
+    mtdStub = async () => 1000
+  }
+})

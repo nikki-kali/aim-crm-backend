@@ -58,16 +58,20 @@ async function buildWhatsappDailyPost(dateStr = lastBusinessDayEasternDateString
     // themselves are Evident's MTD billed — "sales = billed" (Elizabeth,
     // 2026-10-02) — the same number the Leadership Dashboard and the reps'
     // own daily report show.
-    const [sales, doctors, wonToday, salesBilled] = await Promise.all([
+    // Booked is also Evident's MTD figure (Report #12) and is shown beside
+    // billed (#40) on each card (user request, 2026-10-06); billed alone
+    // drives the Monthly sales bar.
+    const [sales, doctors, wonToday, salesBilled, salesBooked] = await Promise.all([
       computeMonthlySalesGoal(u.email, dateStr),
       computeMonthlyDoctorsGoal(u.email, dateStr),
       listNewDoctorNamesOnDate(u.id, dateStr),
       evidentMtdForRep(u.email, dateStr, 'billed'),
+      evidentMtdForRep(u.email, dateStr, 'booked'),
     ])
     if (!sales || !doctors) continue
     reps.push({
       firstName: u.name.split(' ')[0],
-      salesCur: salesBilled, salesTarget: Number(sales.target),
+      salesCur: salesBilled, bookedCur: salesBooked, salesTarget: Number(sales.target),
       docsCur: Number(doctors.current_value), docsTarget: Number(doctors.target),
       wonToday,
     })
@@ -76,8 +80,9 @@ async function buildWhatsappDailyPost(dateStr = lastBusinessDayEasternDateString
 
   const team = reps.reduce((t, r) => ({
     salesCur: t.salesCur === null || r.salesCur === null ? null : t.salesCur + r.salesCur, salesTarget: t.salesTarget + r.salesTarget,
+    bookedCur: t.bookedCur === null || r.bookedCur === null ? null : Math.round((t.bookedCur + r.bookedCur) * 100) / 100,
     docsCur: t.docsCur + r.docsCur, docsTarget: t.docsTarget + r.docsTarget,
-  }), { salesCur: 0, salesTarget: 0, docsCur: 0, docsTarget: 0 })
+  }), { salesCur: 0, bookedCur: 0, salesTarget: 0, docsCur: 0, docsTarget: 0 })
 
   const monthName = new Date(`${dateStr}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' })
   const daysLeft = businessDaysLeftInMonth(dateStr)
@@ -88,6 +93,7 @@ async function buildWhatsappDailyPost(dateStr = lastBusinessDayEasternDateString
   const line = (r) => [
     `*${r.firstName}*`,
     `Sales: ${money(r.salesCur)} of ${whole(r.salesTarget)} (${pctText(r.salesCur, r.salesTarget)})`,
+    `Booked: ${money(r.bookedCur)} · Billed: ${money(r.salesCur)}`,
     `New doctors: ${r.docsCur} of ${r.docsTarget} (${pctOf(r.docsCur, r.docsTarget)}%)`,
     ...(r.wonToday.length ? [`Won today: ${r.wonToday.join(', ')}`] : []),
   ].join('\n')
@@ -95,7 +101,7 @@ async function buildWhatsappDailyPost(dateStr = lastBusinessDayEasternDateString
   const caption = [
     `*Good morning, team!* Here is where we stand for ${monthName}.`,
     '',
-    `*Team*\nSales: ${money(team.salesCur)} of ${whole(team.salesTarget)} (${pctText(team.salesCur, team.salesTarget)})\nNew doctors: ${team.docsCur} of ${team.docsTarget} (${pctOf(team.docsCur, team.docsTarget)}%)`,
+    `*Team*\nSales: ${money(team.salesCur)} of ${whole(team.salesTarget)} (${pctText(team.salesCur, team.salesTarget)})\nBooked: ${money(team.bookedCur)} · Billed: ${money(team.salesCur)}\nNew doctors: ${team.docsCur} of ${team.docsTarget} (${pctOf(team.docsCur, team.docsTarget)}%)`,
     '',
     ...reps.flatMap((r) => [line(r), '']),
     `"${quote}"`,
@@ -135,12 +141,19 @@ function buildWhatsappImageHtml(post, message) {
       <div style="margin-top:6px;font:300 34px/1 'Manrope',sans-serif;color:#fff;letter-spacing:-.02em;font-variant-numeric:tabular-nums">${big}<span style="font:400 12px 'Manrope',sans-serif;color:rgba(255,255,255,.72);letter-spacing:0"> ${ofText}</span></div>
       <div style="margin-top:10px;height:6px;border-radius:99px;background:rgba(255,255,255,.22);box-shadow:inset 0 1px 2px rgba(4,32,45,.25)"><div style="width:${barPct === 0 ? 0 : Math.max(barPct, 3)}%;height:100%;border-radius:99px;background:linear-gradient(90deg,#8ff3f5,#ffffff);box-shadow:0 0 12px rgba(143,243,245,.9)"></div></div>
     </div>`
+  // Month-to-date booked next to billed (the bar above is billed).
+  const bookedBilled = (r) => `
+    <div style="margin-top:18px;padding-top:14px;border-top:1px solid rgba(255,255,255,.2);display:flex;gap:12px">
+      <div style="flex:1">${eyebrow('Booked')}<div style="margin-top:5px;font:400 19px/1 'Manrope',sans-serif;color:#fff;letter-spacing:-.01em;font-variant-numeric:tabular-nums">${money(r.bookedCur)}</div></div>
+      <div style="flex:1">${eyebrow('Billed')}<div style="margin-top:5px;font:400 19px/1 'Manrope',sans-serif;color:#fff;letter-spacing:-.01em;font-variant-numeric:tabular-nums">${money(r.salesCur)}</div></div>
+    </div>`
   const card = (r) => `
     <div style="${glass};flex:1;border-radius:26px;padding:22px 22px 24px">
       <div style="font:600 17px 'Manrope',sans-serif;color:#fff;letter-spacing:.01em">${esc(r.firstName)}</div>
       <div style="margin-top:10px;height:1px;background:linear-gradient(90deg,rgba(255,255,255,.55),rgba(255,255,255,0))"></div>
       <div style="margin-top:14px">${eyebrow('This month', .6)}</div>
       ${metric('Monthly sales', money(r.salesCur), `of ${whole(r.salesTarget)}`, pctText(r.salesCur, r.salesTarget), pctOf(r.salesCur, r.salesTarget))}
+      ${bookedBilled(r)}
       ${metric('New doctors', String(r.docsCur), `of ${r.docsTarget}`, `${pctOf(r.docsCur, r.docsTarget)}%`, pctOf(r.docsCur, r.docsTarget))}
     </div>`
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
