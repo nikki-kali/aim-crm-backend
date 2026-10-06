@@ -30,6 +30,7 @@ const goalsRoutes = require('./routes/goals')
 const feedbackRoutes = require('./routes/feedback')
 const trainingRoutes = require('./routes/training')
 const contentApprovalsRoutes = require('./routes/contentApprovals')
+const contentApprovalDecisionsRoutes = require('./routes/contentApprovalDecisions')
 const workflowRoutes = require('./routes/workflows')
 const dashboardLayoutRoutes = require('./routes/dashboardLayout')
 
@@ -81,6 +82,7 @@ app.use(express.urlencoded({ extended: true }))
 app.get('/health', (req, res) => res.json({ status: 'ok' }))
 
 app.use('/api/auth',            authRoutes)
+app.use('/api/content-approval-decisions', contentApprovalDecisionsRoutes)
 app.use('/api/dashboard',       reportRoutes)
 app.use('/api/leads',           intakeRoutes)   // public capture — before auth-gated leads
 app.use('/api/leads',           leadRoutes)
