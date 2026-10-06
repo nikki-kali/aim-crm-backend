@@ -7,7 +7,7 @@ const STATUSES = ['', 'approved', 'edit', 'rejected']
 // Fixed allowlist of review-able posts for the October review. A postId
 // outside this set is rejected rather than silently creating an arbitrary
 // row, since the id also becomes the table's primary key.
-const POST_IDS = ['oct05', 'oct09', 'oct11', 'scanner', 'oct13', 'oct23']
+const POST_IDS = ['oct05', 'oct09', 'oct11', 'scanner', 'oct13', 'oct23', 'oct27', 'oct31']
 
 function mapRow(row) {
   return {
