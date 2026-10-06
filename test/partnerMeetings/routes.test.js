@@ -207,3 +207,12 @@ test('a missing or unknown token is rejected', async () => {
     assert.equal((await call(server, 'POST', '/api/partner-meetings/confirm', { token: 'abc' }, true)).status, 410)
   } finally { server.close() }
 })
+
+test('the form supports browser autofill and link pre-fill', async () => {
+  const server = await startServer()
+  try {
+    const r = await call(server, 'GET', '/api/partner-meetings/book')
+    for (const a of ['name', 'organization', 'email', 'tel']) assert.match(r.body, new RegExp(`autocomplete="${a}"`))
+    assert.match(r.body, /URLSearchParams\(location\.search\)/)
+  } finally { server.close() }
+})

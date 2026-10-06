@@ -39,9 +39,10 @@ router.get('/book', (req, res) => {
         <div style="flex:1"><label style="display:block;font-size:12px;color:#5b7a86;margin:0 0 3px">Option ${i} time *</label>
           <input type="time" name="time${i}" required style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;font-size:14px"></div>
       </div>`
+  const AUTOCOMPLETE = { partner_name: 'name', company: 'organization', email: 'email', phone: 'tel' }
   const field = (label, name, type = 'text', required = false) => `
       <label style="display:block;font-size:13px;color:#10353f;font-weight:600;margin:0 0 4px">${label}${required ? ' *' : ''}</label>
-      <input type="${type}" name="${name}" ${required ? 'required' : ''} style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;margin-bottom:14px;font-size:14px">`
+      <input type="${type}" name="${name}" autocomplete="${AUTOCOMPLETE[name] || 'off'}" ${required ? 'required' : ''} style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;margin-bottom:14px;font-size:14px">`
   res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Schedule a meeting with Ben | AIM Dental Laboratory</title></head>
 <body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7faf9;padding:40px 16px">
@@ -78,6 +79,13 @@ router.get('/book', (req, res) => {
       var o = document.createElement('option'); o.value = z[0]; o.textContent = z[1]; sel.appendChild(o);
     });
     if (detected) sel.value = detected;
+    // Links can pre-fill the form: ?name=&company=&email=&phone=&timezone=
+    var qs = new URLSearchParams(location.search);
+    [['name', 'partner_name'], ['company', 'company'], ['email', 'email'], ['phone', 'phone']].forEach(function (m) {
+      var val = qs.get(m[0]); if (val) document.getElementsByName(m[1])[0].value = val.slice(0, 160);
+    });
+    var tzq = qs.get('timezone');
+    if (tzq) { var has = Array.prototype.some.call(sel.options, function (o) { return o.value === tzq; }); if (has) sel.value = tzq; }
     var today = new Date(); today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
     var min = today.toISOString().slice(0, 10);
     ['1', '2', '3'].forEach(function (i) { document.getElementsByName('date' + i)[0].min = min; });
