@@ -17,6 +17,7 @@ const scanSubmissionRoutes = require('./routes/scanSubmission')
 const verifyEmailRoutes = require('./routes/verifyEmail')
 const implantIntakeRoutes = require('./routes/implantIntake')
 const officeVisitsRoutes = require('./routes/officeVisits')
+const partnerMeetingsRoutes = require('./routes/partnerMeetings')
 const officeVisitsAdminRoutes = require('./routes/officeVisitsAdmin')
 const newsletterRoutes = require('./routes/newsletter')
 const userRoutes = require('./routes/users')
@@ -61,6 +62,7 @@ app.use('/api/track-case', trackCaseRoutes) // public — marketing website's "T
 app.use('/api/scan-submission', scanSubmissionRoutes) // public — "Submit a Scanned Case" file uploads
 app.use('/api/verify-email', verifyEmailRoutes) // public — first-time-email gate for Schedule Pickup / Submit a Scanned Case
 app.use('/api/office-visits', officeVisitsRoutes) // public — Office Visit request form + approve/suggest-time confirm links
+app.use('/api/partner-meetings', partnerMeetingsRoutes) // public — partner meeting request form + Ben's approve / call-first links
 
 // FRONTEND_URL supports a comma-separated list so both the stable Vercel
 // domain and a custom domain can be allowed at once (e.g. while DNS for a
