@@ -4,6 +4,10 @@ const auth = require('../middleware/auth')
 
 const router = express.Router()
 const STATUSES = ['', 'approved', 'edit', 'rejected']
+// Fixed allowlist of review-able posts for the October review. A postId
+// outside this set is rejected rather than silently creating an arbitrary
+// row, since the id also becomes the table's primary key.
+const POST_IDS = ['oct05', 'oct09', 'oct11', 'scanner', 'oct13', 'oct23']
 
 function mapRow(row) {
   return {
@@ -11,6 +15,7 @@ function mapRow(row) {
     status: row.status,
     feedback: row.feedback,
     reviewer: row.reviewer,
+    reviewerId: row.reviewer_id,
     updated: row.updated_at,
   }
 }
@@ -25,22 +30,36 @@ router.get('/', auth, async (req, res, next) => {
   }
 })
 
-// PUT /api/content-approval-decisions/:postId — upsert one post's decision
+// PUT /api/content-approval-decisions/:postId — upsert one post's decision.
+// The reviewer identity comes from the verified JWT (req.user), never from
+// the request body, so the audit trail can't be spoofed by typing someone
+// else's name. `feedback` is the only free-text field a client controls.
 router.put('/:postId', auth, async (req, res, next) => {
   try {
-    const { status = '', feedback = '', reviewer = '' } = req.body || {}
-    if (!STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' })
-    if (String(feedback).length > 4000 || String(reviewer).length > 200) {
-      return res.status(400).json({ error: 'Feedback or reviewer name is too long' })
+    const { postId } = req.params
+    if (!POST_IDS.includes(postId)) {
+      return res.status(400).json({ error: 'Unknown post id' })
     }
+    const { status = '' } = req.body || {}
+    const feedback = typeof req.body?.feedback === 'string' ? req.body.feedback : ''
+    if (!STATUSES.includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' })
+    }
+    if (feedback.length > 4000) {
+      return res.status(400).json({ error: 'Feedback is too long' })
+    }
+    const reviewerName = req.user?.name || req.user?.email || 'Unknown'
+    const reviewerId = req.user?.id ?? null
+
     const { rows } = await db.query(
-      `insert into content_approval_decisions (post_id, status, feedback, reviewer, updated_at)
-       values ($1, $2, $3, $4, now())
+      `insert into content_approval_decisions (post_id, status, feedback, reviewer, reviewer_id, updated_at)
+       values ($1, $2, $3, $4, $5, now())
        on conflict (post_id) do update
          set status = excluded.status, feedback = excluded.feedback,
-             reviewer = excluded.reviewer, updated_at = now()
+             reviewer = excluded.reviewer, reviewer_id = excluded.reviewer_id,
+             updated_at = now()
        returning *`,
-      [req.params.postId, status, String(feedback), String(reviewer)]
+      [postId, status, feedback, reviewerName, reviewerId]
     )
     res.json({ decision: mapRow(rows[0]) })
   } catch (err) {
