@@ -1,5 +1,5 @@
 const { fetchEvidentEmails, fetchEviSmartEmails } = require('./gmailFetch')
-const { parseAndAggregate, pickEviSmartForDate, applyEmailMtdTotals, repKeyFromSalesperson } = require('./parseEvident')
+const { parseAndAggregate, pickEviSmartForDate, applyEmailMtdTotals, applyEviSmartMtdFallback, repKeyFromSalesperson } = require('./parseEvident')
 const { buildCombinedLeadershipEmail } = require('./buildReport')
 const { getHistory, appendRow } = require('./log')
 const { sendEmail } = require('../email')
@@ -150,6 +150,7 @@ async function runEvidentReport({ requireEviSmart = false } = {}) {
 
   console.log('[evident-report] fetching EviSmart Daily Sales Report...')
   const eviSmartRaw = await fetchEviSmartTotals(runDate)
+  Object.assign(aggregate, applyEviSmartMtdFallback(aggregate, eviSmartRaw))
   aggregate.eviSmart = applyEmailMtdTotals(eviSmartRaw, aggregate)
   aggregate.eviSmart.lastMonth = await evidentLastMonth(runDate)
   if (!eviSmartRaw) {
@@ -224,7 +225,9 @@ async function sendEvidentReportForApproval() {
   const historyRows = await getHistory()
   const messages = (await fetchEvidentEmails()).filter((m) => m.date === runDate)
   const aggregate = parseAndAggregate(messages, { runDate })
-  aggregate.eviSmart = applyEmailMtdTotals(await fetchEviSmartTotals(runDate), aggregate)
+  const eviSmartRaw = await fetchEviSmartTotals(runDate)
+  Object.assign(aggregate, applyEviSmartMtdFallback(aggregate, eviSmartRaw))
+  aggregate.eviSmart = applyEmailMtdTotals(eviSmartRaw, aggregate)
   aggregate.eviSmart.lastMonth = await evidentLastMonth(runDate)
   const repGoals = applyEvidentMtdToGoals(await fetchRepGoalsWithProgress(runDate), aggregate.companyMtdBilledByRep)
   const { subject, html } = buildCombinedLeadershipEmail(aggregate, historyRows, repGoals, {})

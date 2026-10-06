@@ -376,6 +376,52 @@ function pickEviSmartForDate(messages, runDate) {
   return null;
 }
 
+// The "MTD by sales rep" table every EviSmart Daily Sales Report carries:
+// Billed (#40) and Booked (#12) month to date for each rep and the company,
+// the two reports Elizabeth named as the source of truth (2026-10-02). Found
+// 2026-10-06: when Evident skipped its own two MTD emails for Oct 5, this
+// table still had every figure. Layouts vary by day ("James (Delaney)" or
+// "Delaney, James"; a "No rep (N/A)" row on some days), and headers are <th>
+// cells, so it is read here rather than with parseTable. Returns null when
+// the table isn't there, never zeros.
+function extractEviSmartRepMtd(html) {
+  const tables = String(html || '').match(/<table[\s\S]*?<\/table>/gi) || [];
+  const table = tables.find((t) => /Company total/i.test(t) && /Delaney/i.test(t) && /Alexander/i.test(t));
+  if (!table) return null;
+  const rows = table.split(/<tr[^>]*>/i).slice(1).map((r) => (r.match(/<(?:td|th)[^>]*>[\s\S]*?<\/(?:td|th)>/gi) || []).map(stripTags));
+  const header = rows[0] || [];
+  const billedCol = header.findIndex((h) => /billed/i.test(h));
+  const bookedCol = header.findIndex((h) => /booked/i.test(h));
+  if (billedCol < 1 || bookedCol < 1) return null;
+  const pick = (re) => rows.slice(1).find((r) => re.test(r[0] || ''));
+  const jamesRow = pick(/delaney|^james/i), williamRow = pick(/alexander|^william/i), naRow = pick(/n\/a|no rep/i), totalRow = pick(/company total/i);
+  if (!jamesRow || !williamRow || !totalRow) return null;
+  const col = (idx) => {
+    const james = toNum(jamesRow[idx]), william = toNum(williamRow[idx]), company = toNum(totalRow[idx]);
+    const na = naRow ? toNum(naRow[idx]) : Math.round((company - james - william) * 100) / 100;
+    return { james, william, na, company };
+  };
+  return { billed: col(billedCol), booked: col(bookedCol) };
+}
+
+// Fills the two company/by-rep MTD figures from EviSmart's by-rep table ONLY
+// when Evident's own email for that figure didn't arrive; an email that did
+// arrive always wins. A filled figure is no longer reported as missing.
+function applyEviSmartMtdFallback(agg, eviSmart) {
+  const rep = eviSmart && eviSmart.repMtd;
+  if (!rep) return agg;
+  const out = { ...agg, missing: [...agg.missing] };
+  const fill = (label, kind, totalKey, byRepKey) => {
+    if (!out.missing.includes(label) || !rep[kind]) return;
+    out[totalKey] = rep[kind].company;
+    out[byRepKey] = { na: rep[kind].na, james: rep[kind].james, william: rep[kind].william };
+    out.missing = out.missing.filter((l) => l !== label);
+  };
+  fill('MTD Booked Daily Update', 'booked', 'companyMtdBooked', 'companyMtdBookedByRep');
+  fill('Daily MTD Total Billed', 'billed', 'companyMtdBilled', 'companyMtdBilledByRep');
+  return out;
+}
+
 function extractEviSmartTotals(html) {
   const dailyBooked = extractEviSmartRow(html, 'Daily Booked');
   const dailyBilled = extractEviSmartRow(html, 'Daily Billed');
@@ -418,6 +464,7 @@ function extractEviSmartTotals(html) {
           || '0'
         ),
     lastMonth: extractEviSmartLastMonth(html),
+    repMtd: extractEviSmartRepMtd(html),
     dailyCustomers: extractEviSmartCustomers(html),
     cumulativeAsOf: (html.match(/\(\s*(?:MTD )?through (\d{1,2} [A-Za-z]{3})/) || [])[1] || null,
   };
@@ -676,4 +723,4 @@ function parseAndAggregate(messages, { runDate } = {}) {
   };
 }
 
-module.exports = { parseAndAggregate, parseTable, classify, toNum, findCol, rowToObj, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractRepColumns, extractEviSmartTotals, eviSmartSubjectDate, pickEviSmartForDate, repKeyFromSalesperson, applyEmailMtdTotals };
+module.exports = { parseAndAggregate, parseTable, classify, toNum, findCol, rowToObj, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractRepColumns, extractEviSmartTotals, extractEviSmartRepMtd, applyEviSmartMtdFallback, eviSmartSubjectDate, pickEviSmartForDate, repKeyFromSalesperson, applyEmailMtdTotals };

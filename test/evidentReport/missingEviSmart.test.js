@@ -37,3 +37,13 @@ test('if Evident\'s MTD booked email is missing, the month comparison shows a no
   const { html } = buildCombinedLeadershipEmail(a, [], [], {})
   assert.match(html, /booked or billed total wasn't available/)
 })
+
+test('the "missing reports" banner only names reports whose figures are shown; a missing WIP report no longer raises a false warning', () => {
+  const a = agg()
+  a.missing = ['Cases Currently In Progress']
+  assert.doesNotMatch(buildCombinedLeadershipEmail(a, [], [], {}).html, /Heads up: today's figures are missing/)
+  a.missing = ['Cases Currently In Progress', 'Daily Billed Report - Nadine']
+  const real = buildCombinedLeadershipEmail(a, [], [], {}).html
+  assert.match(real, /missing 1 of the 4 Evident reports they come from \(Daily Billed Report - Nadine\)/)
+  assert.doesNotMatch(real, /Cases Currently In Progress/)
+})

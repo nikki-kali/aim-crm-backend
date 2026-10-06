@@ -204,6 +204,21 @@ function dateLabelFor(runDate) {
   });
 }
 
+// Only reports whose figures appear in this email can make a number here
+// wrong. "Cases Currently In Progress" (WIP) and the per-rep Booked Cases
+// emails feed only the internal log row, so a missing one used to raise a
+// false "numbers may be understated" warning on a fully filled-in report
+// (2026-10-06). A report EviSmart's by-rep table already filled in is no
+// longer in agg.missing either.
+const SHOWN_REPORTS = ['Daily Booking Report - Nadine', 'Daily Billed Report - Nadine', 'MTD Booked Daily Update', 'Daily MTD Total Billed'];
+function buildMissingBanner(agg) {
+  const missingShown = agg.missing.filter((label) => SHOWN_REPORTS.includes(label));
+  if (!missingShown.length) return '';
+  return `<div style="margin:30px 36px 0;padding:16px 19px;background:#fefaf1;border:1px solid #fde68a;border-left:3px solid #b45309;border-radius:4px 12px 12px 4px">
+         <p style="margin:0;font-size:13.5px;line-height:1.55;color:${BRAND.ink}">Heads up: today's figures are missing ${missingShown.length} of the ${SHOWN_REPORTS.length} Evident reports they come from (${missingShown.join(', ')}). Numbers below may be understated.</p>
+       </div>`;
+}
+
 // Report #1: Leadership Sales Summary — Daily Booked (count + customer
 // detail), Daily Billed (value only), MTD Booked (count + value), MTD
 // Billed (value only), YTD Sales Value Total (booked, + the $2.7M goal
@@ -253,11 +268,7 @@ function buildReport1Body(agg, historyRows = [], overrides = {}) {
        </div>`
     : '';
 
-  const missingBanner = agg.missing.length
-    ? `<div style="margin:30px 36px 0;padding:16px 19px;background:#fefaf1;border:1px solid #fde68a;border-left:3px solid #b45309;border-radius:4px 12px 12px 4px">
-         <p style="margin:0;font-size:13.5px;line-height:1.55;color:${BRAND.ink}">Heads up: today's figures are missing ${agg.missing.length} of the ${agg.expectedCount} expected Evident reports (${agg.missing.join(', ')}). Numbers below may be understated.</p>
-       </div>`
-    : '';
+  const missingBanner = buildMissingBanner(agg);
 
   // Customer-aggregated detail for Today's Booked (Ben Silberstein's
   // requirement, 2026-09-18; format confirmed 2026-09-18 against a real
@@ -406,6 +417,10 @@ function buildReport2Body(agg, repGoals = []) {
     for (const r of rows) {
       const key = repKeyFromSalesperson(r.salesperson);
       if (!key) continue;
+      // A row in the Daily Billed Report with a Sales Value but no billed
+      // amount is not invoiced yet, so it is not a billed case (found
+      // 2026-10-06: William showed "5 cases billed $0.00").
+      if (valueField === 'billedValue' && !(r.billedValue > 0)) continue;
       g[key].count += 1;
       g[key].value += r[valueField];
     }
@@ -446,11 +461,7 @@ function buildReport2Body(agg, repGoals = []) {
       ${goals.map(goalBar).join('')}
     </div>` : ''}`;
 
-  const missingBanner = agg.missing.length
-    ? `<div style="margin:30px 36px 0;padding:16px 19px;background:#fefaf1;border:1px solid #fde68a;border-left:3px solid #b45309;border-radius:4px 12px 12px 4px">
-         <p style="margin:0;font-size:13.5px;line-height:1.55;color:${BRAND.ink}">Heads up: today's figures are missing ${agg.missing.length} of the ${agg.expectedCount} expected Evident reports (${agg.missing.join(', ')}). Numbers below may be understated.</p>
-       </div>`
-    : '';
+  const missingBanner = buildMissingBanner(agg);
 
   const jamesGoals = goalsFor('James Delaney');
   const williamGoals = goalsFor('William Alexander');

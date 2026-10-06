@@ -1,7 +1,7 @@
 const db = require('../config/db')
 const { sendEmail, salesRepDailyReportEmail } = require('./email')
-const { fetchEvidentEmailsInRange } = require('./evidentReport/gmailFetch')
-const { extractDailyBookedCustomerNames, extractBookingRows, extractBilledRows, parseTable, rowToObj, extractRepColumns } = require('./evidentReport/parseEvident')
+const { fetchEvidentEmailsInRange, fetchEviSmartEmails } = require('./evidentReport/gmailFetch')
+const { extractDailyBookedCustomerNames, extractBookingRows, extractBilledRows, parseTable, rowToObj, extractRepColumns, pickEviSmartForDate } = require('./evidentReport/parseEvident')
 const { computeProgress } = require('./goalProgress')
 const { APPROVER_EMAIL, createApprovalToken, buildApproveUrl, injectApprovalBanner } = require('./reportApproval')
 const { renderGoalBarsGif } = require('./goalBarGifRenderer')
@@ -109,6 +109,21 @@ const gmailDate = (dateStr, addDays) => {
 const mtdCache = new Map()
 const MTD_CACHE_MS = 10 * 60 * 1000
 
+// Which source to trust for a month-to-date figure, best first: the Evident
+// email dated for the report day itself, then EviSmart's by-rep table for
+// that day (same #12/#40 reports), and only then an OLDER Evident email in
+// the same month (a stale last resort). Found 2026-10-06: when Evident
+// skipped a day's MTD emails the older one was used silently.
+function pickMtdSource({ exact, eviSmart, older }) {
+  return exact || eviSmart || older || null
+}
+
+async function eviSmartRepMtdFor(dateStr, kind) {
+  const totals = pickEviSmartForDate(await fetchEviSmartEmails(), dateStr)
+  const rep = totals && totals.repMtd && totals.repMtd[kind === 'billed' ? 'billed' : 'booked']
+  return rep ? { na: rep.na, james: rep.james, william: rep.william } : null
+}
+
 async function fetchMtdByRepAsOf(dateStr, kind) {
   const cacheKey = `${kind}|${dateStr}`
   const hit = mtdCache.get(cacheKey)
@@ -116,7 +131,13 @@ async function fetchMtdByRepAsOf(dateStr, kind) {
   const monthStart = `${dateStr.slice(0, 7)}-01`
   const promise = fetchEvidentEmailsInRange(
     `subject:"${MTD_QUERY[kind]}" after:${gmailDate(monthStart, -1)} before:${gmailDate(dateStr, 2)}`
-  ).then((msgs) => pickMtdByRepAsOf(msgs, dateStr, kind))
+  ).then(async (msgs) => {
+    const exact = pickMtdByRepAsOf(msgs.filter((m) => m.date === dateStr), dateStr, kind)
+    if (exact) return exact
+    let eviSmart = null
+    try { eviSmart = await eviSmartRepMtdFor(dateStr, kind) } catch (err) { console.error('[sales-rep-daily-report] EviSmart by-rep fallback failed:', err.message) }
+    return pickMtdSource({ exact, eviSmart, older: eviSmart ? null : pickMtdByRepAsOf(msgs, dateStr, kind) })
+  })
   mtdCache.set(cacheKey, { at: Date.now(), promise })
   promise.catch(() => mtdCache.delete(cacheKey))
   return promise
@@ -269,6 +290,14 @@ async function fetchRepBookedDoctorNamesThisWeek(repEmail, dateStr) {
 // resolves rep ownership for this same report. Best-effort: any failure
 // (Gmail hiccup, no email that day, no repId) returns nulls rather than a
 // fabricated $0, matching this file's other best-effort Evident lookups.
+// Cases billed = rows actually invoiced (Total Billed > 0). Evident's Daily
+// Billed Report also lists rows with a Sales Value but a blank Total Billed;
+// those are not billed yet and used to be counted ("5 cases billed $0.00").
+function summarizeBilledRows(rows) {
+  const billed = rows.filter((r) => r.billedValue > 0)
+  return { count: billed.length, value: billed.reduce((sum, r) => sum + r.billedValue, 0) }
+}
+
 async function computeRepDailyEvidentStats(repEmail, dateStr, repId) {
   const empty = { dailyBookedCount: null, dailyBookedValue: null, dailyBilledCount: null, dailyBilledValue: null }
   if (!repId) return empty
@@ -292,8 +321,8 @@ async function computeRepDailyEvidentStats(repEmail, dateStr, repId) {
     return {
       dailyBookedCount: bookingRows ? bookingRows.length : null,
       dailyBookedValue: bookingRows ? bookingRows.reduce((sum, r) => sum + r.value, 0) : null,
-      dailyBilledCount: billedRows ? billedRows.length : null,
-      dailyBilledValue: billedRows ? billedRows.reduce((sum, r) => sum + r.billedValue, 0) : null,
+      dailyBilledCount: billedRows ? summarizeBilledRows(billedRows).count : null,
+      dailyBilledValue: billedRows ? summarizeBilledRows(billedRows).value : null,
     }
   } catch (err) {
     console.error(`[sales-rep-daily-report] failed to fetch daily booked/billed for ${repEmail}:`, err.message)
@@ -654,6 +683,8 @@ module.exports = {
   listNewDoctorNamesThisWeek,
   weeksInMonth,
   pickMtdByRepAsOf,
+  pickMtdSource,
+  summarizeBilledRows,
   evidentMtdForRep,
   evidentMtdCompanyTotal,
   lastDayOfPriorMonth,

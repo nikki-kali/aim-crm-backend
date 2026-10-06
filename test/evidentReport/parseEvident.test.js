@@ -482,6 +482,7 @@ test('extractEviSmartTotals reads all 6 real rows from a real EviSmart Daily Sal
     ytdTotalSalesValue: 388621.46,
     ytdBilledValue: 337992.27,
     lastMonth: { monthName: 'August', booked: 157654.32, billed: 145872.42 },
+    repMtd: null, // this older real email has no "MTD by sales rep" table
     dailyCustomers: [],
     cumulativeAsOf: '23 Sep',
   });
