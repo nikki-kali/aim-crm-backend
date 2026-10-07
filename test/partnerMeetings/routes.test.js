@@ -20,6 +20,11 @@ require.cache[emailModulePath] = {
   },
 }
 
+// The public form is rate limited per IP (10 a minute); this file submits more
+// than that from one address, so the limiter is a pass-through here.
+const limiterPath = require.resolve(path.join(__dirname, '../../src/middleware/rateLimiter.js'))
+require.cache[limiterPath] = { id: limiterPath, filename: limiterPath, loaded: true, exports: () => (req, res, next) => next() }
+
 const routes = require('../../src/routes/partnerMeetings')
 
 function startServer() {
@@ -84,7 +89,8 @@ test('POST /request rejects bad input without saving or emailing', async () => {
       goodBody({ partner_name: '' }),
       goodBody({ email: 'nope' }),
       goodBody({ timezone: 'Mars/Base' }),
-      goodBody({ slots: [{ date: futureDate(10), time: '10:00' }] }),
+      goodBody({ slots: [{ date: futureDate(10), time: '' }, { date: futureDate(11), time: '14:30' }], availability: '' }),
+      goodBody({ slots: [], availability: '' }),
       goodBody({ slots: [{ date: '2020-01-01', time: '10:00' }, { date: futureDate(11), time: '14:30' }, { date: futureDate(12), time: '09:00' }] }),
     ]
     for (const c of cases) {
@@ -214,5 +220,65 @@ test('the form supports browser autofill and link pre-fill', async () => {
     const r = await call(server, 'GET', '/api/partner-meetings/book')
     for (const a of ['name', 'organization', 'email', 'tel']) assert.match(r.body, new RegExp(`autocomplete="${a}"`))
     assert.match(r.body, /URLSearchParams\(location\.search\)/)
+  } finally { server.close() }
+})
+
+test('availability text alone is enough, and a request with neither is rejected', async () => {
+  const server = await startServer()
+  sentEmails.length = 0
+  try {
+    const none = await call(server, 'POST', '/api/partner-meetings/request', goodBody({ slots: [], availability: '' }))
+    assert.equal(none.status, 400)
+    const half = await call(server, 'POST', '/api/partner-meetings/request', goodBody({ slots: [{ date: futureDate(10), time: '' }], availability: 'mornings' }))
+    assert.equal(half.status, 400)
+    assert.equal(sentEmails.length, 0)
+
+    const ok = await call(server, 'POST', '/api/partner-meetings/request', goodBody({ slots: [], availability: 'Weekday mornings next week' }))
+    assert.equal(ok.status, 201, JSON.stringify(ok.body))
+    const m = sentEmails[0]
+    assert.match(m.html, /Weekday mornings next week/)
+    assert.doesNotMatch(m.html, /Approve this time/)
+    assert.match(m.html, /Pick a time and confirm/)
+    assert.equal(tokenFrom(m.html).length, 2) // set_time + call_first
+  } finally { server.close(); await cleanup() }
+})
+
+test('Ben picks a time himself: a bad date keeps his link alive, a good one confirms and emails both sides', async () => {
+  const server = await startServer()
+  sentEmails.length = 0
+  try {
+    await call(server, 'POST', '/api/partner-meetings/request', goodBody({ slots: [], availability: 'Any weekday morning' }))
+    const [setTok] = tokenFrom(sentEmails[0].html)
+    sentEmails.length = 0
+
+    const page = await call(server, 'GET', `/api/partner-meetings/confirm?token=${setTok}`)
+    assert.match(page.body, /name="date"/)
+    assert.match(page.body, /America\/Los_Angeles/)
+
+    const bad = await call(server, 'POST', '/api/partner-meetings/confirm', { token: setTok, date: '2020-01-01', time: '10:00' }, true)
+    assert.equal(bad.status, 400)
+    assert.equal(sentEmails.length, 0)
+
+    const good = await call(server, 'POST', '/api/partner-meetings/confirm', { token: setTok, date: futureDate(14), time: '09:30' }, true)
+    assert.equal(good.status, 200)
+    assert.match(good.body, /Meeting confirmed/)
+    assert.equal(sentEmails.length, 2)
+    assert.match(sentEmails.find((e) => e.to.includes('test-partner@example.com')).html, /9:30 AM/)
+    const { rows } = await db.query(`SELECT status, confirmed_slot_index, jsonb_array_length(slots) n FROM partner_meeting_requests WHERE partner_name LIKE 'TEST PARTNER%'`)
+    assert.equal(rows[0].status, 'approved')
+    assert.equal(rows[0].confirmed_slot_index, 0)
+    assert.equal(rows[0].n, 1)
+
+    const again = await call(server, 'POST', '/api/partner-meetings/confirm', { token: setTok, date: futureDate(14), time: '09:30' }, true)
+    assert.equal(again.status, 410)
+  } finally { server.close(); await cleanup() }
+})
+
+test('the form no longer requires the three times and asks for availability', async () => {
+  const server = await startServer()
+  try {
+    const r = await call(server, 'GET', '/api/partner-meetings/book')
+    assert.match(r.body, /name="availability"/)
+    assert.doesNotMatch(r.body, /name="date1" required/)
   } finally { server.close() }
 })

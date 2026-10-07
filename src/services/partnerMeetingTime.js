@@ -70,6 +70,41 @@ function validateSlots(slots, tz, now = new Date()) {
   return { ok: true, slots: clean }
 }
 
+// Slots are optional: blank rows are skipped, 0 to 3 filled rows are allowed.
+// A half-filled row (date without time, or the reverse) is an error.
+function validateOptionalSlots(slots, tz, now = new Date()) {
+  try {
+    assertTimeZone(tz)
+  } catch {
+    return { ok: false, error: 'Please choose a valid time zone.' }
+  }
+  if (slots == null) return { ok: true, slots: [] }
+  if (!Array.isArray(slots) || slots.length > 3) return { ok: false, error: 'Please give at most 3 dates and times.' }
+  const clean = []
+  for (const s of slots) {
+    const date = String((s && s.date) || '').trim()
+    const time = String((s && s.time) || '').trim()
+    if (!date && !time) continue
+    if (!date || !time) return { ok: false, error: 'Each option needs both a date and a time.' }
+    const one = checkOneSlot(date, time, tz, now)
+    if (!one.ok) return one
+    clean.push({ date, time })
+  }
+  if (new Set(clean.map((s) => `${s.date} ${s.time}`)).size !== clean.length) {
+    return { ok: false, error: 'Please give different options, not the same one twice.' }
+  }
+  return { ok: true, slots: clean }
+}
+
+function checkOneSlot(date, time, tz, now = new Date()) {
+  if (!isRealDate(date)) return { ok: false, error: 'One of the dates is not a valid date.' }
+  if (!TIME_RE.test(time)) return { ok: false, error: 'One of the times is not a valid time.' }
+  if (zonedTimeToUtc(date, time, tz).getTime() <= now.getTime()) {
+    return { ok: false, error: 'Each option must be an upcoming date and time, not one in the past.' }
+  }
+  return { ok: true }
+}
+
 // "Wednesday, October 14, 2026 at 10:00 AM (America/New_York)": the wall-clock
 // time exactly as the partner typed it, never converted.
 function formatSlot(slot, tz) {
@@ -81,4 +116,4 @@ function formatSlot(slot, tz) {
   return `${dateLabel} at ${h12}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'} (${tz})`
 }
 
-module.exports = { zonedTimeToUtc, validateSlots, formatSlot, assertTimeZone }
+module.exports = { zonedTimeToUtc, validateSlots, validateOptionalSlots, checkOneSlot, formatSlot, assertTimeZone }

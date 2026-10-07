@@ -2,12 +2,12 @@ const express = require('express')
 const cors = require('cors')
 const db = require('../config/db')
 const rateLimiter = require('../middleware/rateLimiter')
-const { validateSlots, zonedTimeToUtc, formatSlot } = require('../services/partnerMeetingTime')
+const { validateOptionalSlots, checkOneSlot, zonedTimeToUtc, formatSlot } = require('../services/partnerMeetingTime')
 const { buildIcs, buildGoogleCalendarUrl } = require('../services/partnerMeetingCalendar')
 const { createToken, peekToken, consumeToken, invalidateOtherTokens } = require('../services/partnerMeetingTokens')
 const {
   internalRequestEmail, partnerConfirmationEmail, benConfirmationEmail,
-  approveConfirmPage, callFirstConfirmPage, resultPage, oneLine, escapeHtml, who,
+  approveConfirmPage, callFirstConfirmPage, setTimePage, resultPage, oneLine, escapeHtml, who,
 } = require('../services/partnerMeetingEmails')
 const { PARTNER_MEETING_TO, PARTNER_MEETING_CC, PARTNER_MEETING_BCC, MEET_LINK, MEETING_MINUTES } = require('../constants/partnerMeetings')
 const { sendEmail } = require('../services/email')
@@ -34,10 +34,10 @@ const COMMON_ZONES = [
 router.get('/book', (req, res) => {
   const slotRow = (i) => `
       <div style="display:flex;gap:8px;margin-bottom:10px">
-        <div style="flex:1"><label style="display:block;font-size:12px;color:#5b7a86;margin:0 0 3px">Option ${i} date *</label>
-          <input type="date" name="date${i}" required style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;font-size:14px"></div>
-        <div style="flex:1"><label style="display:block;font-size:12px;color:#5b7a86;margin:0 0 3px">Option ${i} time *</label>
-          <input type="time" name="time${i}" required style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;font-size:14px"></div>
+        <div style="flex:1"><label style="display:block;font-size:12px;color:#5b7a86;margin:0 0 3px">Option ${i} date</label>
+          <input type="date" name="date${i}" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;font-size:14px"></div>
+        <div style="flex:1"><label style="display:block;font-size:12px;color:#5b7a86;margin:0 0 3px">Option ${i} time</label>
+          <input type="time" name="time${i}" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;font-size:14px"></div>
       </div>`
   const AUTOCOMPLETE = { partner_name: 'name', company: 'organization', email: 'email', phone: 'tel' }
   const field = (label, name, type = 'text', required = false) => `
@@ -48,7 +48,7 @@ router.get('/book', (req, res) => {
 <body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7faf9;padding:40px 16px">
   <div style="max-width:480px;margin:0 auto">
     <h1 style="font-size:20px;color:#10353f;margin:0 0 6px">Schedule a meeting with Ben</h1>
-    <p style="font-size:14px;color:#5b7a86;margin:0 0 24px">Tell us who you are and give us 3 dates and times that work for you. We will confirm one of them by email with a Google Meet link.</p>
+    <p style="font-size:14px;color:#5b7a86;margin:0 0 24px">Tell us who you are and when you are available. We will confirm a time by email with a Google Meet link.</p>
     <form id="pm-form" style="background:#fff;border-radius:16px;padding:24px;box-shadow:0 4px 20px rgba(0,0,0,.06)">
       ${field('Your name', 'partner_name', 'text', true)}
       ${field('Company', 'company')}
@@ -56,7 +56,10 @@ router.get('/book', (req, res) => {
       ${field('Phone', 'phone', 'tel')}
       <label style="display:block;font-size:13px;color:#10353f;font-weight:600;margin:0 0 4px">Your time zone *</label>
       <select name="timezone" id="pm-tz" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;margin-bottom:14px;font-size:14px;background:#fff"></select>
-      <p style="font-size:13px;color:#10353f;font-weight:600;margin:0 0 8px">3 times you are available (30 minutes) *</p>
+      <label style="display:block;font-size:13px;color:#10353f;font-weight:600;margin:0 0 4px">Your availability *</label>
+      <textarea name="availability" rows="3" maxlength="1000" placeholder="For example: weekday mornings next week, or Tuesday and Thursday after 2 PM" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;margin-bottom:16px;font-size:14px;font-family:inherit"></textarea>
+      <p style="font-size:13px;color:#10353f;font-weight:600;margin:0 0 2px">Have exact times in mind? (optional, 30 minutes)</p>
+      <p style="font-size:12px;color:#5b7a86;margin:0 0 8px">Add up to 3 and we can confirm one with a single click.</p>
       ${slotRow(1)}${slotRow(2)}${slotRow(3)}
       <label style="display:block;font-size:13px;color:#10353f;font-weight:600;margin:6px 0 4px">Anything we should know?</label>
       <textarea name="note" rows="3" maxlength="1000" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d7e3e1;border-radius:8px;margin-bottom:18px;font-size:14px;font-family:inherit"></textarea>
@@ -93,12 +96,15 @@ router.get('/book', (req, res) => {
     document.getElementById('pm-form').addEventListener('submit', async function (e) {
       e.preventDefault();
       var f = e.target, err = document.getElementById('pm-error'), btn = document.getElementById('pm-submit');
-      err.style.display = 'none'; btn.disabled = true;
+      err.style.display = 'none';
       var v = function (n) { return f.elements[n].value; };
+      var anySlot = [1, 2, 3].some(function (i) { return v('date' + i) || v('time' + i); });
+      if (!v('availability').trim() && !anySlot) { err.textContent = 'Please describe your availability, or add at least one date and time.'; err.style.display = 'block'; return; }
+      btn.disabled = true;
       var payload = {
         partner_name: v('partner_name'), company: v('company'), email: v('email'), phone: v('phone'),
-        timezone: v('timezone'), note: v('note'),
-        slots: [1, 2, 3].map(function (i) { return { date: v('date' + i), time: v('time' + i) }; }),
+        timezone: v('timezone'), note: v('note'), availability: v('availability'),
+        slots: [1, 2, 3].map(function (i) { return { date: v('date' + i), time: v('time' + i) }; }).filter(function (s) { return s.date || s.time; }),
       };
       try {
         var res = await fetch('/api/partner-meetings/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -130,24 +136,28 @@ router.post('/request', rateLimiter({ windowMs: 60 * 1000, max: 10 }), async (re
   if (!partner_name || partner_name.length > 120) return res.status(400).json({ error: 'Please enter your name.' })
   if (!EMAIL_RE.test(email) || email.length > 254) return res.status(400).json({ error: 'Please enter a valid email address.' })
   if (company.length > 160 || phone.length > 40 || note.length > 1000) return res.status(400).json({ error: 'One of the fields is too long.' })
-  const checked = validateSlots(b.slots, timezone)
+  const availability = String(b.availability || '').trim()
+  if (availability.length > 1000) return res.status(400).json({ error: 'Your availability is too long.' })
+  const checked = validateOptionalSlots(b.slots, timezone)
   if (!checked.ok) return res.status(400).json({ error: checked.error })
+  if (!availability && !checked.slots.length) return res.status(400).json({ error: 'Please describe your availability, or add at least one date and time.' })
 
   let requestId
   try {
     const { rows } = await db.query(
-      `INSERT INTO partner_meeting_requests (partner_name, company, email, phone, timezone, slots, note)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7) RETURNING *`,
-      [partner_name, company || null, email, phone || null, timezone, JSON.stringify(checked.slots), note || null]
+      `INSERT INTO partner_meeting_requests (partner_name, company, email, phone, timezone, slots, note, availability)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8) RETURNING *`,
+      [partner_name, company || null, email, phone || null, timezone, JSON.stringify(checked.slots), note || null, availability || null]
     )
     const request = rows[0]
     requestId = request.id
     const approveTokens = []
-    for (let i = 0; i < 3; i++) approveTokens.push(await createToken({ requestId, action: 'approve', slotIndex: i }))
+    for (let i = 0; i < checked.slots.length; i++) approveTokens.push(await createToken({ requestId, action: 'approve', slotIndex: i }))
+    const setTimeToken = checked.slots.length ? null : await createToken({ requestId, action: 'set_time' })
     const callFirstToken = await createToken({ requestId, action: 'call_first' })
     const link = (t) => `${BACKEND_URL}/api/partner-meetings/confirm?token=${t}`
 
-    const { subject, html } = internalRequestEmail({ request, approveUrls: approveTokens.map(link), callFirstUrl: link(callFirstToken) })
+    const { subject, html } = internalRequestEmail({ request, approveUrls: approveTokens.map(link), callFirstUrl: link(callFirstToken), setTimeUrl: setTimeToken ? link(setTimeToken) : null })
     await sendEmail({
       to: PARTNER_MEETING_TO, cc: PARTNER_MEETING_CC, bcc: PARTNER_MEETING_BCC,
       replyTo: email, subject, html,
@@ -174,7 +184,9 @@ router.get('/confirm', rateLimiter({ windowMs: 10 * 60 * 1000, max: 40 }), async
     if (!rows[0]) return res.status(404).send(resultPage('Not found', 'This request no longer exists.'))
     const page = claim.action === 'approve'
       ? approveConfirmPage({ request: rows[0], slot: rows[0].slots[claim.slot_index], token: String(token) })
-      : callFirstConfirmPage({ request: rows[0], token: String(token) })
+      : claim.action === 'set_time'
+        ? setTimePage({ request: rows[0], token: String(token) })
+        : callFirstConfirmPage({ request: rows[0], token: String(token) })
     return res.send(page)
   } catch (err) {
     console.error('[partner-meetings] GET /confirm failed:', err)
@@ -186,6 +198,19 @@ router.post('/confirm', rateLimiter({ windowMs: 10 * 60 * 1000, max: 40 }), asyn
   try {
     const token = String((req.body || {}).token || '')
     if (!token) return res.status(400).send(resultPage('Missing link', 'This link is missing its token.'))
+    // A "pick a time" link is checked BEFORE it is used up, so a typo in the
+    // date does not burn Ben's only link.
+    let pickedSlot = null
+    const peeked = await peekToken(token)
+    if (peeked && peeked.action === 'set_time') {
+      const { rows: pr } = await db.query(`SELECT * FROM partner_meeting_requests WHERE id = $1`, [peeked.request_id])
+      if (!pr[0]) return res.status(404).send(resultPage('Not found', 'This request no longer exists.'))
+      const date = String((req.body || {}).date || '').trim()
+      const time = String((req.body || {}).time || '').trim()
+      const check = checkOneSlot(date, time, pr[0].timezone)
+      if (!check.ok) return res.status(400).send(setTimePage({ request: pr[0], token, error: check.error }))
+      pickedSlot = { date, time }
+    }
     const claim = await consumeToken(token)
     if (!claim) return res.status(410).send(resultPage('Link expired or already used', 'This link has already been used, or has expired.'))
     const { rows: found } = await db.query(`SELECT * FROM partner_meeting_requests WHERE id = $1`, [claim.request_id])
@@ -203,14 +228,16 @@ router.post('/confirm', rateLimiter({ windowMs: 10 * 60 * 1000, max: 40 }), asyn
 
     // Approve: the other proposed times and the call-first button are now moot.
     await invalidateOtherTokens(request.id, token)
+    // A time Ben picked is stored as the request's single slot (index 0).
+    const slotIndex = pickedSlot ? 0 : claim.slot_index
     const { rows: updated } = await db.query(
-      `UPDATE partner_meeting_requests SET status='approved', confirmed_slot_index=$2, updated_at=NOW()
+      `UPDATE partner_meeting_requests SET status='approved', confirmed_slot_index=$2, slots=COALESCE($3::jsonb, slots), updated_at=NOW()
        WHERE id=$1 AND status IN ('pending','call_first') RETURNING *`,
-      [request.id, claim.slot_index]
+      [request.id, slotIndex, pickedSlot ? JSON.stringify([pickedSlot]) : null]
     )
     if (!updated.length) return res.send(resultPage('Already handled', 'This request was already updated, so no changes were made.'))
 
-    const slot = request.slots[claim.slot_index]
+    const slot = pickedSlot || request.slots[claim.slot_index]
     const startUtc = zonedTimeToUtc(slot.date, slot.time, request.timezone)
     const event = {
       uid: `partner-meeting-${request.id}@aimdentallab.com`, startUtc, durationMin: MEETING_MINUTES,
