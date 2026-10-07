@@ -282,3 +282,31 @@ test('the form no longer requires the three times and asks for availability', as
     assert.doesNotMatch(r.body, /name="date1" required/)
   } finally { server.close() }
 })
+
+test('Ben can pick the time in his own zone; the partner is told the time in theirs', async () => {
+  const server = await startServer()
+  sentEmails.length = 0
+  try {
+    await call(server, 'POST', '/api/partner-meetings/request', goodBody({ slots: [], availability: 'Mornings' }))
+    const [setTok] = tokenFrom(sentEmails[0].html)
+    sentEmails.length = 0
+    const r = await call(server, 'POST', '/api/partner-meetings/confirm', { token: setTok, tz: 'America/New_York', date: futureDate(14), time: '09:30' }, true)
+    assert.equal(r.status, 200)
+    const toPartner = sentEmails.find((e) => e.to.includes('test-partner@example.com'))
+    assert.match(toPartner.html, /6:30 AM \(America\/Los_Angeles\)/) // 9:30 ET = 6:30 PT
+    const toBen = sentEmails.find((e) => e.to.includes('ben@aimdentallab.com'))
+    assert.match(toBen.html, /9:30 AM ET/)
+  } finally { server.close(); await cleanup() }
+})
+
+test('the pick-a-time page shows the time zone choice', async () => {
+  const server = await startServer()
+  sentEmails.length = 0
+  try {
+    await call(server, 'POST', '/api/partner-meetings/request', goodBody({ slots: [], availability: 'Mornings' }))
+    const [setTok] = tokenFrom(sentEmails[0].html)
+    const page = await call(server, 'GET', `/api/partner-meetings/confirm?token=${setTok}`)
+    assert.match(page.body, /name="tz"/)
+    assert.match(sentEmails[0].html, /Email them/)
+  } finally { server.close(); await cleanup() }
+})

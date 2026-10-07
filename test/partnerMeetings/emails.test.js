@@ -98,3 +98,20 @@ test('the confirm pages post the token in a form, show the partner, and the call
   assert.ok(call.includes('href="tel:555-0100"'))
   assert.ok(call.includes('href="mailto:jane@acme.com"'))
 })
+
+test('the request email has an "Email them" button that opens a message to the partner', () => {
+  const { html } = internalRequestEmail({ request: REQUEST, approveUrls: ['a', 'b', 'c'], callFirstUrl: 'd' })
+  assert.match(html, /Email them/)
+  assert.ok(html.includes('href="mailto:jane@acme.com?subject='))
+})
+
+test('the pick-a-time page lets Ben choose the time zone, defaulting to Eastern', () => {
+  const { setTimePage } = require('../../src/services/partnerMeetingEmails')
+  const html = setTimePage({ request: REQUEST, token: 't' })
+  assert.match(html, /<select name="tz"/)
+  assert.match(html, /<option value="America\/New_York" selected>/)
+  assert.match(html, /<option value="America\/Los_Angeles"/)
+  const again = setTimePage({ request: REQUEST, token: 't', error: 'x', selectedTz: 'America/Chicago', date: '2026-10-20', time: '09:30' })
+  assert.match(again, /<option value="America\/Chicago" selected>/)
+  assert.match(again, /value="2026-10-20"/)
+})

@@ -101,3 +101,11 @@ test('the Google Calendar link carries the title, UTC times and the Meet link', 
   assert.equal(url.searchParams.get('location'), EVENT.location)
   assert.match(url.searchParams.get('details'), /Jane Smith/)
 })
+
+test('utcToZonedParts is the reverse of zonedTimeToUtc', () => {
+  const { utcToZonedParts, zonedTimeToUtc } = require('../../src/services/partnerMeetingTime')
+  const utc = zonedTimeToUtc('2026-10-21', '09:30', 'America/New_York')
+  assert.deepEqual(utcToZonedParts(utc, 'America/Los_Angeles'), { date: '2026-10-21', time: '06:30' })
+  const late = zonedTimeToUtc('2026-10-21', '22:00', 'America/Los_Angeles')
+  assert.deepEqual(utcToZonedParts(late, 'Asia/Manila'), { date: '2026-10-22', time: '13:00' })
+})

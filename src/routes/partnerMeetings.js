@@ -2,14 +2,14 @@ const express = require('express')
 const cors = require('cors')
 const db = require('../config/db')
 const rateLimiter = require('../middleware/rateLimiter')
-const { validateOptionalSlots, checkOneSlot, zonedTimeToUtc, formatSlot } = require('../services/partnerMeetingTime')
+const { validateOptionalSlots, checkOneSlot, zonedTimeToUtc, utcToZonedParts, assertTimeZone, formatSlot } = require('../services/partnerMeetingTime')
 const { buildIcs, buildGoogleCalendarUrl } = require('../services/partnerMeetingCalendar')
 const { createToken, peekToken, consumeToken, invalidateOtherTokens } = require('../services/partnerMeetingTokens')
 const {
   internalRequestEmail, partnerConfirmationEmail, benConfirmationEmail,
   approveConfirmPage, callFirstConfirmPage, setTimePage, resultPage, oneLine, escapeHtml, who,
 } = require('../services/partnerMeetingEmails')
-const { PARTNER_MEETING_TO, PARTNER_MEETING_CC, PARTNER_MEETING_BCC, MEET_LINK, MEETING_MINUTES } = require('../constants/partnerMeetings')
+const { COMMON_ZONES, PARTNER_MEETING_TO, PARTNER_MEETING_CC, PARTNER_MEETING_BCC, MEET_LINK, MEETING_MINUTES } = require('../constants/partnerMeetings')
 const { sendEmail } = require('../services/email')
 
 const router = express.Router()
@@ -23,14 +23,6 @@ router.use(express.json({ limit: '64kb' }))
 router.use(express.urlencoded({ extended: false, limit: '64kb' }))
 
 // ---- the public form ----
-const COMMON_ZONES = [
-  ['America/New_York', 'Eastern Time (New York)'], ['America/Chicago', 'Central Time (Chicago)'],
-  ['America/Denver', 'Mountain Time (Denver)'], ['America/Phoenix', 'Arizona (Phoenix)'],
-  ['America/Los_Angeles', 'Pacific Time (Los Angeles)'], ['America/Anchorage', 'Alaska (Anchorage)'],
-  ['Pacific/Honolulu', 'Hawaii (Honolulu)'], ['America/Toronto', 'Toronto'],
-  ['Europe/London', 'London'], ['Asia/Manila', 'Manila'],
-]
-
 router.get('/book', (req, res) => {
   const slotRow = (i) => `
       <div style="display:flex;gap:8px;margin-bottom:10px">
@@ -207,9 +199,12 @@ router.post('/confirm', rateLimiter({ windowMs: 10 * 60 * 1000, max: 40 }), asyn
       if (!pr[0]) return res.status(404).send(resultPage('Not found', 'This request no longer exists.'))
       const date = String((req.body || {}).date || '').trim()
       const time = String((req.body || {}).time || '').trim()
-      const check = checkOneSlot(date, time, pr[0].timezone)
-      if (!check.ok) return res.status(400).send(setTimePage({ request: pr[0], token, error: check.error }))
-      pickedSlot = { date, time }
+      // Ben may enter the time in any zone; it is stored as the partner's wall clock.
+      let tz = String((req.body || {}).tz || '').trim() || pr[0].timezone
+      try { assertTimeZone(tz) } catch { tz = pr[0].timezone }
+      const check = checkOneSlot(date, time, tz)
+      if (!check.ok) return res.status(400).send(setTimePage({ request: pr[0], token, error: check.error, selectedTz: tz, date, time }))
+      pickedSlot = utcToZonedParts(zonedTimeToUtc(date, time, tz), pr[0].timezone)
     }
     const claim = await consumeToken(token)
     if (!claim) return res.status(410).send(resultPage('Link expired or already used', 'This link has already been used, or has expired.'))

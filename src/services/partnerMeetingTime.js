@@ -116,4 +116,15 @@ function formatSlot(slot, tz) {
   return `${dateLabel} at ${h12}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'} (${tz})`
 }
 
-module.exports = { zonedTimeToUtc, validateSlots, validateOptionalSlots, checkOneSlot, formatSlot, assertTimeZone }
+// The wall-clock date and time in `tz` at the instant `utcDate`: the reverse of zonedTimeToUtc.
+function utcToZonedParts(utcDate, tz) {
+  assertTimeZone(tz)
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    }).formatToParts(utcDate).map((x) => [x.type, x.value])
+  )
+  return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}` }
+}
+
+module.exports = { utcToZonedParts, zonedTimeToUtc, validateSlots, validateOptionalSlots, checkOneSlot, formatSlot, assertTimeZone }
