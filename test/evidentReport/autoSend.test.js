@@ -65,3 +65,15 @@ test('the preview banner shows a Hold link only when one is provided', () => {
   assert.match(withHold, /href="https:\/\/example\.com\/hold\?day=2026-09-28&sig=abc"/);
   assert.doesNotMatch(injectApprovalBanner(html, { reportLabel: 'X', approveUrl: 'https://example.com/a' }), /Hold today's send/);
 });
+
+test('EviSmart late on an early attempt: nothing sent, no alert, and the job is told to wait for the next attempt', async () => {
+  const f = fakes(Object.assign(new Error('no evismart'), { code: 'EVISMART_UNAVAILABLE' }));
+  assert.equal(await deliverToLeadership({ autoSend: true, final: false, ...f }), 'waiting-for-evismart');
+  assert.deepEqual(f.calls, ['leadership']);
+});
+
+test('EviSmart still missing on the final attempt: the approver is alerted', async () => {
+  const f = fakes(Object.assign(new Error('no evismart'), { code: 'EVISMART_UNAVAILABLE' }));
+  assert.equal(await deliverToLeadership({ autoSend: true, final: true, ...f }), 'held');
+  assert.deepEqual(f.calls, ['leadership', 'alert:no evismart']);
+});

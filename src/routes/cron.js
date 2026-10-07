@@ -4,6 +4,7 @@ const { runEvidentCrmSyncJob } = require('../jobs/evidentCrmSync')
 const { runEvidentReportJob, runEvidentReportSendJob } = require('../jobs/evidentReport')
 const { runSalesRepDailyReportJob } = require('../jobs/salesRepDailyReport')
 const { checkEvidentEmails, buildMissingEmailsAlert } = require('../services/evidentReport/emailCheck')
+const { fetchEviSmartHeaders } = require('../services/evidentReport/gmailFetch')
 const { sendEmail } = require('../services/email')
 const { APPROVER_EMAIL } = require('../services/reportApproval')
 
@@ -32,7 +33,7 @@ function isAuthorized(provided, secret) {
 
 // Overridable seam so tests never touch Gmail or send mail.
 const emailCheckDeps = {
-  check: () => checkEvidentEmails(),
+  check: () => checkEvidentEmails({ fetchEviSmart: fetchEviSmartHeaders }),
   sendAlert: async (result) => {
     const { subject, html } = buildMissingEmailsAlert(result)
     await sendEmail({ to: [APPROVER_EMAIL], subject, html })

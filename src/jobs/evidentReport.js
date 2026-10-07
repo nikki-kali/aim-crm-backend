@@ -16,7 +16,7 @@ const { claimJobRun, releaseJobRun, todayEt } = require('../services/cronRuns')
 // a day already sent (for example the approver clicked Approve & Send after
 // the 6:00 AM preview) is left alone, and a day the approver held (the
 // "Hold today's send" link in the preview) is skipped.
-async function deliverToLeadership({ autoSend, sendToLeadership, alertApprover, isHeld = async () => false }) {
+async function deliverToLeadership({ autoSend, sendToLeadership, alertApprover, isHeld = async () => false, final = true }) {
   if (!autoSend) return 'switch-off'
   if (await isHeld()) return 'held-by-approver'
   try {
@@ -25,6 +25,12 @@ async function deliverToLeadership({ autoSend, sendToLeadership, alertApprover, 
   } catch (err) {
     if (err.code === 'ALREADY_SENT') return 'already-sent'
     if (err.code === 'EVISMART_UNAVAILABLE') {
+      // EviSmart sometimes lands just after 7:00 AM (7:01 on 6 Oct), so the
+      // earlier attempts stay quiet and wait; only the last one alerts.
+      if (!final) {
+        console.warn('[evident-report] EviSmart report not here yet; NOT sending to leadership, will retry')
+        return 'waiting-for-evismart'
+      }
       console.warn('[evident-report] EviSmart report unavailable; NOT sending to leadership, alerting the approver')
       await alertApprover(err.message)
       return 'held'
@@ -60,7 +66,7 @@ async function runEvidentReportJob({ source = 'cron', force = false } = {}) {
 }
 
 // 7:00 AM run: the automatic send to leadership (see deliverToLeadership).
-async function runEvidentReportSendJob({ source = 'cron', force = false } = {}) {
+async function runEvidentReportSendJob({ source = 'cron', force = false, final = true } = {}) {
   if (!enabled()) {
     console.log('[evident-report-send] run skipped — EVIDENT_REPORT_ENABLED is not set to true')
     return 'disabled'
@@ -80,6 +86,7 @@ async function runEvidentReportSendJob({ source = 'cron', force = false } = {}) 
     const outcome = await deliverToLeadership({
       autoSend,
       isHeld: () => isHeld(day),
+      final,
       sendToLeadership: () => runEvidentReport({ requireEviSmart: true }),
       alertApprover: (reason) => sendEmail({
         to: [APPROVER_EMAIL],
@@ -88,7 +95,7 @@ async function runEvidentReportSendJob({ source = 'cron', force = false } = {}) 
       }),
     })
     console.log(`[evident-report-send] ${outcome}`)
-    if (outcome === 'held') await releaseJobRun('evident-report-send', day)
+    if (outcome === 'held' || outcome === 'waiting-for-evismart') await releaseJobRun('evident-report-send', day)
     return outcome
   } catch (err) {
     console.error('[evident-report-send] run failed:', err)
@@ -103,7 +110,13 @@ function startEvidentReportScheduler() {
   // sooner). The report covers the previous business day, using EviSmart's
   // end-of-day email sent the evening before.
   cron.schedule('0 6 * * 1-5', () => runEvidentReportJob({ source: 'cron' }), { timezone: 'America/New_York' })
-  cron.schedule('0 7 * * 1-5', () => runEvidentReportSendJob({ source: 'cron' }), { timezone: 'America/New_York' })
+  // EviSmart's email can arrive after 7:00 (it landed at 7:01 on 6 Oct), so
+  // the send retries at 7:20 and 7:40 and gives up, alerting, at 8:00. A day
+  // already sent, or held, is left alone by every attempt.
+  cron.schedule('0 7 * * 1-5', () => runEvidentReportSendJob({ source: 'cron', final: false }), { timezone: 'America/New_York' })
+  cron.schedule('20 7 * * 1-5', () => runEvidentReportSendJob({ source: 'cron-retry', final: false }), { timezone: 'America/New_York' })
+  cron.schedule('40 7 * * 1-5', () => runEvidentReportSendJob({ source: 'cron-retry', final: false }), { timezone: 'America/New_York' })
+  cron.schedule('0 8 * * 1-5', () => runEvidentReportSendJob({ source: 'cron-retry', final: true }), { timezone: 'America/New_York' })
   console.log('[evident-report] job registered')
 }
 

@@ -172,4 +172,20 @@ async function fetchEvidentSubjects() {
   return out
 }
 
-module.exports = { fetchEvidentSubjects, EVISMART_SENDERS, EVISMART_QUERY, fetchEvidentEmails, fetchEviSmartEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }
+// EviSmart Daily Sales Report emails from ANY sender (headers only, no
+// bodies): the 5:30 AM check uses it to tell "not here yet" apart from "sent
+// from an address the automation does not accept".
+async function fetchEviSmartHeaders() {
+  const auth = getGmailAuth()
+  const gmail = google.gmail({ version: 'v1', auth })
+  const listRes = await gmail.users.messages.list({ userId: 'me', q: 'subject:"EviSmart Daily Sales Report" newer_than:5d', maxResults: 50 })
+  const out = []
+  for (const { id } of listRes.data.messages || []) {
+    const res = await gmail.users.messages.get({ userId: 'me', id, format: 'metadata', metadataHeaders: ['Subject', 'From'] })
+    const h = Object.fromEntries((res.data.payload.headers || []).map((x) => [x.name.toLowerCase(), x.value]))
+    out.push({ subject: h.subject || '', sender: h.from || '', internalDate: Number(res.data.internalDate) })
+  }
+  return out
+}
+
+module.exports = { fetchEviSmartHeaders, fetchEvidentSubjects, EVISMART_SENDERS, EVISMART_QUERY, fetchEvidentEmails, fetchEviSmartEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }
