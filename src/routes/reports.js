@@ -575,7 +575,7 @@ async function describeClaimForConfirmation(claim) {
     return { label: `${rows[0].name || rows[0].email}'s Daily Sales Report`, detail: `This will send ${rows[0].name || rows[0].email}'s Daily Sales Report for ${claim.report_date} now.` }
   }
   if (claim.report_type === contentApprovalRequest.REPORT_TYPE) {
-    return { label: 'the content approval request', detail: 'This will email leadership now: to execassistant@aimdentallab.com, cc ben@aimdentallab.com, bcc media@aimdentallab.com.' }
+    return { label: 'the content approval request', detail: 'This will email the content approval request to leadership now: to execassistant@aimdentallab.com, cc ben@aimdentallab.com, bcc media@aimdentallab.com.' }
   }
   return null
 }
