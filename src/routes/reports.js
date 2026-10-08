@@ -15,6 +15,7 @@ const {
 } = require('../services/salesRepDailyReport')
 const { runEvidentReport, sendEvidentReportForApproval } = require('../services/evidentReport')
 const { APPROVER_EMAIL, peekApprovalToken, consumeApprovalToken } = require('../services/reportApproval')
+const contentApprovalRequest = require('../services/contentApproval/requestEmail')
 const { getCompanyTotalRevenue } = require('../services/clientRevenue')
 const { resolveViewableRepId, fetchRepQ4Progress } = require('../services/repProgress')
 
@@ -573,6 +574,9 @@ async function describeClaimForConfirmation(claim) {
     if (!rows[0]) return null
     return { label: `${rows[0].name || rows[0].email}'s Daily Sales Report`, detail: `This will send ${rows[0].name || rows[0].email}'s Daily Sales Report for ${claim.report_date} now.` }
   }
+  if (claim.report_type === contentApprovalRequest.REPORT_TYPE) {
+    return { label: 'the content approval request', detail: 'This will email leadership now: to execassistant@aimdentallab.com, cc ben@aimdentallab.com, bcc media@aimdentallab.com.' }
+  }
   return null
 }
 
@@ -632,6 +636,11 @@ router.post('/approve', rateLimiter({ windowMs: 10 * 60 * 1000, max: 20 }), asyn
       if (!rows[0]) return res.status(404).send(resultPage('Rep not found', 'The rep this report was for no longer exists.', false))
       await sendRepDailyReport(rows[0], { dateStr: claim.report_date })
       return res.send(resultPage('Sent!', `${rows[0].name || rows[0].email}'s Daily Sales Report has been sent.`, true))
+    }
+
+    if (claim.report_type === contentApprovalRequest.REPORT_TYPE) {
+      await contentApprovalRequest.sendContentApprovalRequest()
+      return res.send(resultPage('Sent!', 'The content approval request has been sent to leadership.', true))
     }
 
     return res.status(400).send(resultPage('Unknown report type', 'This link points to a report type this server no longer recognizes.', false))
