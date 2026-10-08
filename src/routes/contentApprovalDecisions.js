@@ -1,13 +1,26 @@
 const express = require('express')
 const db = require('../config/db')
-const auth = require('../middleware/auth')
+const jwt = require('jsonwebtoken')
 
 const router = express.Router()
 const STATUSES = ['', 'approved', 'edit', 'rejected']
 // Fixed allowlist of review-able posts for the October review. A postId
 // outside this set is rejected rather than silently creating an arbitrary
 // row, since the id also becomes the table's primary key.
-const POST_IDS = ['oct05', 'oct09', 'oct11', 'scanner', 'oct13', 'oct23', 'oct27', 'oct31']
+const POST_IDS = ['oct05', 'oct09', 'oct11', 'scanner', 'oct13', 'oct23', 'oct23-video', 'oct27', 'oct31']
+
+// The review page is open to anyone with the link (no sign-in required).
+// A valid token, if one is sent, still identifies the reviewer; otherwise
+// the reviewer types a name, which is stored marked as unverified.
+function optionalUser(req) {
+  const header = req.headers.authorization
+  if (!header?.startsWith('Bearer ')) return null
+  try {
+    return jwt.verify(header.slice(7), process.env.JWT_SECRET)
+  } catch {
+    return null
+  }
+}
 
 function mapRow(row) {
   return {
@@ -21,7 +34,7 @@ function mapRow(row) {
 }
 
 // GET /api/content-approval-decisions — every post's decision
-router.get('/', auth, async (req, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
     const { rows } = await db.query('select * from content_approval_decisions order by post_id')
     res.json({ decisions: rows.map(mapRow) })
@@ -31,10 +44,10 @@ router.get('/', auth, async (req, res, next) => {
 })
 
 // PUT /api/content-approval-decisions/:postId — upsert one post's decision.
-// The reviewer identity comes from the verified JWT (req.user), never from
-// the request body, so the audit trail can't be spoofed by typing someone
-// else's name. `feedback` is the only free-text field a client controls.
-router.put('/:postId', auth, async (req, res, next) => {
+// Signed-in reviewers are identified from the verified JWT. Anyone else must
+// send `reviewerName`; it is saved with a "(not signed in)" suffix so the
+// audit trail never presents a typed name as a verified one.
+router.put('/:postId', async (req, res, next) => {
   try {
     const { postId } = req.params
     if (!POST_IDS.includes(postId)) {
@@ -48,8 +61,17 @@ router.put('/:postId', auth, async (req, res, next) => {
     if (feedback.length > 4000) {
       return res.status(400).json({ error: 'Feedback is too long' })
     }
-    const reviewerName = req.user?.name || req.user?.email || 'Unknown'
-    const reviewerId = req.user?.id ?? null
+    const user = optionalUser(req)
+    let reviewerName
+    if (user) {
+      reviewerName = user.name || user.email || 'Unknown'
+    } else {
+      const typed = typeof req.body?.reviewerName === 'string' ? req.body.reviewerName.trim() : ''
+      if (!typed) return res.status(400).json({ error: 'Please enter your name' })
+      if (typed.length > 80) return res.status(400).json({ error: 'Name is too long' })
+      reviewerName = `${typed} (not signed in)`
+    }
+    const reviewerId = user?.id ?? null
 
     const { rows } = await db.query(
       `insert into content_approval_decisions (post_id, status, feedback, reviewer, reviewer_id, updated_at)
