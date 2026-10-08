@@ -28,7 +28,8 @@ function mapRow(row) {
     status: row.status,
     feedback: row.feedback,
     reviewer: row.reviewer,
-    reviewerId: row.reviewer_id,
+    // reviewer_id stays in the table for the audit trail but isn't returned:
+    // this endpoint is public, and internal user ids don't belong on it.
     updated: row.updated_at,
   }
 }
