@@ -1,3 +1,4 @@
+const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
 const { sendEmail } = require('../email')
@@ -17,6 +18,8 @@ const LEADERSHIP = {
 const SUBJECT = 'AIM October social posts ready for your approval'
 
 const TEMPLATE = fs.readFileSync(path.join(__dirname, 'requestEmail.html'), 'utf8')
+// Shown on the confirm page so you can tell which email version will send.
+const TEMPLATE_VERSION = crypto.createHash('sha1').update(TEMPLATE).digest('hex').slice(0, 8)
 
 function bannerRow(approveUrl) {
   return `<tr><td style="background:#fefaf1;border-bottom:1px solid #fde68a;padding:18px 36px;text-align:center;font-family:Arial,Helvetica,sans-serif">
@@ -40,6 +43,7 @@ async function sendContentApprovalRequest() {
 
 module.exports = {
   REPORT_TYPE,
+  TEMPLATE_VERSION,
   sendContentApprovalRequestPreview,
   sendContentApprovalRequest,
 }
