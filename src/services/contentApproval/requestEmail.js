@@ -21,6 +21,13 @@ const TEMPLATE = fs.readFileSync(path.join(__dirname, 'requestEmail.html'), 'utf
 // Shown on the confirm page so you can tell which email version will send.
 const TEMPLATE_VERSION = crypto.createHash('sha1').update(TEMPLATE).digest('hex').slice(0, 8)
 
+// Follow-up nudge on the same request. Its preview keeps the original
+// "[Preview] ..." subject and the leadership copy uses "Re: ...", so both
+// land in the existing threads.
+const FOLLOWUP_REPORT_TYPE = 'content-approval-followup'
+const FOLLOWUP_TEMPLATE = fs.readFileSync(path.join(__dirname, 'followupEmail.html'), 'utf8')
+const FOLLOWUP_VERSION = crypto.createHash('sha1').update(FOLLOWUP_TEMPLATE).digest('hex').slice(0, 8)
+
 function bannerRow(approveUrl) {
   return `<tr><td style="background:#fefaf1;border-bottom:1px solid #fde68a;padding:18px 36px;text-align:center;font-family:Arial,Helvetica,sans-serif">
     <p style="margin:0 0 10px;font-size:13px;color:#78350f;line-height:1.5">This is a preview. Nothing has been sent to leadership yet.<br>Approving sends it to execassistant@aimdentallab.com, cc ben@aimdentallab.com, bcc media@aimdentallab.com.</p>
@@ -41,9 +48,25 @@ async function sendContentApprovalRequest() {
   await sendEmail({ ...LEADERSHIP, subject: SUBJECT, html: TEMPLATE })
 }
 
+async function sendContentApprovalFollowupPreview() {
+  const reportDate = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+  const token = await createApprovalToken({ reportType: FOLLOWUP_REPORT_TYPE, reportDate })
+  const html = FOLLOWUP_TEMPLATE.replace('<!--APPROVAL_BANNER-->', bannerRow(buildApproveUrl(token)))
+  await sendEmail({ to: PREVIEW_TO, subject: `[Preview] ${SUBJECT}`, html })
+  return { previewTo: PREVIEW_TO }
+}
+
+async function sendContentApprovalFollowup() {
+  await sendEmail({ ...LEADERSHIP, subject: `Re: ${SUBJECT}`, html: FOLLOWUP_TEMPLATE })
+}
+
 module.exports = {
   REPORT_TYPE,
   TEMPLATE_VERSION,
+  FOLLOWUP_REPORT_TYPE,
+  FOLLOWUP_VERSION,
   sendContentApprovalRequestPreview,
   sendContentApprovalRequest,
+  sendContentApprovalFollowupPreview,
+  sendContentApprovalFollowup,
 }

@@ -574,6 +574,9 @@ async function describeClaimForConfirmation(claim) {
     if (!rows[0]) return null
     return { label: `${rows[0].name || rows[0].email}'s Daily Sales Report`, detail: `This will send ${rows[0].name || rows[0].email}'s Daily Sales Report for ${claim.report_date} now.` }
   }
+  if (claim.report_type === contentApprovalRequest.FOLLOWUP_REPORT_TYPE) {
+    return { label: 'the content approval follow-up', detail: 'This will send the follow-up to leadership now, in the same thread: to execassistant@aimdentallab.com, cc ben@aimdentallab.com, bcc media@aimdentallab.com. (Email version ' + contentApprovalRequest.FOLLOWUP_VERSION + ')' }
+  }
   if (claim.report_type === contentApprovalRequest.REPORT_TYPE) {
     return { label: 'the content approval request', detail: 'This will email the content approval request to leadership now: to execassistant@aimdentallab.com, cc ben@aimdentallab.com, bcc media@aimdentallab.com. (Email version ' + contentApprovalRequest.TEMPLATE_VERSION + ')' }
   }
@@ -636,6 +639,11 @@ router.post('/approve', rateLimiter({ windowMs: 10 * 60 * 1000, max: 20 }), asyn
       if (!rows[0]) return res.status(404).send(resultPage('Rep not found', 'The rep this report was for no longer exists.', false))
       await sendRepDailyReport(rows[0], { dateStr: claim.report_date })
       return res.send(resultPage('Sent!', `${rows[0].name || rows[0].email}'s Daily Sales Report has been sent.`, true))
+    }
+
+    if (claim.report_type === contentApprovalRequest.FOLLOWUP_REPORT_TYPE) {
+      await contentApprovalRequest.sendContentApprovalFollowup()
+      return res.send(resultPage('Sent!', 'The follow-up has been sent to leadership.', true))
     }
 
     if (claim.report_type === contentApprovalRequest.REPORT_TYPE) {
