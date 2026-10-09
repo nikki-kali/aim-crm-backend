@@ -24,23 +24,10 @@ function applyEviSmartMtdPrimary(agg, eviSmart) {
   return out
 }
 
-// Doctors EviSmart lists as "new" (first case this month) that are not new
-// doctors. Dr. Idelle Brand (A1119) was listed for James on 2026-10-08; the
-// user confirmed James's new doctors is 0 (2026-10-09). Her low account code
-// also fits an older customer (September's real new doctors are A41xx).
-const EXCLUDED_NEW_DOCTOR_CODES = new Set(['A1119'])
-
-function withoutExcludedDoctors(extras) {
-  if (!extras || !extras.newDoctors) return extras
-  const keep = (list) => list.filter((d) => !EXCLUDED_NEW_DOCTOR_CODES.has(d.code))
-  return { ...extras, newDoctors: { james: keep(extras.newDoctors.james), william: keep(extras.newDoctors.william) } }
-}
-
 // Replaces each rep's new-doctor goal progress with EviSmart's count
 // (doctors whose first case falls this month). No extras, or an email without
 // that table, leaves the CRM-based numbers untouched.
-function applyEviSmartNewDoctors(repGoals, rawExtras) {
-  const extras = withoutExcludedDoctors(rawExtras)
+function applyEviSmartNewDoctors(repGoals, extras) {
   if (!extras || !extras.newDoctors) return repGoals
   return repGoals.map((rep) => {
     const key = repKeyFromSalesperson(rep.repName)
@@ -57,4 +44,4 @@ function applyEviSmartNewDoctors(repGoals, rawExtras) {
   })
 }
 
-module.exports = { applyEviSmartMtdPrimary, applyEviSmartNewDoctors, withoutExcludedDoctors, EXCLUDED_NEW_DOCTOR_CODES }
+module.exports = { applyEviSmartMtdPrimary, applyEviSmartNewDoctors }
