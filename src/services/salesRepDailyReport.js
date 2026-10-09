@@ -6,6 +6,7 @@ const { computeProgress } = require('./goalProgress')
 const { APPROVER_EMAIL, createApprovalToken, buildApproveUrl, injectApprovalBanner } = require('./reportApproval')
 const { renderGoalBarsGif } = require('./goalBarGifRenderer')
 const { checkBookedMtd, previousWeekday, sameMonth } = require('./evidentReport/bookedMtdGuard')
+const { withoutExcludedDoctors } = require('./evidentReport/eviSmartPrimary')
 
 // Recipients are the two real AIM reps by email, not a role query — role
 // IN ('staff','sales_rep') would also catch Yoel Klein and the TEST
@@ -264,7 +265,7 @@ async function withEviSmartNewDoctors(progress, repEmail, dateStr) {
   if (!progress) return progress
   try {
     const key = EVIDENT_REP_KEY_BY_EMAIL[repEmail]
-    const { extras } = await eviSmartDayFor(dateStr)
+    const extras = withoutExcludedDoctors((await eviSmartDayFor(dateStr)).extras)
     const list = key && extras && extras.newDoctors && extras.newDoctors[key]
     if (!list) return progress
     const target = Number(progress.target)

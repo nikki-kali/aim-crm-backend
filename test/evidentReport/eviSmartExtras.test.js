@@ -55,10 +55,29 @@ test('new doctors from EviSmart replace the goal progress for that rep only', ()
     { repName: 'William Alexander', goals: [{ metric: 'new_doctors', target: '12', current_value: 0, progress_pct: 0 }] },
   ]
   const out = applyEviSmartNewDoctors(goals, x)
-  assert.equal(out[0].goals[0].current_value, 1)
-  assert.equal(out[0].goals[0].progress_pct, 6)
+  // The real email lists Dr. Idelle Brand (A1119) for James, but she is not a
+  // new doctor (user, 2026-10-09), so James stays at 0.
+  assert.equal(out[0].goals[0].current_value, 0)
   assert.equal(out[0].goals[1].current_value, 234)   // revenue untouched
   assert.equal(out[1].goals[0].current_value, 0)
+})
+
+test('a genuinely new doctor is still counted; only excluded codes are dropped', () => {
+  const extras = { newDoctors: { james: [{ code: 'A1119', name: 'Dr. Idelle Brand', cases: 2 }, { code: 'A4160', name: 'Dr. New Person', cases: 1 }], william: [] }, lastMonth: null }
+  const goals = [{ repName: 'James Delaney', goals: [{ metric: 'new_doctors', target: '18', current_value: 0, progress_pct: 0 }] }]
+  const out = applyEviSmartNewDoctors(goals, extras)
+  assert.equal(out[0].goals[0].current_value, 1)
+  assert.equal(out[0].goals[0].progress_pct, 6)
+})
+
+test('withoutExcludedDoctors removes A1119 from the lists and leaves the rest', () => {
+  const { withoutExcludedDoctors, EXCLUDED_NEW_DOCTOR_CODES } = require('../../src/services/evidentReport/eviSmartPrimary')
+  assert.ok(EXCLUDED_NEW_DOCTOR_CODES.has('A1119'))
+  const x = withoutExcludedDoctors(P.extractEviSmartExtras(NEW))
+  assert.deepEqual(x.newDoctors, { james: [], william: [] })
+  assert.equal(x.lastMonth.booked, 171172.07)
+  assert.equal(withoutExcludedDoctors(null), null)
+  assert.deepEqual(withoutExcludedDoctors({ newDoctors: null, lastMonth: null }), { newDoctors: null, lastMonth: null })
 })
 
 test('with no extras (older email) the CRM-based new-doctor numbers are left alone', () => {
