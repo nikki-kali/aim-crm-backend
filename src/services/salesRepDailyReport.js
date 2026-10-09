@@ -1,7 +1,7 @@
 const db = require('../config/db')
 const { sendEmail, salesRepDailyReportEmail } = require('./email')
 const { fetchEvidentEmailsInRange, fetchEviSmartEmails } = require('./evidentReport/gmailFetch')
-const { extractDailyBookedCustomerNames, extractBookingRows, extractBilledRows, parseTable, rowToObj, extractRepColumns, pickEviSmartForDate } = require('./evidentReport/parseEvident')
+const { extractDailyBookedCustomerNames, extractBookingRows, extractBilledRows, parseTable, rowToObj, extractRepColumns, pickEviSmartMessageForDate, extractEviSmartExtras } = require('./evidentReport/parseEvident')
 const { computeProgress } = require('./goalProgress')
 const { APPROVER_EMAIL, createApprovalToken, buildApproveUrl, injectApprovalBanner } = require('./reportApproval')
 const { renderGoalBarsGif } = require('./goalBarGifRenderer')
@@ -139,8 +139,23 @@ async function dailyBookedTotalFor(dateStr) {
   return Math.round(extractBookingRows(m.html).reduce((s, r) => s + (r.value || 0), 0) * 100) / 100
 }
 
+// EviSmart's report for the day (totals and extra tables), cached briefly:
+// every rep and the WhatsApp post ask about the same day.
+const eviSmartDayCache = new Map()
+function eviSmartDayFor(dateStr) {
+  const hit = eviSmartDayCache.get(dateStr)
+  if (hit && Date.now() - hit.at < MTD_CACHE_MS) return hit.promise
+  const promise = fetchEviSmartEmails().then((msgs) => {
+    const found = pickEviSmartMessageForDate(msgs, dateStr)
+    return { totals: found ? found.totals : null, extras: found ? extractEviSmartExtras(found.message.html) : null }
+  })
+  eviSmartDayCache.set(dateStr, { at: Date.now(), promise })
+  promise.catch(() => eviSmartDayCache.delete(dateStr))
+  return promise
+}
+
 async function eviSmartRepMtdFor(dateStr, kind) {
-  const totals = pickEviSmartForDate(await fetchEviSmartEmails(), dateStr)
+  const { totals } = await eviSmartDayFor(dateStr)
   const rep = totals && totals.repMtd && totals.repMtd[kind === 'billed' ? 'billed' : 'booked']
   return rep ? { na: rep.na, james: rep.james, william: rep.william } : null
 }
@@ -150,9 +165,17 @@ async function fetchMtdByRepAsOf(dateStr, kind) {
   const hit = mtdCache.get(cacheKey)
   if (hit && Date.now() - hit.at < MTD_CACHE_MS) return hit.promise
   const monthStart = `${dateStr.slice(0, 7)}-01`
-  const promise = fetchEvidentEmailsInRange(
-    `subject:"${MTD_QUERY[kind]}" after:${gmailDate(monthStart, -1)} before:${gmailDate(dateStr, 2)}`
-  ).then(async (msgs) => {
+  const promise = (async () => {
+    // EviSmart first (user decision, 2026-10-09); Evident only without it.
+    try {
+      const fromEviSmart = await eviSmartRepMtdFor(dateStr, kind)
+      if (fromEviSmart) return fromEviSmart
+    } catch (err) { console.error('[sales-rep-daily-report] EviSmart by-rep lookup failed:', err.message) }
+    return fetchEvidentEmailsInRange(
+      `subject:"${MTD_QUERY[kind]}" after:${gmailDate(monthStart, -1)} before:${gmailDate(dateStr, 2)}`
+    )
+  })().then(async (msgs) => {
+    if (!Array.isArray(msgs)) return msgs
     let exact = pickMtdByRepAsOf(msgs.filter((m) => m.date === dateStr), dateStr, kind)
     let rejected = false
     if (exact && kind === 'booked') {
@@ -234,7 +257,29 @@ const MONTHLY_NEW_DOCTOR_TARGETS = {
 // used once entered), falling back to the flat MONTHLY_NEW_DOCTOR_TARGETS
 // default only when no such row exists yet. Best-effort: null on any
 // failure, same as the sales bar.
+// New doctors for the month: EviSmart's "New doctors by rep" table (doctors
+// whose first case falls this month) replaces the CRM-based count whenever
+// the day's EviSmart report has that table (user decision, 2026-10-09).
+async function withEviSmartNewDoctors(progress, repEmail, dateStr) {
+  if (!progress) return progress
+  try {
+    const key = EVIDENT_REP_KEY_BY_EMAIL[repEmail]
+    const { extras } = await eviSmartDayFor(dateStr)
+    const list = key && extras && extras.newDoctors && extras.newDoctors[key]
+    if (!list) return progress
+    const target = Number(progress.target)
+    return { ...progress, current_value: list.length, progress_pct: target > 0 ? Math.min(Math.round((list.length / target) * 100), 100) : 0 }
+  } catch (err) {
+    console.error('[sales-rep-daily-report] EviSmart new doctors lookup failed, using the CRM count:', err.message)
+    return progress
+  }
+}
+
 async function computeMonthlyDoctorsGoal(repEmail, dateStr) {
+  return withEviSmartNewDoctors(await computeMonthlyDoctorsGoalFromCrm(repEmail, dateStr), repEmail, dateStr)
+}
+
+async function computeMonthlyDoctorsGoalFromCrm(repEmail, dateStr) {
   try {
     const { rows: [rep] } = await db.query(`SELECT id FROM users WHERE email=$1`, [repEmail])
     if (!rep) return null

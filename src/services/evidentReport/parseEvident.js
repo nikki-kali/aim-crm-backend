@@ -357,7 +357,7 @@ function eviSmartSubjectDate(subject) {
 // booked) and would understate a full-day report, so they are ignored;
 // null means "no usable pull" and the report says so instead of guessing.
 // Newest first, first one whose Totals actually parse.
-function pickEviSmartForDate(messages, runDate) {
+function pickEviSmartMessageForDate(messages, runDate) {
   const etParts = (ms) => {
     const d = new Date(ms).toLocaleString('en-CA', { timeZone: 'America/New_York', hour12: false });
     return { date: d.slice(0, 10), hour: Number(d.slice(12, 14)) };
@@ -371,9 +371,14 @@ function pickEviSmartForDate(messages, runDate) {
     .sort((a, b) => b.internalDate - a.internalDate);
   for (const m of eligible) {
     const totals = extractEviSmartTotals(m.html);
-    if (totals) return totals;
+    if (totals) return { message: m, totals };
   }
   return null;
+}
+
+function pickEviSmartForDate(messages, runDate) {
+  const hit = pickEviSmartMessageForDate(messages, runDate);
+  return hit ? hit.totals : null;
 }
 
 // The "MTD by sales rep" table every EviSmart Daily Sales Report carries:
@@ -420,6 +425,46 @@ function applyEviSmartMtdFallback(agg, eviSmart) {
   fill('MTD Booked Daily Update', 'booked', 'companyMtdBooked', 'companyMtdBookedByRep');
   fill('Daily MTD Total Billed', 'billed', 'companyMtdBilled', 'companyMtdBilledByRep');
   return out;
+}
+
+// ---- the EviSmart email's own extra tables (last month, new doctors) ----
+// 2026-10-09: EviSmart's report now carries "Last month" figures and a "New
+// doctors by rep" table (first case in the month, from Customer List). Read
+// by table content, not position, so a reordered email still parses. Returns
+// null for a part the email does not have (unknown, never zero).
+const cellText = (c) => String(c).replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim();
+function emailTables(html) {
+  return (String(html || '').match(/<table[\s\S]*?<\/table>/gi) || []).map((t) =>
+    (t.match(/<tr[\s\S]*?<\/tr>/gi) || []).map((r) => (r.match(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi) || []).map(cellText)));
+}
+const moneyOf = (s) => { const m = String(s || '').match(/\$\s*([\d,]+(?:\.\d+)?)/); return m ? Number(m[1].replace(/,/g, '')) : null; };
+
+function extractEviSmartExtras(html) {
+  const tables = emailTables(html);
+  let lastMonth = null;
+  for (const rows of tables) {
+    const booked = rows.find((r) => /^Last month booked \(/i.test(r[0] || ''));
+    const billed = rows.find((r) => /^Last month billed/i.test(r[0] || ''));
+    if (booked && billed) {
+      const name = (booked[0].match(/\(([A-Za-z]+)\s+\d{4}/) || [])[1];
+      const count = Number(String(booked[1] || '').replace(/,/g, ''));
+      lastMonth = { monthName: name || null, bookedCount: Number.isFinite(count) ? count : null, booked: moneyOf(booked[2]), billed: moneyOf(billed[2]) };
+      break;
+    }
+  }
+  // The first table headed Rep | Code | Doctor | First case | Cases is this
+  // month; a later one with the same header is the September reference list.
+  const docTable = tables.find((rows) => rows[0] && /^Rep$/i.test(rows[0][0]) && /^Code$/i.test(rows[0][1]) && /^Doctor$/i.test(rows[0][2]));
+  let newDoctors = null;
+  if (docTable) {
+    newDoctors = { james: [], william: [] };
+    for (const r of docTable.slice(1)) {
+      const key = /^James/i.test(r[0]) ? 'james' : /^William/i.test(r[0]) ? 'william' : null;
+      if (!key || !r[1] || /^none/i.test(r[2] || '')) continue;
+      newDoctors[key].push({ code: r[1], name: r[2], firstCase: r[3] || null, cases: Number(r[4]) || 0 });
+    }
+  }
+  return { lastMonth, newDoctors };
 }
 
 function extractEviSmartTotals(html) {
@@ -723,4 +768,4 @@ function parseAndAggregate(messages, { runDate } = {}) {
   };
 }
 
-module.exports = { parseAndAggregate, parseTable, classify, toNum, findCol, rowToObj, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractRepColumns, extractEviSmartTotals, extractEviSmartRepMtd, applyEviSmartMtdFallback, eviSmartSubjectDate, pickEviSmartForDate, repKeyFromSalesperson, applyEmailMtdTotals };
+module.exports = { extractEviSmartExtras, pickEviSmartMessageForDate, parseAndAggregate, parseTable, classify, toNum, findCol, rowToObj, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractRepColumns, extractEviSmartTotals, extractEviSmartRepMtd, applyEviSmartMtdFallback, eviSmartSubjectDate, pickEviSmartForDate, repKeyFromSalesperson, applyEmailMtdTotals };

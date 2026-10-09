@@ -1,5 +1,6 @@
 const { fetchEvidentEmails, fetchEviSmartEmails } = require('./gmailFetch')
-const { parseAndAggregate, pickEviSmartForDate, applyEmailMtdTotals, applyEviSmartMtdFallback, repKeyFromSalesperson } = require('./parseEvident')
+const { parseAndAggregate, pickEviSmartMessageForDate, extractEviSmartExtras, applyEmailMtdTotals, repKeyFromSalesperson } = require('./parseEvident')
+const { applyEviSmartMtdPrimary, applyEviSmartNewDoctors } = require('./eviSmartPrimary')
 const { buildCombinedLeadershipEmail } = require('./buildReport')
 const { getHistory, appendRow } = require('./log')
 const { sendEmail } = require('../email')
@@ -46,8 +47,15 @@ async function fetchRepGoalsWithProgress(runDate) {
 // Last month for the month-over-month section: booked from the prior
 // month's final "MTD Booked Daily Update" (#12), billed from its final
 // "Daily MTD Total Billed" (#40) — per Elizabeth, not EviSmart's #92 row.
-async function evidentLastMonth(runDate) {
+async function evidentLastMonth(runDate, extras = null) {
   const prior = lastDayOfPriorMonth(runDate)
+  // EviSmart's own last-month figures come first (user decision, 2026-10-09),
+  // but only when its row is for the month actually before the report month.
+  const priorName = new Date(`${prior}T12:00:00Z`).toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' })
+  const lm = extras && extras.lastMonth
+  if (lm && lm.monthName && priorName.toLowerCase().startsWith(lm.monthName.toLowerCase().slice(0, 3)) && lm.booked != null && lm.billed != null) {
+    return { monthName: priorName, booked: lm.booked, billed: lm.billed }
+  }
   const [booked, billed] = await Promise.all([evidentMtdCompanyTotal(prior, 'booked'), evidentMtdCompanyTotal(prior, 'billed')])
   if (booked == null || billed == null) return null
   return { monthName: new Date(`${prior}T12:00:00Z`).toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' }), booked, billed }
@@ -79,12 +87,21 @@ function applyEvidentMtdToGoals(repGoals, mtdByRep) {
 // first one that actually parses, rather than assuming the first message
 // returned is the freshest or that a send with no Totals table means "no
 // data exists today."
-async function fetchEviSmartTotals(runDate) {
-  const messages = await fetchEviSmartEmails()
-  // Only an email dated for runDate and sent after that day ended counts
-  // (see pickEviSmartForDate) — never just "the newest one," which could be
-  // an early-day pull or a different day's report.
-  return pickEviSmartForDate(messages, runDate)
+// The day's EviSmart report: its totals plus the extra tables (last month, new
+// doctors). Only an email dated for runDate and sent after that day ended
+// counts (see pickEviSmartMessageForDate), never just "the newest one," which
+// could be an early-day pull or a different day's report.
+async function fetchEviSmartDay(runDate) {
+  const hit = pickEviSmartMessageForDate(await fetchEviSmartEmails(), runDate)
+  return { totals: hit ? hit.totals : null, extras: hit ? extractEviSmartExtras(hit.message.html) : null }
+}
+
+// EviSmart is primary for month-to-date booked and billed; Evident fills in
+// only when EviSmart has no report (see eviSmartPrimary.js).
+function applyEviSmartPrimaryTo(aggregate, eviSmartRaw) {
+  const out = applyEviSmartMtdPrimary(aggregate, eviSmartRaw)
+  Object.assign(aggregate, out)
+  if (!('bookedMtdRejected' in out)) delete aggregate.bookedMtdRejected
 }
 
 // Returns the last COMPLETED business day before now, in America/New_York
@@ -152,10 +169,11 @@ async function runEvidentReport({ requireEviSmart = false } = {}) {
   }
 
   console.log('[evident-report] fetching EviSmart Daily Sales Report...')
-  const eviSmartRaw = await fetchEviSmartTotals(runDate)
-  Object.assign(aggregate, applyEviSmartMtdFallback(aggregate, eviSmartRaw))
+  const eviDay = await fetchEviSmartDay(runDate)
+  const eviSmartRaw = eviDay.totals
+  applyEviSmartPrimaryTo(aggregate, eviSmartRaw)
   aggregate.eviSmart = applyEmailMtdTotals(eviSmartRaw, aggregate)
-  aggregate.eviSmart.lastMonth = await evidentLastMonth(runDate)
+  aggregate.eviSmart.lastMonth = await evidentLastMonth(runDate, eviDay.extras)
   if (!eviSmartRaw) {
     console.warn('[evident-report] EviSmart Daily Sales Report unavailable — Daily Billed will show as N/A; every other figure comes from the Evident emails')
   }
@@ -172,7 +190,7 @@ async function runEvidentReport({ requireEviSmart = false } = {}) {
     throw Object.assign(new Error(`Evident's month-to-date booked figure for ${runDate} did not add up (${aggregate.bookedMtdRejected.reason}). Nothing was sent to leadership.`), { code: 'BOOKED_MTD_SUSPECT' })
   }
 
-  const repGoals = applyEvidentMtdToGoals(await fetchRepGoalsWithProgress(runDate), aggregate.companyMtdBilledByRep)
+  const repGoals = applyEviSmartNewDoctors(applyEvidentMtdToGoals(await fetchRepGoalsWithProgress(runDate), aggregate.companyMtdBilledByRep), eviDay.extras)
   const { subject, html, sheetRow } = buildCombinedLeadershipEmail(aggregate, historyRows, repGoals, {})
 
   // One combined email (leadership request, 2026-09-23 — supersedes Ben
@@ -235,11 +253,12 @@ async function sendEvidentReportForApproval() {
   const messages = (await fetchEvidentEmails()).filter((m) => m.date === runDate)
   const aggregate = parseAndAggregate(messages, { runDate })
   await applyBookedMtdGuard(aggregate, runDate, (d) => evidentMtdCompanyTotal(d, 'booked'))
-  const eviSmartRaw = await fetchEviSmartTotals(runDate)
-  Object.assign(aggregate, applyEviSmartMtdFallback(aggregate, eviSmartRaw))
+  const eviDay = await fetchEviSmartDay(runDate)
+  const eviSmartRaw = eviDay.totals
+  applyEviSmartPrimaryTo(aggregate, eviSmartRaw)
   aggregate.eviSmart = applyEmailMtdTotals(eviSmartRaw, aggregate)
-  aggregate.eviSmart.lastMonth = await evidentLastMonth(runDate)
-  const repGoals = applyEvidentMtdToGoals(await fetchRepGoalsWithProgress(runDate), aggregate.companyMtdBilledByRep)
+  aggregate.eviSmart.lastMonth = await evidentLastMonth(runDate, eviDay.extras)
+  const repGoals = applyEviSmartNewDoctors(applyEvidentMtdToGoals(await fetchRepGoalsWithProgress(runDate), aggregate.companyMtdBilledByRep), eviDay.extras)
   const { subject, html } = buildCombinedLeadershipEmail(aggregate, historyRows, repGoals, {})
 
   const token = await createApprovalToken({ reportType: 'evident-report', reportDate: runDate })
