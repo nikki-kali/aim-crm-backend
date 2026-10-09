@@ -8,6 +8,9 @@ const db = require('../src/config/db')
 const salesRepDailyReport = require('../src/services/salesRepDailyReport')
 let mtdStub = async () => 1000
 salesRepDailyReport.evidentMtdForRep = (...args) => mtdStub(...args)
+// New doctor names come from EviSmart's report; no Gmail in tests either.
+let namesStub = async () => null
+salesRepDailyReport.eviSmartNewDoctorNamesForRep = (...args) => namesStub(...args)
 const { buildWhatsappDailyPost, buildWhatsappImageHtml, pickDailyMessage } = require('../src/services/whatsappDailyPost')
 
 async function makeTestDoctor(repId, firstCaseDate) {
@@ -147,4 +150,38 @@ test('a booked figure Evident did not provide shows a dash, not a made-up number
   } finally {
     mtdStub = async () => 1000
   }
+})
+
+test('the new doctor or practice names appear under each rep on the image and in the caption', async () => {
+  namesStub = async (email) => (email === 'james@aimdentallab.com' ? ['Dr. Idelle Brand', 'Domino Dental'] : [])
+  try {
+    const post = await buildWhatsappDailyPost('2026-10-08', 9)
+    const james = post.reps.find((r) => r.firstName === 'James')
+    assert.deepEqual(james.newDoctorNames, ['Dr. Idelle Brand', 'Domino Dental'])
+    assert.match(post.caption, /\*James\*\n[^\n]*\n[^\n]*\nNew doctors: \d+ of 18 \(\d+%\)\nNew: Dr\. Idelle Brand, Domino Dental/)
+    const william = post.reps.find((r) => r.firstName === 'William')
+    assert.deepEqual(william.newDoctorNames, [])
+    assert.doesNotMatch(post.caption.split('*William*')[1], /New: /)   // no names, no line
+    const text = buildWhatsappImageHtml(post, 'msg').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+    assert.match(text, /Dr\. Idelle Brand/)
+    assert.match(text, /Domino Dental/)
+  } finally {
+    namesStub = async () => null
+  }
+})
+
+test('names are escaped on the image, and an unavailable names lookup shows nothing and breaks nothing', async () => {
+  namesStub = async () => ['<b>Evil</b> & Co']
+  try {
+    const post = await buildWhatsappDailyPost('2026-10-08', 9)
+    const html = buildWhatsappImageHtml(post, 'msg')
+    assert.doesNotMatch(html, /<b>Evil<\/b>/)
+    assert.match(html, /&lt;b&gt;Evil&lt;\/b&gt; &amp; Co/)
+  } finally {
+    namesStub = async () => null
+  }
+  const post2 = await buildWhatsappDailyPost('2026-10-08', 9)
+  assert.ok(post2.reps.every((r) => Array.isArray(r.newDoctorNames) && r.newDoctorNames.length === 0))
+  assert.doesNotMatch(post2.caption, /New: /)
+  assert.doesNotMatch(buildWhatsappImageHtml(post2, 'msg'), /undefined|NaN/)
 })

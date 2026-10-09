@@ -6,6 +6,7 @@ const {
   businessDaysLeftInMonth,
   lastBusinessDayEasternDateString,
   listNewDoctorNamesOnDate,
+  eviSmartNewDoctorNamesForRep,
   evidentMtdForRep,
 } = require('./salesRepDailyReport')
 const { PUSH_QUOTES } = require('./email')
@@ -61,12 +62,13 @@ async function buildWhatsappDailyPost(dateStr = lastBusinessDayEasternDateString
     // Booked is also Evident's MTD figure (Report #12) and is shown beside
     // billed (#40) on each card (user request, 2026-10-06); billed alone
     // drives the Monthly sales bar.
-    const [sales, doctors, wonToday, salesBilled, salesBooked] = await Promise.all([
+    const [sales, doctors, wonToday, salesBilled, salesBooked, newDoctorNames] = await Promise.all([
       computeMonthlySalesGoal(u.email, dateStr),
       computeMonthlyDoctorsGoal(u.email, dateStr),
       listNewDoctorNamesOnDate(u.id, dateStr),
       evidentMtdForRep(u.email, dateStr, 'billed'),
       evidentMtdForRep(u.email, dateStr, 'booked'),
+      eviSmartNewDoctorNamesForRep(u.email, dateStr),
     ])
     if (!sales || !doctors) continue
     reps.push({
@@ -74,6 +76,7 @@ async function buildWhatsappDailyPost(dateStr = lastBusinessDayEasternDateString
       salesCur: salesBilled, bookedCur: salesBooked, salesTarget: Number(sales.target),
       docsCur: Number(doctors.current_value), docsTarget: Number(doctors.target),
       wonToday,
+      newDoctorNames: newDoctorNames || [],
     })
   }
   if (reps.length === 0) return null
@@ -95,6 +98,7 @@ async function buildWhatsappDailyPost(dateStr = lastBusinessDayEasternDateString
     `Sales: ${money(r.salesCur)} of ${whole(r.salesTarget)} (${pctText(r.salesCur, r.salesTarget)})`,
     `Booked: ${money(r.bookedCur)} · Billed: ${money(r.salesCur)}`,
     `New doctors: ${r.docsCur} of ${r.docsTarget} (${pctOf(r.docsCur, r.docsTarget)}%)`,
+    ...(r.newDoctorNames.length ? [`New: ${r.newDoctorNames.join(', ')}`] : []),
     ...(r.wonToday.length ? [`Won today: ${r.wonToday.join(', ')}`] : []),
   ].join('\n')
 
@@ -147,6 +151,9 @@ function buildWhatsappImageHtml(post, message) {
       <div style="flex:1">${eyebrow('Booked')}<div style="margin-top:5px;font:400 19px/1 'Manrope',sans-serif;color:#fff;letter-spacing:-.01em;font-variant-numeric:tabular-nums">${money(r.bookedCur)}</div></div>
       <div style="flex:1">${eyebrow('Billed')}<div style="margin-top:5px;font:400 19px/1 'Manrope',sans-serif;color:#fff;letter-spacing:-.01em;font-variant-numeric:tabular-nums">${money(r.salesCur)}</div></div>
     </div>`
+  // The new doctors' or practices' names, so the card says who was signed.
+  const newDoctorNames = (r) => (r.newDoctorNames && r.newDoctorNames.length ? `
+    <div style="margin-top:14px">${r.newDoctorNames.map((n) => `<div style="margin-top:4px;font:500 13px/1.35 'Manrope',sans-serif;color:#fff">${esc(n)}</div>`).join('')}</div>` : '')
   const card = (r) => `
     <div style="${glass};flex:1;border-radius:26px;padding:22px 22px 24px">
       <div style="font:600 17px 'Manrope',sans-serif;color:#fff;letter-spacing:.01em">${esc(r.firstName)}</div>
@@ -155,6 +162,7 @@ function buildWhatsappImageHtml(post, message) {
       ${metric('Monthly sales', money(r.salesCur), `of ${whole(r.salesTarget)}`, pctText(r.salesCur, r.salesTarget), pctOf(r.salesCur, r.salesTarget))}
       ${bookedBilled(r)}
       ${metric('New doctors', String(r.docsCur), `of ${r.docsTarget}`, `${pctOf(r.docsCur, r.docsTarget)}%`, pctOf(r.docsCur, r.docsTarget))}
+      ${newDoctorNames(r)}
     </div>`
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -167,7 +175,7 @@ function buildWhatsappImageHtml(post, message) {
     <div style="font:500 10px 'Manrope',sans-serif;letter-spacing:.26em;text-transform:uppercase;color:rgba(255,255,255,.75)">AIM Dental Laboratory</div>
     <div style="margin-top:8px;font:300 32px/1.1 'Manrope',sans-serif;color:#fff;letter-spacing:-.02em">Sales Team Progress</div>
     <div style="margin-top:6px;font:400 12px 'Manrope',sans-serif;color:rgba(255,255,255,.8)">${dateLabel}</div>
-    <div style="display:flex;gap:16px;margin-top:18px;align-items:flex-start">${post.reps.map(card).join('')}</div>
+    <div style="display:flex;gap:16px;margin-top:18px;align-items:stretch">${post.reps.map(card).join('')}</div>
     <div style="${glass};margin-top:16px;border-radius:22px;padding:15px 24px;text-align:center;font:400 14px/1.45 'Manrope',sans-serif;color:#fff;letter-spacing:.005em">${esc(message)}</div>
   </div>
 </div></body></html>`

@@ -275,6 +275,21 @@ async function withEviSmartNewDoctors(progress, repEmail, dateStr) {
   }
 }
 
+// Names of this month's new doctors or practices for a rep, from the same
+// EviSmart table the count uses; null when the day's report has no such table
+// or cannot be read (callers then show no names rather than guess).
+async function eviSmartNewDoctorNamesForRep(repEmail, dateStr) {
+  try {
+    const key = EVIDENT_REP_KEY_BY_EMAIL[repEmail]
+    const { extras } = await eviSmartDayFor(dateStr)
+    const list = key && extras && extras.newDoctors && extras.newDoctors[key]
+    return list ? list.map((d) => d.name) : null
+  } catch (err) {
+    console.error('[sales-rep-daily-report] EviSmart new doctor names lookup failed:', err.message)
+    return null
+  }
+}
+
 async function computeMonthlyDoctorsGoal(repEmail, dateStr) {
   return withEviSmartNewDoctors(await computeMonthlyDoctorsGoalFromCrm(repEmail, dateStr), repEmail, dateStr)
 }
@@ -763,6 +778,7 @@ module.exports = {
   weeksInMonth,
   pickMtdByRepAsOf,
   acceptBookedByRep,
+  eviSmartNewDoctorNamesForRep,
   pickMtdSource,
   summarizeBilledRows,
   evidentMtdForRep,
