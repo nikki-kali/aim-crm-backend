@@ -642,7 +642,8 @@ router.post('/approve', rateLimiter({ windowMs: 10 * 60 * 1000, max: 20 }), asyn
     }
 
     if (claim.report_type === contentApprovalRequest.FOLLOWUP_REPORT_TYPE) {
-      await contentApprovalRequest.sendContentApprovalFollowup()
+      const result = await contentApprovalRequest.sendContentApprovalFollowup()
+      if (!result.sent) return res.send(resultPage('Nothing to send', 'Every upcoming post already has a decision, so no follow-up was sent.', true))
       return res.send(resultPage('Sent!', 'The follow-up has been sent to leadership.', true))
     }
 

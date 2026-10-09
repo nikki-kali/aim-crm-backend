@@ -4,6 +4,7 @@ const { runEvidentCrmSyncJob } = require('../jobs/evidentCrmSync')
 const { runEvidentReportJob, runEvidentReportSendJob } = require('../jobs/evidentReport')
 const { runSalesRepDailyReportJob } = require('../jobs/salesRepDailyReport')
 const { runWhatsappPostJob } = require('../jobs/whatsappPost')
+const { runContentApprovalFollowupJob } = require('../jobs/contentApprovalFollowup')
 const { checkEvidentEmails, buildMissingEmailsAlert } = require('../services/evidentReport/emailCheck')
 const { fetchEviSmartHeaders } = require('../services/evidentReport/gmailFetch')
 const { sendEmail } = require('../services/email')
@@ -24,6 +25,7 @@ const JOBS = {
   'evident-report-send': runEvidentReportSendJob,
   'sales-rep-daily-report': runSalesRepDailyReportJob,
   'whatsapp-post': runWhatsappPostJob,
+  'content-approval-followup': runContentApprovalFollowupJob,
 }
 
 function isAuthorized(provided, secret) {

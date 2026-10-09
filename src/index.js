@@ -6,6 +6,7 @@ const { startSocialTokenRefreshScheduler } = require('./jobs/socialTokenRefresh'
 const { startEvidentReportScheduler } = require('./jobs/evidentReport')
 const { startEvidentCrmSyncScheduler } = require('./jobs/evidentCrmSync')
 const { startSalesRepDailyReportScheduler } = require('./jobs/salesRepDailyReport')
+const { startContentApprovalFollowupScheduler } = require('./jobs/contentApprovalFollowup')
 
 // Mounted here rather than in app.js — that file has real in-progress
 // unrelated work (an EOS→goals refactor) and must not be touched.
@@ -32,4 +33,5 @@ app.listen(PORT, () => {
   startEvidentReportScheduler()
   startSalesRepDailyReportScheduler()
   startEvidentCrmSyncScheduler()
+  startContentApprovalFollowupScheduler()
 })
