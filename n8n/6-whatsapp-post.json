@@ -1,5 +1,5 @@
 {
-  "name": "AIM \u00b7 WhatsApp post (8:15 to 10:15 AM)",
+  "name": "AIM \u00b7 WhatsApp post (6:15 to 10:15 AM)",
   "nodes": [
     {
       "parameters": {
@@ -7,13 +7,13 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "15,45 8,9 * * 1-5"
+              "expression": "15,45 6-9 * * 1-5"
             }
           ]
         }
       },
       "id": "wa-early",
-      "name": "Early attempts: 8:15, 8:45, 9:15, 9:45",
+      "name": "Early attempts: every 30 min from 6:15 to 9:45",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -99,7 +99,7 @@
     }
   ],
   "connections": {
-    "Early attempts: 8:15, 8:45, 9:15, 9:45": {
+    "Early attempts: every 30 min from 6:15 to 9:45": {
       "main": [
         [
           {

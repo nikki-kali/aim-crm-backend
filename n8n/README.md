@@ -9,7 +9,7 @@ n8n only **starts** the jobs on time and checks that the Evident emails arrived.
 | `3-leadership-send-0700.json` | 7:00 AM | `POST /api/cron/evident-report-send` | Automatic send to leadership (unless held, already sent, or EviSmart is unusable). |
 | `4-crm-sync-0700.json` | 7:00 AM | `POST /api/cron/evident-crm-sync` | Evident to CRM sync. |
 | `5-rep-reports-0800.json` | 8:00 AM | `POST /api/cron/sales-rep-daily-report` | Sends the rep report previews to the approver. |
-| `6-whatsapp-post.json` | 8:15, 8:45, 9:15, 9:45, then a final try at 10:15 | `POST /api/cron/whatsapp-post` (`?final=true` on the last) | Builds the WhatsApp progress picture and caption and emails them to nadinekate.d.limjoco@gmail.com. Waits for the day's EviSmart report; sends once per day; alerts the approver only on the final try if EviSmart never came, or if a figure is missing. |
+| `6-whatsapp-post.json` | every 30 min from 6:15 to 9:45, then a final try at 10:15 | `POST /api/cron/whatsapp-post` (`?final=true` on the last) | Builds the WhatsApp progress picture and caption and emails them to nadinekate.d.limjoco@gmail.com. Waits for the day's EviSmart report; sends once per day; alerts the approver only on the final try if EviSmart never came, or if a figure is missing. |
 | `0-error-alert.json` | on failure | | Emails you if any workflow above fails (server asleep, Gmail access expired). |
 
 ## One-time setup
