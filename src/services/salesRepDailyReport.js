@@ -6,6 +6,7 @@ const { computeProgress } = require('./goalProgress')
 const { APPROVER_EMAIL, createApprovalToken, buildApproveUrl, injectApprovalBanner } = require('./reportApproval')
 const { renderGoalBarsGif } = require('./goalBarGifRenderer')
 const { checkBookedMtd, previousWeekday, sameMonth } = require('./evidentReport/bookedMtdGuard')
+const { countEviSmartNewDoctors } = require('./evidentReport/eviSmartPrimary')
 
 // Recipients are the two real AIM reps by email, not a role query — role
 // IN ('staff','sales_rep') would also catch Yoel Klein and the TEST
@@ -652,8 +653,17 @@ async function buildDailyReportHtml(repName, repEmail, dateStr, status, { test =
   // weekly target derived from the monthly new-doctors goal — not the
   // monthly running total the bars above already show.
   const dailyEvident = await computeRepDailyEvidentStats(repEmail, dateStr, repId)
-  const dailyNewDoctors = repId ? await countNewDoctorsOnDate(repId, dateStr) : null
-  const doctorsThisWeek = repId ? await countNewDoctorsThisWeek(repId, dateStr) : null
+  let dailyNewDoctors = repId ? await countNewDoctorsOnDate(repId, dateStr) : null
+  let doctorsThisWeek = repId ? await countNewDoctorsThisWeek(repId, dateStr) : null
+  // EviSmart's "New doctors by rep" table is the source when the day's report
+  // has it (user decision, 2026-10-09); the CRM counts above are the fallback.
+  try {
+    const { extras } = await eviSmartDayFor(dateStr)
+    const fromEviSmart = countEviSmartNewDoctors(extras, EVIDENT_REP_KEY_BY_EMAIL[repEmail], dateStr, mondayOfWeekEastern(dateStr))
+    if (fromEviSmart) { dailyNewDoctors = fromEviSmart.today; doctorsThisWeek = fromEviSmart.week }
+  } catch (err) {
+    console.error('[sales-rep-daily-report] EviSmart new doctors (today/week) lookup failed, using the CRM counts:', err.message)
+  }
   const weeklyDoctorsTarget = doctorsGoal ? Math.ceil(doctorsGoal.target / weeksInMonth(dateStr)) : null
   const doctorsLeftForWeeklyGoal =
     weeklyDoctorsTarget !== null && doctorsThisWeek !== null ? Math.max(weeklyDoctorsTarget - doctorsThisWeek, 0) : null

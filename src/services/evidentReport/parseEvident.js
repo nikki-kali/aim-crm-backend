@@ -439,6 +439,13 @@ function emailTables(html) {
 }
 const moneyOf = (s) => { const m = String(s || '').match(/\$\s*([\d,]+(?:\.\d+)?)/); return m ? Number(m[1].replace(/,/g, '')) : null; };
 
+// "5 Oct 2026" -> "2026-10-05"; null when it isn't in that form.
+function isoFromDayMonthYear(text) {
+  const m = String(text || '').match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/);
+  const mm = m && MONTHS[m[2].toLowerCase()];
+  return mm ? `${m[3]}-${mm}-${m[1].padStart(2, '0')}` : null;
+}
+
 function extractEviSmartExtras(html) {
   const tables = emailTables(html);
   let lastMonth = null;
@@ -454,17 +461,22 @@ function extractEviSmartExtras(html) {
   }
   // The first table headed Rep | Code | Doctor | First case | Cases is this
   // month; a later one with the same header is the September reference list.
-  const docTable = tables.find((rows) => rows[0] && /^Rep$/i.test(rows[0][0]) && /^Code$/i.test(rows[0][1]) && /^Doctor$/i.test(rows[0][2]));
-  let newDoctors = null;
-  if (docTable) {
-    newDoctors = { james: [], william: [] };
-    for (const r of docTable.slice(1)) {
+  const docTables = tables.filter((rows) => rows[0] && /^Rep$/i.test(rows[0][0]) && /^Code$/i.test(rows[0][1]) && /^Doctor$/i.test(rows[0][2]));
+  const readDoctors = (rows) => {
+    const out = { james: [], william: [] };
+    for (const r of rows.slice(1)) {
       const key = /^James/i.test(r[0]) ? 'james' : /^William/i.test(r[0]) ? 'william' : null;
       if (!key || !r[1] || /^none/i.test(r[2] || '')) continue;
-      newDoctors[key].push({ code: r[1], name: r[2], firstCase: r[3] || null, cases: Number(r[4]) || 0 });
+      out[key].push({ code: r[1], name: r[2], firstCase: r[3] || null, firstCaseIso: isoFromDayMonthYear(r[3]), cases: Number(r[4]) || 0 });
     }
-  }
-  return { lastMonth, newDoctors };
+    return out;
+  };
+  // Second table with the same header = the previous month's reference list.
+  return {
+    lastMonth,
+    newDoctors: docTables[0] ? readDoctors(docTables[0]) : null,
+    newDoctorsPrevMonth: docTables[1] ? readDoctors(docTables[1]) : null,
+  };
 }
 
 function extractEviSmartTotals(html) {

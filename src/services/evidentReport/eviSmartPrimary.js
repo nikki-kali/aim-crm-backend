@@ -44,4 +44,16 @@ function applyEviSmartNewDoctors(repGoals, extras) {
   })
 }
 
-module.exports = { applyEviSmartMtdPrimary, applyEviSmartNewDoctors }
+// New doctors for one rep from EviSmart's tables: how many had their first
+// case on `dateStr` and how many from `weekStart` through `dateStr` (the
+// previous month's reference list is included so a week that crosses a month
+// end counts correctly). null when the email has no new-doctors table, so the
+// caller keeps its CRM numbers.
+function countEviSmartNewDoctors(extras, key, dateStr, weekStart) {
+  if (!extras || !extras.newDoctors || !key) return null
+  const all = [...(extras.newDoctors[key] || []), ...((extras.newDoctorsPrevMonth && extras.newDoctorsPrevMonth[key]) || [])]
+  const inWeek = all.filter((d) => d.firstCaseIso && d.firstCaseIso >= weekStart && d.firstCaseIso <= dateStr)
+  return { today: inWeek.filter((d) => d.firstCaseIso === dateStr).length, week: inWeek.length, names: inWeek.map((d) => d.name) }
+}
+
+module.exports = { applyEviSmartMtdPrimary, applyEviSmartNewDoctors, countEviSmartNewDoctors }

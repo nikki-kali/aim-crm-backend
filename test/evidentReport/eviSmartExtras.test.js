@@ -12,7 +12,7 @@ test('the real 8 Oct email: last month and the new doctors are read', () => {
   const x = P.extractEviSmartExtras(NEW)
   assert.deepEqual(x.lastMonth, { monthName: 'September', bookedCount: 1821, booked: 171172.07, billed: 168424.13 })
   assert.equal(x.newDoctors.james.length, 1)
-  assert.deepEqual(x.newDoctors.james[0], { code: 'A1119', name: 'Dr. Idelle Brand', firstCase: '5 Oct 2026', cases: 2 })
+  assert.deepEqual(x.newDoctors.james[0], { code: 'A1119', name: 'Dr. Idelle Brand', firstCase: '5 Oct 2026', firstCaseIso: '2026-10-05', cases: 2 })
   assert.deepEqual(x.newDoctors.william, [])      // "None this month" is a known zero, not missing data
 })
 
@@ -65,4 +65,38 @@ test('with no extras (older email) the CRM-based new-doctor numbers are left alo
   const goals = [{ repName: 'James Delaney', goals: [{ metric: 'new_doctors', target: '18', current_value: 3, progress_pct: 17 }] }]
   assert.deepEqual(applyEviSmartNewDoctors(goals, { newDoctors: null, lastMonth: null }), goals)
   assert.deepEqual(applyEviSmartNewDoctors(goals, null), goals)
+})
+
+test('first-case dates come through as ISO, and the September reference list is kept separately', () => {
+  const x = P.extractEviSmartExtras(NEW)
+  assert.equal(x.newDoctors.james[0].firstCaseIso, '2026-10-05')
+  assert.deepEqual(x.newDoctorsPrevMonth.james.map((d) => [d.name, d.firstCaseIso]), [
+    ['Dr. Cecilia U. Schneuerman', '2026-09-02'], ['Domino Dental', '2026-09-22'], ['Dr. Joel Manley', '2026-09-23'],
+  ])
+  assert.deepEqual(x.newDoctorsPrevMonth.william.map((d) => d.name), ['Dr. Leslie Grace Lopez'])
+})
+
+test('countEviSmartNewDoctors: today and this week from the real 8 Oct email', () => {
+  const { countEviSmartNewDoctors } = require('../../src/services/evidentReport/eviSmartPrimary')
+  const x = P.extractEviSmartExtras(NEW)
+  // Thursday 8 Oct; the week started Monday 5 Oct; Dr. Idelle Brand's first case was 5 Oct.
+  assert.deepEqual(countEviSmartNewDoctors(x, 'james', '2026-10-08', '2026-10-05'), { today: 0, week: 1, names: ['Dr. Idelle Brand'] })
+  assert.deepEqual(countEviSmartNewDoctors(x, 'william', '2026-10-08', '2026-10-05'), { today: 0, week: 0, names: [] })
+  // On her first-case day she is "today" too.
+  assert.deepEqual(countEviSmartNewDoctors(x, 'james', '2026-10-05', '2026-10-05'), { today: 1, week: 1, names: ['Dr. Idelle Brand'] })
+})
+
+test('countEviSmartNewDoctors: a week that crosses the month end also counts the September list', () => {
+  const { countEviSmartNewDoctors } = require('../../src/services/evidentReport/eviSmartPrimary')
+  const x = P.extractEviSmartExtras(NEW)
+  // Week of Mon 21 Sep through Wed 23 Sep: Domino Dental (22 Sep) and Dr. Joel Manley (23 Sep).
+  const r = countEviSmartNewDoctors(x, 'james', '2026-09-23', '2026-09-21')
+  assert.equal(r.week, 2)
+  assert.equal(r.today, 1)
+})
+
+test('countEviSmartNewDoctors returns null when the email has no new-doctors table (callers keep the CRM numbers)', () => {
+  const { countEviSmartNewDoctors } = require('../../src/services/evidentReport/eviSmartPrimary')
+  assert.equal(countEviSmartNewDoctors({ newDoctors: null }, 'james', '2026-10-08', '2026-10-05'), null)
+  assert.equal(countEviSmartNewDoctors(null, 'james', '2026-10-08', '2026-10-05'), null)
 })
