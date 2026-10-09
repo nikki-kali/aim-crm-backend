@@ -575,7 +575,7 @@ async function describeClaimForConfirmation(claim) {
     return { label: `${rows[0].name || rows[0].email}'s Daily Sales Report`, detail: `This will send ${rows[0].name || rows[0].email}'s Daily Sales Report for ${claim.report_date} now.` }
   }
   if (claim.report_type === contentApprovalRequest.FOLLOWUP_REPORT_TYPE) {
-    return { label: 'the content approval follow-up', detail: 'This will send the follow-up to leadership now, in the same thread: to execassistant@aimdentallab.com, cc ben@aimdentallab.com, bcc media@aimdentallab.com. (Email version ' + contentApprovalRequest.FOLLOWUP_VERSION + ')' }
+    return { label: 'the content approval follow-up', detail: 'This will send the follow-up from noreply@aimdentallab.com to leadership now, as a reply in the original thread: to execassistant@aimdentallab.com, cc ben@aimdentallab.com, bcc media@aimdentallab.com. (Email version ' + contentApprovalRequest.FOLLOWUP_VERSION + ')' }
   }
   if (claim.report_type === contentApprovalRequest.REPORT_TYPE) {
     return { label: 'the content approval request', detail: 'This will email the content approval request to leadership now: to execassistant@aimdentallab.com, cc ben@aimdentallab.com, bcc media@aimdentallab.com. (Email version ' + contentApprovalRequest.TEMPLATE_VERSION + ')' }

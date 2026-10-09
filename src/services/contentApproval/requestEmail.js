@@ -27,6 +27,11 @@ const TEMPLATE_VERSION = crypto.createHash('sha1').update(TEMPLATE).digest('hex'
 const FOLLOWUP_REPORT_TYPE = 'content-approval-followup'
 const FOLLOWUP_TEMPLATE = fs.readFileSync(path.join(__dirname, 'followupEmail.html'), 'utf8')
 const FOLLOWUP_VERSION = crypto.createHash('sha1').update(FOLLOWUP_TEMPLATE).digest('hex').slice(0, 8)
+// Message-ID of the Oct 8 leadership email (read from the media@ BCC copy).
+// Sending the follow-up with In-Reply-To/References set to it is what puts
+// it in the same thread; a matching subject alone isn't enough for Gmail.
+const ORIGINAL_MESSAGE_ID = '<010001a11a7750db-d48c0c86-f965-44a1-8fca-6c98a4598f74-000000@email.amazonses.com>'
+const REPLY_HEADERS = { 'In-Reply-To': ORIGINAL_MESSAGE_ID, References: ORIGINAL_MESSAGE_ID }
 
 function bannerRow(approveUrl) {
   return `<tr><td style="background:#fefaf1;border-bottom:1px solid #fde68a;padding:18px 36px;text-align:center;font-family:Arial,Helvetica,sans-serif">
@@ -52,12 +57,12 @@ async function sendContentApprovalFollowupPreview() {
   const reportDate = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
   const token = await createApprovalToken({ reportType: FOLLOWUP_REPORT_TYPE, reportDate })
   const html = FOLLOWUP_TEMPLATE.replace('<!--APPROVAL_BANNER-->', bannerRow(buildApproveUrl(token)))
-  await sendEmail({ to: PREVIEW_TO, subject: `[Preview] ${SUBJECT}`, html })
+  await sendEmail({ to: PREVIEW_TO, subject: `[Preview] ${SUBJECT}`, html, headers: REPLY_HEADERS })
   return { previewTo: PREVIEW_TO }
 }
 
 async function sendContentApprovalFollowup() {
-  await sendEmail({ ...LEADERSHIP, subject: `Re: ${SUBJECT}`, html: FOLLOWUP_TEMPLATE })
+  await sendEmail({ ...LEADERSHIP, subject: `Re: ${SUBJECT}`, html: FOLLOWUP_TEMPLATE, headers: REPLY_HEADERS })
 }
 
 module.exports = {
