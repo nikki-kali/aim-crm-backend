@@ -214,6 +214,13 @@ const SHOWN_REPORTS = ['Daily Booking Report - Nadine', 'Daily Billed Report - N
 function buildMissingBanner(agg) {
   const missingShown = agg.missing.filter((label) => SHOWN_REPORTS.includes(label));
   if (!missingShown.length) return '';
+  // A reading that arrived but was rejected as implausible (see
+  // bookedMtdGuard.js) is explained, rather than reported as "missing".
+  if (agg.bookedMtdRejected && missingShown.length === 1 && missingShown[0] === 'MTD Booked Daily Update') {
+    return `<div style="margin:30px 36px 0;padding:16px 19px;background:#fefaf1;border:1px solid #fde68a;border-left:3px solid #b45309;border-radius:4px 12px 12px 4px">
+         <p style="margin:0;font-size:13.5px;line-height:1.55;color:${BRAND.ink}">Heads up: Evident's month-to-date booked figure for today did not add up against yesterday and today's bookings, so it is not shown (N/A). Every other figure comes from Evident's own reports as usual.</p>
+       </div>`;
+  }
   return `<div style="margin:30px 36px 0;padding:16px 19px;background:#fefaf1;border:1px solid #fde68a;border-left:3px solid #b45309;border-radius:4px 12px 12px 4px">
          <p style="margin:0;font-size:13.5px;line-height:1.55;color:${BRAND.ink}">Heads up: today's figures are missing ${missingShown.length} of the ${SHOWN_REPORTS.length} Evident reports they come from (${missingShown.join(', ')}). Numbers below may be understated.</p>
        </div>`;

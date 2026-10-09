@@ -5,6 +5,7 @@ const { extractDailyBookedCustomerNames, extractBookingRows, extractBilledRows, 
 const { computeProgress } = require('./goalProgress')
 const { APPROVER_EMAIL, createApprovalToken, buildApproveUrl, injectApprovalBanner } = require('./reportApproval')
 const { renderGoalBarsGif } = require('./goalBarGifRenderer')
+const { checkBookedMtd, previousWeekday, sameMonth } = require('./evidentReport/bookedMtdGuard')
 
 // Recipients are the two real AIM reps by email, not a role query — role
 // IN ('staff','sales_rep') would also catch Yoel Klein and the TEST
@@ -118,6 +119,26 @@ function pickMtdSource({ exact, eviSmart, older }) {
   return exact || eviSmart || older || null
 }
 
+// Total across every rep plus N/A, for the plausibility check.
+const byRepTotal = (byRep) => (byRep ? byRep.na + byRep.james + byRep.william : null)
+
+// Evident's "MTD Booked Daily Update" once reported $485,192 for a month that
+// had booked about $44,000 (2026-10-08). Returns true when `exact` (today's
+// per-rep reading) fits the previous day's reading plus today's bookings.
+// Pure so it is testable without Gmail.
+function acceptBookedByRep({ exact, prev, dailyBooked }) {
+  if (!exact) return false
+  return checkBookedMtd({ mtd: byRepTotal(exact), prevMtd: byRepTotal(prev), dailyBooked }).ok
+}
+
+// Total booked that day from the Daily Booking Report's own rows, or null.
+async function dailyBookedTotalFor(dateStr) {
+  const msgs = await fetchEvidentEmailsInRange(`subject:"Daily Booking Report - Nadine" after:${gmailDate(dateStr, -1)} before:${gmailDate(dateStr, 2)}`)
+  const m = msgs.find((x) => x.date === dateStr)
+  if (!m) return null
+  return Math.round(extractBookingRows(m.html).reduce((s, r) => s + (r.value || 0), 0) * 100) / 100
+}
+
 async function eviSmartRepMtdFor(dateStr, kind) {
   const totals = pickEviSmartForDate(await fetchEviSmartEmails(), dateStr)
   const rep = totals && totals.repMtd && totals.repMtd[kind === 'billed' ? 'billed' : 'booked']
@@ -132,11 +153,24 @@ async function fetchMtdByRepAsOf(dateStr, kind) {
   const promise = fetchEvidentEmailsInRange(
     `subject:"${MTD_QUERY[kind]}" after:${gmailDate(monthStart, -1)} before:${gmailDate(dateStr, 2)}`
   ).then(async (msgs) => {
-    const exact = pickMtdByRepAsOf(msgs.filter((m) => m.date === dateStr), dateStr, kind)
+    let exact = pickMtdByRepAsOf(msgs.filter((m) => m.date === dateStr), dateStr, kind)
+    let rejected = false
+    if (exact && kind === 'booked') {
+      const prevDate = previousWeekday(dateStr)
+      const prev = sameMonth(prevDate, dateStr) ? pickMtdByRepAsOf(msgs.filter((m) => m.date === prevDate), prevDate, 'booked') : null
+      let dailyBooked = null
+      try { dailyBooked = await dailyBookedTotalFor(dateStr) } catch (err) { console.error('[sales-rep-daily-report] daily booked lookup failed:', err.message) }
+      if (!acceptBookedByRep({ exact, prev, dailyBooked })) {
+        console.warn(`[sales-rep-daily-report] Evident MTD Booked for ${dateStr} looks wrong (company total ${byRepTotal(exact)}, previous ${byRepTotal(prev)}, day booked ${dailyBooked}); not using it`)
+        exact = null
+        rejected = true
+      }
+    }
     if (exact) return exact
     let eviSmart = null
     try { eviSmart = await eviSmartRepMtdFor(dateStr, kind) } catch (err) { console.error('[sales-rep-daily-report] EviSmart by-rep fallback failed:', err.message) }
-    return pickMtdSource({ exact, eviSmart, older: eviSmart ? null : pickMtdByRepAsOf(msgs, dateStr, kind) })
+    // A rejected reading must not be replaced by an older email either.
+    return pickMtdSource({ exact, eviSmart, older: eviSmart || rejected ? null : pickMtdByRepAsOf(msgs, dateStr, kind) })
   })
   mtdCache.set(cacheKey, { at: Date.now(), promise })
   promise.catch(() => mtdCache.delete(cacheKey))
@@ -683,6 +717,7 @@ module.exports = {
   listNewDoctorNamesThisWeek,
   weeksInMonth,
   pickMtdByRepAsOf,
+  acceptBookedByRep,
   pickMtdSource,
   summarizeBilledRows,
   evidentMtdForRep,

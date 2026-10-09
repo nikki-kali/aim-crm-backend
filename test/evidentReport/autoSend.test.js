@@ -77,3 +77,9 @@ test('EviSmart still missing on the final attempt: the approver is alerted', asy
   assert.equal(await deliverToLeadership({ autoSend: true, final: true, ...f }), 'held');
   assert.deepEqual(f.calls, ['leadership', 'alert:no evismart']);
 });
+
+test('a month-to-date booked figure that failed the plausibility check: nothing is sent, the approver is alerted at once (no waiting for retries)', async () => {
+  const f = fakes(Object.assign(new Error('booked mtd did not add up'), { code: 'BOOKED_MTD_SUSPECT' }));
+  assert.equal(await deliverToLeadership({ autoSend: true, final: false, ...f }), 'held');
+  assert.deepEqual(f.calls, ['leadership', 'alert:booked mtd did not add up']);
+});

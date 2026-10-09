@@ -24,6 +24,12 @@ async function deliverToLeadership({ autoSend, sendToLeadership, alertApprover, 
     return 'sent-to-leadership'
   } catch (err) {
     if (err.code === 'ALREADY_SENT') return 'already-sent'
+    if (err.code === 'BOOKED_MTD_SUSPECT') {
+      // Retrying cannot fix Evident's own email, so alert at once.
+      console.warn('[evident-report] Evident MTD Booked figure failed the plausibility check; NOT sending to leadership, alerting the approver')
+      await alertApprover(err.message)
+      return 'held'
+    }
     if (err.code === 'EVISMART_UNAVAILABLE') {
       // EviSmart sometimes lands just after 7:00 AM (7:01 on 6 Oct), so the
       // earlier attempts stay quiet and wait; only the last one alerts.

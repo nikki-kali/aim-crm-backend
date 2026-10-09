@@ -9,6 +9,7 @@ const { todayEt } = require('../cronRuns')
 const db = require('../../config/db')
 const { computeProgress } = require('../goalProgress')
 const { DAILY_REPORT_REP_EMAILS, evidentMtdCompanyTotal, lastDayOfPriorMonth } = require('../salesRepDailyReport')
+const { applyBookedMtdGuard } = require('./bookedMtdGuard')
 
 const RECIPIENTS = ['ben@aimdentallab.com', 'execassistant@aimdentallab.com', 'yoel@khdentallab.com']
 
@@ -144,6 +145,8 @@ async function runEvidentReport({ requireEviSmart = false } = {}) {
   console.log(`[evident-report] found ${messages.length} Evident email(s) for ${runDate} (${allMessages.length} fetched in the last 5 days)`)
 
   const aggregate = parseAndAggregate(messages, { runDate })
+  const bookedRejection = await applyBookedMtdGuard(aggregate, runDate, (d) => evidentMtdCompanyTotal(d, 'booked'))
+  if (bookedRejection) console.warn(`[evident-report] Evident's MTD Booked figure rejected: ${bookedRejection.reason}`)
   if (aggregate.missing.length > 0) {
     console.warn(`[evident-report] missing reports: ${aggregate.missing.join(', ')}`)
   }
@@ -161,6 +164,12 @@ async function runEvidentReport({ requireEviSmart = false } = {}) {
   // until Elizabeth approves Evident's Daily Billed Report as the source.
   if (requireEviSmart && !eviSmartRaw) {
     throw Object.assign(new Error(`[evident-report] no usable EviSmart Daily Sales Report for ${runDate}, not sending to leadership`), { code: 'EVISMART_UNAVAILABLE' })
+  }
+  // An automatic send never goes out with a month-to-date booked figure that
+  // failed the plausibility check: the approver is alerted instead, and can
+  // still send it by hand (the preview shows N/A for that figure).
+  if (requireEviSmart && aggregate.bookedMtdRejected) {
+    throw Object.assign(new Error(`Evident's month-to-date booked figure for ${runDate} did not add up (${aggregate.bookedMtdRejected.reason}). Nothing was sent to leadership.`), { code: 'BOOKED_MTD_SUSPECT' })
   }
 
   const repGoals = applyEvidentMtdToGoals(await fetchRepGoalsWithProgress(runDate), aggregate.companyMtdBilledByRep)
@@ -225,6 +234,7 @@ async function sendEvidentReportForApproval() {
   const historyRows = await getHistory()
   const messages = (await fetchEvidentEmails()).filter((m) => m.date === runDate)
   const aggregate = parseAndAggregate(messages, { runDate })
+  await applyBookedMtdGuard(aggregate, runDate, (d) => evidentMtdCompanyTotal(d, 'booked'))
   const eviSmartRaw = await fetchEviSmartTotals(runDate)
   Object.assign(aggregate, applyEviSmartMtdFallback(aggregate, eviSmartRaw))
   aggregate.eviSmart = applyEmailMtdTotals(eviSmartRaw, aggregate)
