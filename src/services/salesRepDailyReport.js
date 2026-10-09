@@ -148,6 +148,8 @@ function eviSmartDayFor(dateStr) {
   if (hit && Date.now() - hit.at < MTD_CACHE_MS) return hit.promise
   const promise = fetchEviSmartEmails().then((msgs) => {
     const found = pickEviSmartMessageForDate(msgs, dateStr)
+    // "Not here yet" must not be remembered: a later attempt looks again.
+    if (!found) eviSmartDayCache.delete(dateStr)
     return { totals: found ? found.totals : null, extras: found ? extractEviSmartExtras(found.message.html) : null }
   })
   eviSmartDayCache.set(dateStr, { at: Date.now(), promise })
@@ -273,6 +275,14 @@ async function withEviSmartNewDoctors(progress, repEmail, dateStr) {
   } catch (err) {
     console.error('[sales-rep-daily-report] EviSmart new doctors lookup failed, using the CRM count:', err.message)
     return progress
+  }
+}
+
+// True when the day's EviSmart Daily Sales Report is in and usable.
+async function eviSmartReportAvailable(dateStr) {
+  try { return Boolean((await eviSmartDayFor(dateStr)).totals) } catch (err) {
+    console.error('[sales-rep-daily-report] EviSmart availability check failed:', err.message)
+    return false
   }
 }
 
@@ -789,6 +799,7 @@ module.exports = {
   pickMtdByRepAsOf,
   acceptBookedByRep,
   eviSmartNewDoctorNamesForRep,
+  eviSmartReportAvailable,
   pickMtdSource,
   summarizeBilledRows,
   evidentMtdForRep,

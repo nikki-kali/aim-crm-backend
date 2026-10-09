@@ -1,0 +1,130 @@
+{
+  "name": "AIM \u00b7 WhatsApp post (8:15 to 10:15 AM)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "15,45 8,9 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "wa-early",
+      "name": "Early attempts: 8:15, 8:45, 9:15, 9:45",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        260,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://aim-crm-backend.onrender.com/api/cron/whatsapp-post",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "wa-http-early",
+      "name": "Try the WhatsApp post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        620,
+        200
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "AIM CRM cron secret"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "15 10 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "wa-final",
+      "name": "Final attempt: 10:15",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        260,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://aim-crm-backend.onrender.com/api/cron/whatsapp-post?final=true",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "wa-http-final",
+      "name": "Last try (alerts if EviSmart never came)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        620,
+        400
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "AIM CRM cron secret"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000
+    }
+  ],
+  "connections": {
+    "Early attempts: 8:15, 8:45, 9:15, 9:45": {
+      "main": [
+        [
+          {
+            "node": "Try the WhatsApp post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final attempt: 10:15": {
+      "main": [
+        [
+          {
+            "node": "Last try (alerts if EviSmart never came)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "America/New_York",
+    "executionOrder": "v1"
+  },
+  "active": false
+}

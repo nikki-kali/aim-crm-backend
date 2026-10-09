@@ -159,4 +159,4 @@ async function renderGoalBarsGif({ salesGoal, doctorsGoal, casesGoal, repEmail, 
   }
 }
 
-module.exports = { renderGoalBarsGif, BUCKET }
+module.exports = { renderGoalBarsGif, BUCKET, resolveLaunchOptions }

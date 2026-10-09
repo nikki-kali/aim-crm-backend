@@ -3,6 +3,7 @@ const crypto = require('crypto')
 const { runEvidentCrmSyncJob } = require('../jobs/evidentCrmSync')
 const { runEvidentReportJob, runEvidentReportSendJob } = require('../jobs/evidentReport')
 const { runSalesRepDailyReportJob } = require('../jobs/salesRepDailyReport')
+const { runWhatsappPostJob } = require('../jobs/whatsappPost')
 const { checkEvidentEmails, buildMissingEmailsAlert } = require('../services/evidentReport/emailCheck')
 const { fetchEviSmartHeaders } = require('../services/evidentReport/gmailFetch')
 const { sendEmail } = require('../services/email')
@@ -22,6 +23,7 @@ const JOBS = {
   'evident-report': runEvidentReportJob,
   'evident-report-send': runEvidentReportSendJob,
   'sales-rep-daily-report': runSalesRepDailyReportJob,
+  'whatsapp-post': runWhatsappPostJob,
 }
 
 function isAuthorized(provided, secret) {
@@ -81,7 +83,8 @@ router.post('/:job', (req, res) => {
   // Answer right away (the job can take minutes; a timer's request would
   // time out), then run it in the background.
   res.status(202).json({ accepted: true, job: req.params.job })
-  run({ source: 'external', force: req.query.force === 'true' })
+  // `final=true` marks the last attempt of the day, for jobs that wait for a late email.
+  run({ source: 'external', force: req.query.force === 'true', final: req.query.final === 'true' })
     .then((outcome) => console.log(`[cron-trigger] ${req.params.job}: ${outcome}`))
     .catch((err) => console.error(`[cron-trigger] ${req.params.job} failed:`, err))
 })
