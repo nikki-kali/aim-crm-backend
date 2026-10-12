@@ -16,6 +16,9 @@ const LEADERSHIP = {
   to: ['execassistant@aimdentallab.com'],
   cc: ['ben@aimdentallab.com'],
   bcc: ['media@aimdentallab.com'],
+  // Sent from noreply@, so replies (e.g. "approved") would bounce; route them
+  // to the media inbox instead.
+  replyTo: 'media@aimdentallab.com',
 }
 const SUBJECT = 'AIM October social posts ready for your approval'
 
