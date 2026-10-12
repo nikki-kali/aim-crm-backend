@@ -200,6 +200,9 @@ router.post(
       // original WEB_LEADS_EMAIL/digital@ default, Pickup routes to
       // digital@ with the widest CC list of the three). Kings Highway
       // pickups route to their own inbox/CC list, distinct from AIM's.
+      // ernest@ handles shipping and case pickup, so he's copied on AIM and
+      // Kings Highway Pickup Scheduler and AIM Contact form notifications
+      // (added 2026-10-13).
       const isKHPickup = isPickup && leadBrand === 'Kings Highway'
       const recipient =
         formType === 'scanner-program'
@@ -214,10 +217,10 @@ router.post(
         formType === 'scanner-program'
           ? undefined
           : isKHPickup
-            ? ['ben@khdentallab.com', 'execassistant@aimdentallab.com', 'digital@khdentallab.com', 'customer@khdentallab.com', 'shipping@khdentallab.com', 'stephenm@khdentallab.com']
+            ? ['ben@khdentallab.com', 'execassistant@aimdentallab.com', 'digital@khdentallab.com', 'customer@khdentallab.com', 'shipping@khdentallab.com', 'stephenm@khdentallab.com', 'ernest@aimdentallab.com']
             : isPickup
-              ? ['customer@aimdentallab.com', 'media@aimdentallab.com', 'execassistant@aimdentallab.com', 'ben@aimdentallab.com', 'shipping@khdentallab.com', 'stephenm@aimdentallab.com']
-              : ['customer@aimdentallab.com', 'digital@aimdentallab.com']
+              ? ['customer@aimdentallab.com', 'media@aimdentallab.com', 'execassistant@aimdentallab.com', 'ben@aimdentallab.com', 'shipping@khdentallab.com', 'stephenm@aimdentallab.com', 'ernest@aimdentallab.com']
+              : ['customer@aimdentallab.com', 'digital@aimdentallab.com', 'ernest@aimdentallab.com']
 
       // Email notification is best-effort — a lead that's saved but doesn't
       // trigger an email is recoverable (it's in the CRM); failing the whole
