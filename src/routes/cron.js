@@ -5,6 +5,7 @@ const { runEvidentReportJob, runEvidentReportSendJob } = require('../jobs/eviden
 const { runSalesRepDailyReportJob } = require('../jobs/salesRepDailyReport')
 const { runWhatsappPostJob } = require('../jobs/whatsappPost')
 const { runContentApprovalFollowupJob } = require('../jobs/contentApprovalFollowup')
+const { runShotListJob } = require('../jobs/shotLists')
 const { checkEvidentEmails, buildMissingEmailsAlert } = require('../services/evidentReport/emailCheck')
 const { fetchEviSmartHeaders } = require('../services/evidentReport/gmailFetch')
 const { sendEmail } = require('../services/email')
@@ -26,6 +27,7 @@ const JOBS = {
   'sales-rep-daily-report': runSalesRepDailyReportJob,
   'whatsapp-post': runWhatsappPostJob,
   'content-approval-followup': runContentApprovalFollowupJob,
+  'shot-list': runShotListJob,
 }
 
 function isAuthorized(provided, secret) {
