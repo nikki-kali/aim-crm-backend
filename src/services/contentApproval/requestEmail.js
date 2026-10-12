@@ -28,7 +28,10 @@ const TEMPLATE_VERSION = crypto.createHash('sha1').update(TEMPLATE).digest('hex'
 // land in the existing threads.
 const FOLLOWUP_REPORT_TYPE = 'content-approval-followup'
 const FOLLOWUP_TEMPLATE = fs.readFileSync(path.join(__dirname, 'followupEmail.html'), 'utf8')
-const FOLLOWUP_VERSION = crypto.createHash('sha1').update(FOLLOWUP_TEMPLATE).digest('hex').slice(0, 8)
+// Bump BUILDER_REV when the wording logic in buildFollowupHtml changes, so the
+// confirm page's version code changes too.
+const BUILDER_REV = 'reschedule-note-1'
+const FOLLOWUP_VERSION = crypto.createHash('sha1').update(FOLLOWUP_TEMPLATE + BUILDER_REV).digest('hex').slice(0, 8)
 // Message-ID of the Oct 8 leadership email (read from the media@ BCC copy).
 // Sending the follow-up with In-Reply-To/References set to it is what puts
 // it in the same thread; a matching subject alone isn't enough for Gmail.
@@ -79,17 +82,24 @@ async function getFollowupState() {
 function buildFollowupHtml({ total, pendingCount, due }, today = todayEt()) {
   if (!due.length) return null
   const intro = pendingCount === total
-    ? `Just following up on the October social posts. None of the ${total} posts have a decision yet, and these are coming up soon:`
-    : `Just following up on the October social posts. Thank you to everyone who has reviewed so far. ${pendingCount} of the ${total} posts still need a decision, and these are coming up soon:`
+    ? `Just following up on the October social posts. None of the ${total} posts have a decision yet, and these are the most urgent:`
+    : `Just following up on the October social posts. Thank you to everyone who has reviewed so far. ${pendingCount} of the ${total} posts still need a decision, and these are the most urgent:`
   const rows = due.map((p, i) => {
     const last = i === due.length - 1
     const overdue = p.date < today
-    const detail = [p.note, overdue ? `It was scheduled for ${labelDate(p.date)}, so it's ready to go out as soon as it's approved.` : '']
+    const detail = [p.note, overdue ? `Missed its ${labelDate(p.date)} slot.` : '']
       .filter(Boolean).map(escapeHtml).join(' ')
     const head = overdue ? `<strong>${escapeHtml(p.title)}</strong>` : `<strong>${labelDate(p.date)}</strong> &nbsp;${escapeHtml(p.title)}`
     return `              <p style="margin:0${last ? '' : ' 0 10px'};">${head}${detail ? `<br>${detail}` : ''}</p>`
   }).join('\n')
+  const missed = due.filter((p) => p.date < today)
+  const names = missed.map((p) => p.title)
+  const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0]
+  const resched = missed.length
+    ? `<p style="margin:0 0 16px; font-size:15px; line-height:24px; color:#1a2a2e;">${missed.length === 1 ? 'One post' : `The ${missed.length} posts`} that missed ${missed.length === 1 ? 'its date' : 'their dates'} without approval (${escapeHtml(list)}) will be rescheduled for this week once approved.</p>\n        `
+    : ''
   return FOLLOWUP_TEMPLATE.replace('{{INTRO}}', escapeHtml(intro)).replace('{{ROWS}}', rows)
+    .replace('        <p style="margin:0 0 24px; font-size:15px; line-height:24px; color:#1a2a2e;">\n          Could you take', `        ${resched}<p style="margin:0 0 24px; font-size:15px; line-height:24px; color:#1a2a2e;">\n          Could you take`)
 }
 
 // Sends the follow-up preview (threaded under the original request) to the
