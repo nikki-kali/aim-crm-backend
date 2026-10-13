@@ -14,7 +14,8 @@ const REPORT_TYPE = 'content-approval-request'
 const PREVIEW_TO = 'media@aimdentallab.com'
 const LEADERSHIP = {
   to: ['execassistant@aimdentallab.com'],
-  cc: ['ben@aimdentallab.com'],
+  // Stephen Murphy added Oct 13, 2026: he works closely with the lab.
+  cc: ['ben@aimdentallab.com', 'stephenm@aimdentallab.com'],
   bcc: ['media@aimdentallab.com'],
   // Sent from noreply@, so replies (e.g. "approved") would bounce; route them
   // to the media inbox instead.
@@ -50,7 +51,7 @@ const ARTICLES_VERSION = crypto.createHash('sha1').update(ARTICLES_TEMPLATE).dig
 
 function bannerRow(approveUrl) {
   return `<tr><td style="background:#fefaf1;border-bottom:1px solid #fde68a;padding:18px 36px;text-align:center;font-family:Arial,Helvetica,sans-serif">
-    <p style="margin:0 0 10px;font-size:13px;color:#78350f;line-height:1.5">This is a preview. Nothing has been sent to leadership yet.<br>Approving sends it to execassistant@aimdentallab.com, cc ben@aimdentallab.com, bcc media@aimdentallab.com.</p>
+    <p style="margin:0 0 10px;font-size:13px;color:#78350f;line-height:1.5">This is a preview. Nothing has been sent to leadership yet.<br>Approving sends it to execassistant@aimdentallab.com, cc ben@aimdentallab.com and stephenm@aimdentallab.com, bcc media@aimdentallab.com.</p>
     <a href="${approveUrl}" style="display:inline-block;padding:11px 26px;background:#059669;color:#fff;text-decoration:none;font-weight:600;font-size:13.5px;border-radius:10px">Approve &amp; Send &#8594;</a>
     <p style="margin:10px 0 0;font-size:10.5px;color:#92702c">You'll be asked to confirm before anything sends. This link expires in 24 hours and can only be used once.</p>
   </td></tr>`
@@ -143,7 +144,7 @@ async function sendContentApprovalArticlesPreview() {
   await db.query(`update report_approval_tokens set used_at = now() where report_type = $1 and used_at is null`, [ARTICLES_REPORT_TYPE])
   const token = await createApprovalToken({ reportType: ARTICLES_REPORT_TYPE, reportDate: todayEt() })
   const html = ARTICLES_TEMPLATE.replace('<!--APPROVAL_BANNER-->', bannerRow(buildApproveUrl(token)))
-  await sendEmail({ to: PREVIEW_TO, subject: `[Preview] ${ARTICLES_SUBJECT}`, html })
+  await sendEmail({ to: PREVIEW_TO, subject: ARTICLES_SUBJECT, html })
   return { previewTo: PREVIEW_TO }
 }
 
