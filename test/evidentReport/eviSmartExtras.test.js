@@ -100,3 +100,12 @@ test('countEviSmartNewDoctors returns null when the email has no new-doctors tab
   assert.equal(countEviSmartNewDoctors({ newDoctors: null }, 'james', '2026-10-08', '2026-10-05'), null)
   assert.equal(countEviSmartNewDoctors(null, 'james', '2026-10-08', '2026-10-05'), null)
 })
+
+test('the real 9 Oct email: "None this month" spanning the row (in the Code cell) is zero doctors, not one', () => {
+  const OCT9 = fs.readFileSync(path.join(__dirname, 'fixtures/evismart-2026-10-09-none-spans-row.html'), 'utf8')
+  const x = P.extractEviSmartExtras(OCT9)
+  assert.deepEqual(x.newDoctors.william, [])
+  assert.deepEqual(x.newDoctors.james.map((d) => d.name), ['Dr. Idelle Brand'])
+  const goals = [{ repName: 'William Alexander', goals: [{ metric: 'new_doctors', target: '12', current_value: 5, progress_pct: 42 }] }]
+  assert.equal(applyEviSmartNewDoctors(goals, x)[0].goals[0].current_value, 0)
+})

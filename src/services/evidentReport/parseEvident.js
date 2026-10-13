@@ -466,7 +466,9 @@ function extractEviSmartExtras(html) {
     const out = { james: [], william: [] };
     for (const r of rows.slice(1)) {
       const key = /^James/i.test(r[0]) ? 'james' : /^William/i.test(r[0]) ? 'william' : null;
-      if (!key || !r[1] || /^none/i.test(r[2] || '')) continue;
+      // "None this month" can sit in the Doctor cell or, spanning the row, in
+      // the Code cell (9 Oct 2026 email); either way it is zero doctors.
+      if (!key || !r[1] || /^none/i.test(r[1]) || /^none/i.test(r[2] || '')) continue;
       out[key].push({ code: r[1], name: r[2], firstCase: r[3] || null, firstCaseIso: isoFromDayMonthYear(r[3]), cases: Number(r[4]) || 0 });
     }
     return out;
