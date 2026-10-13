@@ -11,6 +11,13 @@ const APPROVAL_POSTS = [
   { id: 'oct23-video', date: '2026-10-23', title: '75 Years: 1951 to 2026 (video)' },
   { id: 'oct27', date: '2026-10-27', title: 'Zirconia or e.max' },
   { id: 'oct31', date: '2026-10-31', title: 'Lab or Natural?' },
+  // Blog articles. `date` is when the article is needed by (the post that
+  // links to it, or its publish date).
+  { id: 'art-7questions', date: '2026-10-16', title: 'Article: 7 Questions to Ask Before You Send a Case', note: 'The Oct 13 post already links to it.' },
+  { id: 'art-guarantee', date: '2026-10-24', title: "Article update: What Happens If a Case Doesn't Fit?" },
+  { id: 'art-zirconia', date: '2026-10-26', title: 'Article: Zirconia or e.max' },
+  { id: 'art-turnaround', date: '2026-10-30', title: 'Article update: Turnaround Times and Our 2% Remake Rate' },
+  { id: 'art-diabetes', date: '2026-11-03', title: 'Article: What Diabetes Means for Restorative Case Planning' },
 ]
 
 // A follow-up only goes out for posts that are coming up soon or missed

@@ -33,13 +33,19 @@ const FOLLOWUP_REPORT_TYPE = 'content-approval-followup'
 const FOLLOWUP_TEMPLATE = fs.readFileSync(path.join(__dirname, 'followupEmail.html'), 'utf8')
 // Bump BUILDER_REV when the wording logic in buildFollowupHtml changes, so the
 // confirm page's version code changes too.
-const BUILDER_REV = 'reschedule-note-1'
+const BUILDER_REV = 'content-wording-2'
 const FOLLOWUP_VERSION = crypto.createHash('sha1').update(FOLLOWUP_TEMPLATE + BUILDER_REV).digest('hex').slice(0, 8)
 // Message-ID of the Oct 8 leadership email (read from the media@ BCC copy).
 // Sending the follow-up with In-Reply-To/References set to it is what puts
 // it in the same thread; a matching subject alone isn't enough for Gmail.
 const ORIGINAL_MESSAGE_ID = '<010001a11a7750db-d48c0c86-f965-44a1-8fca-6c98a4598f74-000000@email.amazonses.com>'
 const REPLY_HEADERS = { 'In-Reply-To': ORIGINAL_MESSAGE_ID, References: ORIGINAL_MESSAGE_ID }
+
+// The articles-for-approval email (plus questions for the lab), sent as a
+// reply in the same leadership thread, with the same preview-first flow.
+const ARTICLES_REPORT_TYPE = 'content-approval-articles'
+const ARTICLES_TEMPLATE = fs.readFileSync(path.join(__dirname, 'articlesEmail.html'), 'utf8')
+const ARTICLES_VERSION = crypto.createHash('sha1').update(ARTICLES_TEMPLATE).digest('hex').slice(0, 8)
 
 function bannerRow(approveUrl) {
   return `<tr><td style="background:#fefaf1;border-bottom:1px solid #fde68a;padding:18px 36px;text-align:center;font-family:Arial,Helvetica,sans-serif">
@@ -85,8 +91,8 @@ async function getFollowupState() {
 function buildFollowupHtml({ total, pendingCount, due }, today = todayEt()) {
   if (!due.length) return null
   const intro = pendingCount === total
-    ? `Just following up on the October social posts. None of the ${total} posts have a decision yet, and these are the most urgent:`
-    : `Just following up on the October social posts. Thank you to everyone who has reviewed so far. ${pendingCount} of the ${total} posts still need a decision, and these are the most urgent:`
+    ? `Just following up on the October content. None of the ${total} items have a decision yet, and these are the most urgent:`
+    : `Just following up on the October content. Thank you to everyone who has reviewed so far. ${pendingCount} of the ${total} items still need a decision, and these are the most urgent:`
   const rows = due.map((p, i) => {
     const last = i === due.length - 1
     const overdue = p.date < today
@@ -130,7 +136,26 @@ async function sendContentApprovalFollowup() {
   return { sent: true }
 }
 
+// Preview of the articles email to the media inbox, threaded under the
+// original request. Earlier unused links for it are cancelled first, so only
+// the newest preview can be approved.
+async function sendContentApprovalArticlesPreview() {
+  await db.query(`update report_approval_tokens set used_at = now() where report_type = $1 and used_at is null`, [ARTICLES_REPORT_TYPE])
+  const token = await createApprovalToken({ reportType: ARTICLES_REPORT_TYPE, reportDate: todayEt() })
+  const html = ARTICLES_TEMPLATE.replace('<!--APPROVAL_BANNER-->', bannerRow(buildApproveUrl(token)))
+  await sendEmail({ to: PREVIEW_TO, subject: `[Preview] ${SUBJECT}`, html, headers: REPLY_HEADERS })
+  return { previewTo: PREVIEW_TO }
+}
+
+async function sendContentApprovalArticles() {
+  await sendEmail({ ...LEADERSHIP, subject: `Re: ${SUBJECT}`, html: ARTICLES_TEMPLATE.replace('<!--APPROVAL_BANNER-->', ''), headers: REPLY_HEADERS })
+}
+
 module.exports = {
+  ARTICLES_REPORT_TYPE,
+  ARTICLES_VERSION,
+  sendContentApprovalArticlesPreview,
+  sendContentApprovalArticles,
   REPORT_TYPE,
   TEMPLATE_VERSION,
   FOLLOWUP_REPORT_TYPE,

@@ -7,7 +7,11 @@ const STATUSES = ['', 'approved', 'edit', 'rejected']
 // Fixed allowlist of review-able posts for the October review. A postId
 // outside this set is rejected rather than silently creating an arbitrary
 // row, since the id also becomes the table's primary key.
-const POST_IDS = ['oct05', 'oct09', 'oct11', 'scanner', 'oct13', 'oct23', 'oct23-video', 'oct27', 'oct31']
+const POST_IDS = [
+  'oct05', 'oct09', 'oct11', 'scanner', 'oct13', 'oct23', 'oct23-video', 'oct27', 'oct31',
+  // Blog articles under review (Marketing OS src/data/articleApprovals.js)
+  'art-7questions', 'art-guarantee', 'art-zirconia', 'art-turnaround', 'art-diabetes',
+]
 
 // The review page is open to anyone with the link (no sign-in required).
 // A valid token, if one is sent, still identifies the reviewer; otherwise
