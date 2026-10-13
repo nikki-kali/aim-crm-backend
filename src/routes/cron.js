@@ -74,6 +74,36 @@ router.post('/evident-email-check', async (req, res) => {
   }
 })
 
+// n8n's "AIM · Error alert" workflow calls this when one of the schedules
+// fails, and the server emails the approver, so n8n needs no email login of
+// its own. Body: { workflow, node, error, url }, all optional text. Must be
+// registered before '/:job'.
+const esc = (v) => String(v == null ? '' : v).slice(0, 2000).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+function buildN8nErrorEmail({ workflow, node, error, url } = {}) {
+  const name = esc(workflow || 'An n8n workflow')
+  return {
+    subject: `n8n problem: ${String(workflow || 'a workflow').slice(0, 150)} failed`,
+    html: `<p>The n8n workflow <b>${name}</b> failed.</p>`
+      + `<p>Step: ${esc(node || 'unknown')}<br>Error: ${esc(error || 'unknown')}</p>`
+      + (url && /^https:\/\//.test(String(url)) ? `<p><a href="${esc(url)}">Open the failed run in n8n</a></p>` : '')
+      + '<p>If this is a 5:30 to 8:00 AM (New York) job, the CRM server may have been asleep or its Gmail access may need renewing. Check before the 7:00 AM leadership send.</p>',
+  }
+}
+const n8nErrorDeps = { send: (msg) => sendEmail({ to: [APPROVER_EMAIL], ...msg }) }
+
+router.post('/n8n-error', async (req, res) => {
+  const secret = process.env.CRON_SECRET
+  if (!secret) return res.status(503).json({ error: 'cron trigger is not configured' })
+  if (!isAuthorized(req.get('x-cron-secret'), secret)) return res.status(401).json({ error: 'unauthorized' })
+  try {
+    await n8nErrorDeps.send(buildN8nErrorEmail(req.body || {}))
+    return res.json({ alerted: true })
+  } catch (err) {
+    console.error('[cron-trigger] n8n error alert email failed:', err)
+    return res.status(502).json({ alerted: false, error: err.message })
+  }
+})
+
 // POST only, secret in a header: a GET reachable from a link could be
 // triggered by an email scanner (see the approval-link GET safety rule).
 router.post('/:job', (req, res) => {
@@ -97,3 +127,5 @@ module.exports = router
 module.exports.isAuthorized = isAuthorized
 module.exports.JOBS = JOBS
 module.exports.emailCheckDeps = emailCheckDeps
+module.exports.buildN8nErrorEmail = buildN8nErrorEmail
+module.exports.n8nErrorDeps = n8nErrorDeps

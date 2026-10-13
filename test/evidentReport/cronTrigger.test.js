@@ -14,7 +14,7 @@ test('cron trigger only accepts the exact secret', () => {
 });
 
 test('cron trigger exposes exactly the daily jobs', () => {
-  assert.deepEqual(Object.keys(cronRoute.JOBS).sort(), ['evident-crm-sync', 'evident-report', 'evident-report-send', 'sales-rep-daily-report', 'whatsapp-post']);
+  assert.deepEqual(Object.keys(cronRoute.JOBS).sort(), ['content-approval-followup', 'evident-crm-sync', 'evident-report', 'evident-report-send', 'sales-rep-daily-report', 'shot-list', 'whatsapp-post']);
 });
 
 test('a job is claimed once per day: first caller runs it, a second is told it already ran', async () => {
@@ -34,4 +34,14 @@ test('if the run record is unreachable the job still runs (a missed report is wo
   const boom = async () => { throw new Error('db down'); };
   assert.equal(await claimJobRun('evident-crm-sync', '2026-09-25', 'cron', boom), true);
   await releaseJobRun('evident-crm-sync', '2026-09-25', boom); // must not throw
+});
+
+test('n8n error alert: names the workflow and step, escapes text, links only https runs', () => {
+  const { subject, html } = cronRoute.buildN8nErrorEmail({ workflow: 'AIM · 6:00 AM Leadership Dashboard preview', node: 'Run leadership preview', error: '<script>x</script> timeout', url: 'https://n8n.workflowautomate.tech/workflow/1/executions/9' });
+  assert.equal(subject, 'n8n problem: AIM · 6:00 AM Leadership Dashboard preview failed');
+  assert.match(html, /Run leadership preview/);
+  assert.match(html, /&lt;script&gt;x&lt;\/script&gt; timeout/);
+  assert.match(html, /href="https:\/\/n8n\.workflowautomate\.tech\/workflow\/1\/executions\/9"/);
+  assert.doesNotMatch(cronRoute.buildN8nErrorEmail({ url: 'javascript:alert(1)' }).html, /href=/);
+  assert.match(cronRoute.buildN8nErrorEmail({}).subject, /a workflow failed/);
 });

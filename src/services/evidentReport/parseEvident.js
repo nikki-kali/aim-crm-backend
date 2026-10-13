@@ -570,6 +570,17 @@ function applyEmailMtdTotals(eviSmart, agg) {
   };
 }
 
+// True unless the email names a month ("month (booking)=October 2026") that
+// differs from runDate's. An email without that line is accepted.
+const MONTH_NAMES = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+function emailMonthMatches(html, runDate) {
+  const text = String(html || '').replace(/<[^>]+>/g, ' ');
+  const m = text.match(/month\s*\((?:booking|invoice)\)\s*=\s*([A-Za-z]+)\s+(\d{4})/i);
+  if (!m) return true;
+  const month = MONTH_NAMES.indexOf(m[1].toLowerCase()) + 1;
+  return `${m[2]}-${String(month).padStart(2, '0')}` === runDate.slice(0, 7);
+}
+
 const EXPECTED = [
   { type: 'dailyBooked', rep: 'james', label: "Daily Booked Cases - James' Doctors" },
   { type: 'dailyBooked', rep: 'william', label: "Daily Booked Cases - William's Doctors" },
@@ -598,6 +609,14 @@ function parseAndAggregate(messages, { runDate } = {}) {
   for (const msg of messages) {
     const cls = classify(msg.subject || '');
     if (cls.type === 'other') continue;
+    // "MTD Booked Daily Update" / "Daily MTD Billed" carry their month in the
+    // body ("month (booking)=October 2026"), fixed on the EviSmart side, so on
+    // 1 November they may still show October. A wrong-month email counts as
+    // not received (N/A), never as this month's figure.
+    if ((cls.type === 'companyMtdBooked' || cls.type === 'companyMtdBilled') && runDate && !emailMonthMatches(msg.html, runDate)) {
+      console.warn(`[evident-report] "${msg.subject}" is for a different month than ${runDate}; ignoring it`);
+      continue;
+    }
 
     const table = parseTable(msg.html || '');
 
@@ -783,4 +802,4 @@ function parseAndAggregate(messages, { runDate } = {}) {
   };
 }
 
-module.exports = { extractEviSmartExtras, pickEviSmartMessageForDate, parseAndAggregate, parseTable, classify, toNum, findCol, rowToObj, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractRepColumns, extractEviSmartTotals, extractEviSmartRepMtd, applyEviSmartMtdFallback, eviSmartSubjectDate, pickEviSmartForDate, repKeyFromSalesperson, applyEmailMtdTotals };
+module.exports = { emailMonthMatches, extractEviSmartExtras, pickEviSmartMessageForDate, parseAndAggregate, parseTable, classify, toNum, findCol, rowToObj, extractDailyBookedCustomerNames, extractCaseTotals, extractBookingRows, extractBilledRows, extractRepColumns, extractEviSmartTotals, extractEviSmartRepMtd, applyEviSmartMtdFallback, eviSmartSubjectDate, pickEviSmartForDate, repKeyFromSalesperson, applyEmailMtdTotals };

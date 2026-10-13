@@ -118,6 +118,23 @@ test('not usable yet (returns null, so nothing is sent with gaps) when the daily
   assert.equal(buildEvidentDay([], RUN), null)
 })
 
+test('1 November: a backup MTD email still showing October is ignored (N/A), never used as November', () => {
+  const { emailMonthMatches, parseAndAggregate } = require('../../src/services/evidentReport/parseEvident')
+  const octBooked = '<p>MTD Booked Daily Update month (booking)=October 2026</p>' + table(['Ref', 'Customer', 'Sales Value (Total)', 'N/A', 'Delaney, James', 'Alexander, WIlliam'], [['A1', 'X', '10', '10', '', ''], ['', '', '170000', '169000', '600', '400']])
+  const octBilled = '<p>Daily MTD Billed month (invoice)=October 2026</p>' + table(['Ref', 'Company', 'Sales Value (Total Billed)', 'N/A', 'Delaney, James', 'Alexander, WIlliam'], [['', '', '180000', '179000', '600', '400']])
+  assert.equal(emailMonthMatches(octBooked, '2026-10-30'), true)
+  assert.equal(emailMonthMatches(octBooked, '2026-11-02'), false)
+  assert.equal(emailMonthMatches('<p>no month line</p>', '2026-11-02'), true)
+  const nov = '2026-11-02'
+  const agg = parseAndAggregate([
+    { subject: 'MTD Booked Daily Update', html: octBooked, date: nov },
+    { subject: 'Daily MTD Billed', html: octBilled, date: nov },
+  ], { runDate: nov })
+  assert.ok(agg.missing.includes('MTD Booked Daily Update'))
+  assert.ok(agg.missing.includes('Daily MTD Total Billed'))
+  assert.equal(agg.companyMtdBooked, 0) // reported as missing, so the report shows N/A
+})
+
 test('emails dated for another day are ignored', () => {
   const old = [bookingReport, billedReport, lmBooked, lmBilled].map((m) => ({ ...m, date: '2026-10-09' }))
   assert.equal(buildEvidentDay(old, RUN), null)

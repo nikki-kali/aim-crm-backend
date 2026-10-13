@@ -1,5 +1,5 @@
 {
-  "name": "AIM \u00b7 Error alert (set as Error Workflow)",
+  "name": "AIM · Error alert (set as Error Workflow)",
   "nodes": [
     {
       "parameters": {},
@@ -7,33 +7,35 @@
       "name": "Error Trigger",
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
-      "position": [
-        260,
-        300
-      ]
+      "position": [260, 300]
     },
     {
       "parameters": {
-        "fromEmail": "REPLACE_ME@yourdomain.com",
-        "toEmail": "adivirtuosity@gmail.com",
-        "subject": "=n8n problem: {{ $json.workflow.name }} failed",
-        "emailFormat": "text",
-        "text": "=The workflow \"{{ $json.workflow.name }}\" failed.\n\nStep: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\nRun: {{ $json.execution.url }}\n\nIf this is a 5:30/6:00 AM job, the server may be asleep or Gmail access may need renewing. Check before the 7:00 AM send."
-      },
-      "id": "err-mail",
-      "name": "Email me",
-      "type": "n8n-nodes-base.emailSend",
-      "typeVersion": 2.1,
-      "position": [
-        560,
-        300
-      ],
-      "credentials": {
-        "smtp": {
-          "id": "REPLACE_ME",
-          "name": "SMTP"
+        "method": "POST",
+        "url": "https://aim-crm-backend.onrender.com/api/cron/n8n-error",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ workflow: $json.workflow.name, node: $json.execution.lastNodeExecuted, error: $json.execution.error.message, url: $json.execution.url }) }}",
+        "options": {
+          "timeout": 180000
         }
-      }
+      },
+      "id": "err-alert",
+      "name": "Ask the CRM server to email me",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [560, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "AIM CRM cron secret"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000
     }
   ],
   "connections": {
@@ -41,7 +43,7 @@
       "main": [
         [
           {
-            "node": "Email me",
+            "node": "Ask the CRM server to email me",
             "type": "main",
             "index": 0
           }
