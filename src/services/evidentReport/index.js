@@ -1,6 +1,7 @@
 const { fetchEvidentEmails, fetchEviSmartEmails } = require('./gmailFetch')
 const { parseAndAggregate, pickEviSmartMessageForDate, extractEviSmartExtras, applyEmailMtdTotals, repKeyFromSalesperson } = require('./parseEvident')
 const { applyEviSmartMtdPrimary, applyEviSmartNewDoctors } = require('./eviSmartPrimary')
+const { buildEvidentDay } = require('./evidentDay')
 const { buildCombinedLeadershipEmail } = require('./buildReport')
 const { getHistory, appendRow } = require('./log')
 const { sendEmail } = require('../email')
@@ -91,7 +92,12 @@ function applyEvidentMtdToGoals(repGoals, mtdByRep) {
 // doctors). Only an email dated for runDate and sent after that day ended
 // counts (see pickEviSmartMessageForDate), never just "the newest one," which
 // could be an early-day pull or a different day's report.
-async function fetchEviSmartDay(runDate) {
+// Since 2026-10-13 the figures come from Evident's own 7 PM emails
+// (evidentDay.js); the old EviSmart email is only a fallback for a day
+// Evident's emails can't cover.
+async function fetchEviSmartDay(runDate, evidentMessages = []) {
+  const fromEvident = buildEvidentDay(evidentMessages, runDate)
+  if (fromEvident) return fromEvident
   const hit = pickEviSmartMessageForDate(await fetchEviSmartEmails(), runDate)
   return { totals: hit ? hit.totals : null, extras: hit ? extractEviSmartExtras(hit.message.html) : null }
 }
@@ -169,7 +175,7 @@ async function runEvidentReport({ requireEviSmart = false } = {}) {
   }
 
   console.log('[evident-report] fetching EviSmart Daily Sales Report...')
-  const eviDay = await fetchEviSmartDay(runDate)
+  const eviDay = await fetchEviSmartDay(runDate, messages)
   const eviSmartRaw = eviDay.totals
   applyEviSmartPrimaryTo(aggregate, eviSmartRaw)
   aggregate.eviSmart = applyEmailMtdTotals(eviSmartRaw, aggregate)
@@ -178,10 +184,11 @@ async function runEvidentReport({ requireEviSmart = false } = {}) {
     console.warn('[evident-report] EviSmart Daily Sales Report unavailable — Daily Billed will show as N/A; every other figure comes from the Evident emails')
   }
 
-  // The automatic send to leadership still requires EviSmart (Daily Billed)
-  // until Elizabeth approves Evident's Daily Billed Report as the source.
+  // The automatic send to leadership waits until the day's report is usable:
+  // since 2026-10-13 that means Evident's daily booked, daily billed and a
+  // month-to-date email are in (evidentDay.js), or the old EviSmart email.
   if (requireEviSmart && !eviSmartRaw) {
-    throw Object.assign(new Error(`[evident-report] no usable EviSmart Daily Sales Report for ${runDate}, not sending to leadership`), { code: 'EVISMART_UNAVAILABLE' })
+    throw Object.assign(new Error(`[evident-report] the day's Evident emails for ${runDate} (daily booked, daily billed and month to date) are not all in yet, not sending to leadership`), { code: 'EVISMART_UNAVAILABLE' })
   }
   // An automatic send never goes out with a month-to-date booked figure that
   // failed the plausibility check: the approver is alerted instead, and can
@@ -253,7 +260,7 @@ async function sendEvidentReportForApproval() {
   const messages = (await fetchEvidentEmails()).filter((m) => m.date === runDate)
   const aggregate = parseAndAggregate(messages, { runDate })
   await applyBookedMtdGuard(aggregate, runDate, (d) => evidentMtdCompanyTotal(d, 'booked'))
-  const eviDay = await fetchEviSmartDay(runDate)
+  const eviDay = await fetchEviSmartDay(runDate, messages)
   const eviSmartRaw = eviDay.totals
   applyEviSmartPrimaryTo(aggregate, eviSmartRaw)
   aggregate.eviSmart = applyEmailMtdTotals(eviSmartRaw, aggregate)

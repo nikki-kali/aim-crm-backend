@@ -58,7 +58,8 @@ function classify(subject) {
   if (/^Cases Currently In Progress/i.test(s)) return { type: 'wip' };
   if (/^Daily Booking Report\s*-\s*Nadine/i.test(s)) return { type: 'companyDailyBooked' };
   if (/^Daily Billed Report\s*-\s*Nadine/i.test(s)) return { type: 'companyDailyBilled' };
-  if (/^Daily MTD Total Billed/i.test(s)) return { type: 'companyMtdBilled' };
+  // Renamed "Daily MTD Billed" in Evident's 13 Oct 2026 schedule; both names count.
+  if (/^Daily MTD (?:Total )?Billed/i.test(s)) return { type: 'companyMtdBilled' };
   if (/^MTD Booked Daily Update/i.test(s)) return { type: 'companyMtdBooked' };
   if (/^YTD Billed Cases\s*-\s*Nadine/i.test(s)) return { type: 'companyYtdBilled' };
   return { type: 'other' };

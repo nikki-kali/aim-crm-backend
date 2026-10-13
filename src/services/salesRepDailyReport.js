@@ -7,6 +7,7 @@ const { APPROVER_EMAIL, createApprovalToken, buildApproveUrl, injectApprovalBann
 const { renderGoalBarsGif } = require('./goalBarGifRenderer')
 const { checkBookedMtd, previousWeekday, sameMonth } = require('./evidentReport/bookedMtdGuard')
 const { countEviSmartNewDoctors } = require('./evidentReport/eviSmartPrimary')
+const { buildEvidentDay } = require('./evidentReport/evidentDay')
 
 // Recipients are the two real AIM reps by email, not a role query — role
 // IN ('staff','sales_rep') would also catch Yoel Klein and the TEST
@@ -140,17 +141,25 @@ async function dailyBookedTotalFor(dateStr) {
   return Math.round(extractBookingRows(m.html).reduce((s, r) => s + (r.value || 0), 0) * 100) / 100
 }
 
-// EviSmart's report for the day (totals and extra tables), cached briefly:
-// every rep and the WhatsApp post ask about the same day.
+// The day's report (totals and extra tables), cached briefly: every rep and
+// the WhatsApp post ask about the same day. Built from Evident's own 7 PM
+// emails since 2026-10-13 (evidentDay.js); the old EviSmart email is only a
+// fallback for a day those can't cover.
 const eviSmartDayCache = new Map()
+async function loadDayReport(dateStr) {
+  const evident = await fetchEvidentEmailsInRange(`after:${gmailDate(dateStr, -1)} before:${gmailDate(dateStr, 2)}`)
+  const built = buildEvidentDay(evident.filter((m) => m.date === dateStr), dateStr)
+  if (built) return built
+  const found = pickEviSmartMessageForDate(await fetchEviSmartEmails(), dateStr)
+  return { totals: found ? found.totals : null, extras: found ? extractEviSmartExtras(found.message.html) : null }
+}
 function eviSmartDayFor(dateStr) {
   const hit = eviSmartDayCache.get(dateStr)
   if (hit && Date.now() - hit.at < MTD_CACHE_MS) return hit.promise
-  const promise = fetchEviSmartEmails().then((msgs) => {
-    const found = pickEviSmartMessageForDate(msgs, dateStr)
+  const promise = loadDayReport(dateStr).then((day) => {
     // "Not here yet" must not be remembered: a later attempt looks again.
-    if (!found) eviSmartDayCache.delete(dateStr)
-    return { totals: found ? found.totals : null, extras: found ? extractEviSmartExtras(found.message.html) : null }
+    if (!day.totals) eviSmartDayCache.delete(dateStr)
+    return day
   })
   eviSmartDayCache.set(dateStr, { at: Date.now(), promise })
   promise.catch(() => eviSmartDayCache.delete(dateStr))
