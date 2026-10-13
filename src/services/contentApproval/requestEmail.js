@@ -41,9 +41,10 @@ const FOLLOWUP_VERSION = crypto.createHash('sha1').update(FOLLOWUP_TEMPLATE + BU
 const ORIGINAL_MESSAGE_ID = '<010001a11a7750db-d48c0c86-f965-44a1-8fca-6c98a4598f74-000000@email.amazonses.com>'
 const REPLY_HEADERS = { 'In-Reply-To': ORIGINAL_MESSAGE_ID, References: ORIGINAL_MESSAGE_ID }
 
-// The articles-for-approval email (plus questions for the lab), sent as a
-// reply in the same leadership thread, with the same preview-first flow.
+// The articles-for-approval email (plus questions for the lab). A new email
+// with its own subject, not a reply in the posts thread; same preview-first flow.
 const ARTICLES_REPORT_TYPE = 'content-approval-articles'
+const ARTICLES_SUBJECT = 'AIM articles ready for your approval, plus a few questions for the lab'
 const ARTICLES_TEMPLATE = fs.readFileSync(path.join(__dirname, 'articlesEmail.html'), 'utf8')
 const ARTICLES_VERSION = crypto.createHash('sha1').update(ARTICLES_TEMPLATE).digest('hex').slice(0, 8)
 
@@ -136,19 +137,18 @@ async function sendContentApprovalFollowup() {
   return { sent: true }
 }
 
-// Preview of the articles email to the media inbox, threaded under the
-// original request. Earlier unused links for it are cancelled first, so only
+// Preview of the articles email to the media inbox. Earlier unused links for it are cancelled first, so only
 // the newest preview can be approved.
 async function sendContentApprovalArticlesPreview() {
   await db.query(`update report_approval_tokens set used_at = now() where report_type = $1 and used_at is null`, [ARTICLES_REPORT_TYPE])
   const token = await createApprovalToken({ reportType: ARTICLES_REPORT_TYPE, reportDate: todayEt() })
   const html = ARTICLES_TEMPLATE.replace('<!--APPROVAL_BANNER-->', bannerRow(buildApproveUrl(token)))
-  await sendEmail({ to: PREVIEW_TO, subject: `[Preview] ${SUBJECT}`, html, headers: REPLY_HEADERS })
+  await sendEmail({ to: PREVIEW_TO, subject: `[Preview] ${ARTICLES_SUBJECT}`, html })
   return { previewTo: PREVIEW_TO }
 }
 
 async function sendContentApprovalArticles() {
-  await sendEmail({ ...LEADERSHIP, subject: `Re: ${SUBJECT}`, html: ARTICLES_TEMPLATE.replace('<!--APPROVAL_BANNER-->', ''), headers: REPLY_HEADERS })
+  await sendEmail({ ...LEADERSHIP, subject: ARTICLES_SUBJECT, html: ARTICLES_TEMPLATE.replace('<!--APPROVAL_BANNER-->', '') })
 }
 
 module.exports = {
