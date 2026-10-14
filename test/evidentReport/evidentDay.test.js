@@ -139,3 +139,26 @@ test('emails dated for another day are ignored', () => {
   const old = [bookingReport, billedReport, lmBooked, lmBilled].map((m) => ({ ...m, date: '2026-10-09' }))
   assert.equal(buildEvidentDay(old, RUN), null)
 })
+
+test('New Doctors names read from the real 13 Oct layout ("CODE - Last, First" under Customer, code under Ref)', () => {
+  const { doctorDisplayName } = require('../../src/services/evidentReport/evidentDay')
+  assert.equal(doctorDisplayName('A1119 - Brand, Idelle'), 'Idelle Brand')
+  assert.equal(doctorDisplayName('A4151 - Dental, Domino'), 'Domino Dental')
+  assert.equal(doctorDisplayName('A1301 - , Dr. KELLY J HWANG'), 'Dr. KELLY J HWANG')
+  assert.equal(doctorDisplayName('A1305 - IZZO,'), 'IZZO')
+  assert.equal(doctorDisplayName('KH2244 - Dental, Suite 905'), 'Suite 905 Dental')
+  const html = table(['Ref', 'Customer', 'First Booking', 'Cases (Total)', 'Sales Value (Total)'],
+    [['A1119', 'A1119 - Brand, Idelle', '2026-10-05', '2', '277.13'], ['A4152', 'A4152 - Manley, Joel', '2026-09-23', '1', '50'], ['', '', '', '3', '327.13']])
+  const j = parseNewDoctors(html, '2026-10-13')
+  assert.deepEqual(j.current.map((d) => [d.code, d.name]), [['A1119', 'Idelle Brand']])
+  assert.deepEqual(j.previous.map((d) => d.name), ['Joel Manley'])
+})
+
+test('Last Month vs MTD real 13 Oct layout: "Month (Booking)" column with "Sep 2026" / "Oct 2026"', () => {
+  const html = table(['Ref', 'Month (Booking)', 'Cases (Total)', 'Sales Value (Total)', 'N/A', 'Delaney, James', 'Alexander, WIlliam'],
+    [['Sep 2026', 'Sep 2026', '1821', '172621.17', '168074.89', '1855.42', '2690.86'], ['Oct 2026', 'Oct 2026', '702', '69432.36', '66477.78', '847.13', '2107.45'], ['', '', '2523', '242053.53', '234552.67', '2702.55', '4798.31']])
+  const b = parseLastMonthVsMtd(html, '2026-10-13', 'booked')
+  assert.equal(b.current.value, 69432.36)
+  assert.equal(b.current.count, 702)
+  assert.equal(b.last.value, 172621.17)
+})

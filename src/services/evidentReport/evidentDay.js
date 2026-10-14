@@ -64,6 +64,18 @@ function parseLastMonthVsMtd(html, runDate, kind) {
   return { last, current }
 }
 
+// Evident's Customer cell is "CODE - Last, First" ("A1119 - Brand, Idelle",
+// "A1301 - , Dr. KELLY J HWANG", "A1305 - IZZO,"). Shown as "Idelle Brand",
+// "Dr. KELLY J HWANG", "IZZO".
+function doctorDisplayName(cell) {
+  const s = String(cell || '').trim().replace(/^[A-Z]{1,3}\d+\s*-\s*/, '')
+  const [last, first] = s.split(/\s*,\s*/, 2).map((p) => (p || '').trim())
+  if (first === undefined) return s
+  if (!last) return first
+  if (!first) return last
+  return `${first} ${last}`
+}
+
 // "New Doctors - James/William": one row per doctor with First Booking
 // (YYYY-MM-DD), Cases (Total) and Sales Value (Total), newest first. Returns
 // the doctors whose first booking falls in runDate's month and in the month
@@ -74,7 +86,7 @@ function parseNewDoctors(html, runDate) {
   const { headers, rows } = table
   const firstCol = findCol(headers, 'First Booking')
   if (!firstCol) return null
-  const codeCol = findCol(headers, 'Customer Code') || findCol(headers, 'Code')
+  const codeCol = findCol(headers, 'Customer Code') || findCol(headers, 'Code') || headers.find((h) => /^ref$/i.test(h))
   const nameCol = headers.find((h) => /customer name|doctor|^customer$/i.test(h) && !/case number/i.test(h))
   const casesCol = findCol(headers, 'Cases (Total)')
   const thisMonth = runDate.slice(0, 7)
@@ -89,7 +101,7 @@ function parseNewDoctors(html, runDate) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(iso) || iso > runDate) continue
     const doctor = {
       code: codeCol ? String(obj[codeCol] || '').trim() : '',
-      name: nameCol ? String(obj[nameCol] || '').trim() : '',
+      name: nameCol ? doctorDisplayName(obj[nameCol]) : '',
       firstCase: iso,
       firstCaseIso: iso,
       cases: casesCol ? toNum(obj[casesCol]) : 0,
@@ -180,4 +192,4 @@ function buildEvidentDay(messages, runDate) {
   return { totals, extras }
 }
 
-module.exports = { buildEvidentDay, parseLastMonthVsMtd, parseNewDoctors, dailyCustomersFrom, monthIndexFromCell }
+module.exports = { doctorDisplayName, buildEvidentDay, parseLastMonthVsMtd, parseNewDoctors, dailyCustomersFrom, monthIndexFromCell }
