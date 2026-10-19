@@ -63,6 +63,7 @@ app.use('/api/scan-submission', scanSubmissionRoutes) // public — "Submit a Sc
 app.use('/api/verify-email', verifyEmailRoutes) // public — first-time-email gate for Schedule Pickup / Submit a Scanned Case
 app.use('/api/office-visits', officeVisitsRoutes) // public — Office Visit request form + approve/suggest-time confirm links
 app.use('/api/partner-meetings', partnerMeetingsRoutes) // public — partner meeting request form + Ben's approve / call-first links
+app.use('/api/growth-audit', require('./routes/growthAudit')) // public: website Growth Audit assessment (/partner), emails the report
 
 // FRONTEND_URL supports a comma-separated list so both the stable Vercel
 // domain and a custom domain can be allowed at once (e.g. while DNS for a
