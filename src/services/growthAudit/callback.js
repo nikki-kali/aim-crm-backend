@@ -65,13 +65,19 @@ function zonedTime(dateStr, hour, tz) {
 // Returns a validated booking, or null when the date/window aren't allowed:
 // must be a weekday, after today in the practice's zone, within three weeks.
 function parseCallback({ date, window, repId, now = new Date() }) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) return null
+  date = String(date || '')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null
+  // Round-trip the date so impossible ones ("2026-02-30", "2026-10-99") are
+  // rejected here instead of producing an Invalid Date downstream.
+  const noon = new Date(`${date}T12:00:00Z`)
+  if (Number.isNaN(noon.getTime()) || noon.toISOString().slice(0, 10) !== date) return null
+  // Own-property lookup only, so "__proto__" or "toString" can't pass.
+  if (!Object.prototype.hasOwnProperty.call(WINDOWS, String(window))) return null
   const win = WINDOWS[window]
-  if (!win) return null
   const tz = timezoneFor(repId)
   const today = todayIn(tz, now)
   if (date <= today || date > addDays(today, MAX_DAYS_AHEAD)) return null
-  const weekday = new Date(`${date}T12:00:00Z`).getUTCDay()
+  const weekday = noon.getUTCDay()
   if (weekday === 0 || weekday === 6) return null
   return {
     date,
@@ -94,8 +100,16 @@ function describeCallback(cb) {
 const icsDate = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
 
 // RFC 5545 text escaping and 75-octet line folding.
+// Drops other control characters (which could break the file's line
+// structure) and normalizes every line-break style to the escaped \n.
 function icsText(value) {
-  return String(value ?? '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n')
+  return String(value ?? '')
+    .replace(/\r\n|\r|\n/g, '\n')
+    .replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, '')
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\n/g, '\\n')
 }
 function fold(line) {
   const out = []
@@ -120,7 +134,7 @@ function icsEvent({ uid, start, end, summary, description, location, alarmMinute
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     'BEGIN:VEVENT',
-    `UID:${uid}`,
+    `UID:${String(uid).replace(/[^A-Za-z0-9@._-]/g, '')}`,
     `DTSTAMP:${icsDate(new Date())}`,
     `DTSTART:${icsDate(start)}`,
     `DTEND:${icsDate(end)}`,

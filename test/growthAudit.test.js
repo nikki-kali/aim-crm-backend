@@ -104,3 +104,29 @@ test('rep notification leads with the booked call-back, or says to call next bus
   assert.ok(none.includes('the next business day'))
   assert.ok(!none.includes('attached calendar invite'))
 })
+
+test('security: impossible dates and prototype keys are rejected, never thrown', () => {
+  for (const date of ['2026-10-99', '2026-02-30', '2026-13-01', '0000-00-00']) {
+    assert.strictEqual(parseCallback({ date, window: 'morning', repId: 'james', now: NOW }), null, date)
+  }
+  for (const window of ['__proto__', 'toString', 'constructor', 'hasOwnProperty']) {
+    assert.strictEqual(parseCallback({ date: '2026-10-21', window, repId: 'james', now: NOW }), null, window)
+  }
+})
+
+test('security: control characters cannot break the invite structure', () => {
+  const cb = parseCallback({ date: '2026-10-21', window: 'morning', repId: 'james', now: NOW })
+  const ics = icsEvent({
+    uid: 'x@aim\r\nATTENDEE:evil@example.com',
+    start: cb.start,
+    end: cb.end,
+    summary: 'Dr A\rBEGIN:VEVENT\u0000\u000b',
+    description: 'one\r\ntwo\rthree',
+    location: '555',
+  }).toString()
+  const lines = ics.split('\r\n')
+  assert.strictEqual(lines.filter((l) => l === 'BEGIN:VEVENT').length, 1)
+  assert.ok(!lines.some((l) => l.startsWith('ATTENDEE')))
+  assert.ok(!/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(ics))
+  assert.ok(ics.includes('DESCRIPTION:one\\ntwo\\nthree'))
+})

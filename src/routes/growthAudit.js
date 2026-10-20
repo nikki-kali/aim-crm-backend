@@ -127,7 +127,13 @@ router.post('/', rateLimiter({ windowMs: 10 * 60 * 1000, max: 6 }), async (req, 
     // The booked call-back, in the practice's time zone (from the rep's
     // territory). An invalid or stale slot (an old browser tab, say) never
     // loses the lead: it's saved without one and flagged for a manual call.
-    const callback = parseCallback({ date: body.callbackDate, window: body.callbackWindow, repId })
+    let callback = null
+    try {
+      callback = parseCallback({ date: body.callbackDate, window: body.callbackWindow, repId })
+    } catch (err) {
+      // Best-effort: a bad slot must never stop the lead being saved.
+      console.error('growth-audit: unusable call-back slot', err?.message)
+    }
     const callbackText = callback ? describeCallback(callback) : 'not booked (invalid or missing slot), call the next business day'
 
     const notes = [
