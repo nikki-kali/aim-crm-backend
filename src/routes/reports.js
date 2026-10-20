@@ -14,7 +14,7 @@ const {
   REPORT_CC: DAILY_REPORT_CC,
 } = require('../services/salesRepDailyReport')
 const { runEvidentReport, sendEvidentReportForApproval } = require('../services/evidentReport')
-const { APPROVER_EMAIL, peekApprovalToken, consumeApprovalToken } = require('../services/reportApproval')
+const { STALE_CLAIM_MINUTES, APPROVER_EMAIL, peekApprovalToken, consumeApprovalToken, markApprovalTokenSent, peekStaleUnsentClaim, claimFreshPreview } = require('../services/reportApproval')
 const contentApprovalRequest = require('../services/contentApproval/requestEmail')
 const { getCompanyTotalRevenue } = require('../services/clientRevenue')
 const { resolveViewableRepId, fetchRepQ4Progress } = require('../services/repProgress')
@@ -602,7 +602,11 @@ router.get('/approve', rateLimiter({ windowMs: 10 * 60 * 1000, max: 20 }), async
     if (!token) return res.status(400).send(resultPage('Missing link', 'This approval link is missing its token.', false))
 
     const claim = await peekApprovalToken(token)
-    if (!claim) return res.status(410).send(resultPage('Link expired or already used', EXPIRED_MESSAGE, false))
+    if (!claim) {
+      const stale = await peekStaleUnsentClaim(token)
+      if (stale && FRESH_PREVIEW_TYPES.includes(stale.report_type)) return res.send(freshPreviewPage(token))
+      return res.status(410).send(resultPage('Link expired or already used', EXPIRED_MESSAGE, false))
+    }
 
     const desc = await describeClaimForConfirmation(claim)
     if (!desc) return res.status(400).send(resultPage('Unknown report', 'This link points to a report this server no longer recognizes.', false))
@@ -626,46 +630,92 @@ router.get('/approve', rateLimiter({ windowMs: 10 * 60 * 1000, max: 20 }), async
 // before interpolation rather than trusted.
 router.post('/approve', rateLimiter({ windowMs: 10 * 60 * 1000, max: 20 }), async (req, res) => {
   try {
-    const { token } = req.body
+    const { token } = req.body || {}
     if (!token) return res.status(400).send(resultPage('Missing link', 'This approval link is missing its token.', false))
 
     const claim = await consumeApprovalToken(token)
     if (!claim) return res.status(410).send(resultPage('Link expired or already used', EXPIRED_MESSAGE, false))
 
-    if (claim.report_type === 'evident-report') {
-      await runEvidentReport()
-      return res.send(resultPage('Sent!', 'The Daily Leadership Dashboard has been sent to leadership.', true))
-    }
+    const result = await sendApprovedReport(claim)
+    // Only a marker for the fresh-preview offer; it never allows a re-send.
+    await markApprovalTokenSent(token).catch((err) => console.error('[reports] could not mark approval link as sent:', err))
+    return res.status(result.status || 200).send(resultPage(result.title, result.message, result.ok))
+  } catch (err) {
+    console.error('[reports] approval send failed:', err)
+    // The link stays used: part of the send may already have gone out, so it
+    // is never re-run from here. If nothing went out, opening the link again
+    // in a few minutes offers a fresh preview instead.
+    return res.status(500).send(resultPage('Something went wrong', `The report may not have been sent. Check the recipients' inbox before doing anything else. If it was not sent, open the approval link again in ${STALE_CLAIM_MINUTES} minutes to get a fresh preview. ${err.message || ''}`, false))
+  }
+})
 
+// Report types whose preview can be re-created for the approver.
+const FRESH_PREVIEW_TYPES = ['sales-rep-daily-report', 'evident-report']
+const freshPreviewPage = (token) => `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Send didn't finish</title></head>
+<body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7faf9;padding:60px 20px;text-align:center">
+  <div style="max-width:420px;margin:0 auto;background:#fff;border-radius:16px;padding:36px 30px;box-shadow:0 4px 20px rgba(0,0,0,.06)">
+    <div style="font-size:34px;margin-bottom:12px">⏳</div>
+    <h1 style="margin:0 0 10px;font-size:19px;color:#10353f">This send didn't finish</h1>
+    <p style="margin:0 0 22px;font-size:14px;color:#5b7a86;line-height:1.5">This link was clicked, but the report was never sent (for example, the server restarted). Nothing went out. Get a fresh preview in your inbox and approve that one.</p>
+    <form method="POST" action="/api/reports/approve/fresh-preview">
+      <input type="hidden" name="token" value="${escapeHtml(token)}">
+      <button type="submit" style="display:inline-block;padding:12px 28px;background:#207290;color:#fff;border:none;font-weight:600;font-size:14px;border-radius:10px;font-family:-apple-system,sans-serif;cursor:pointer">Email me a fresh preview</button>
+    </form>
+  </div>
+</body></html>`
+
+// POST /api/reports/approve/fresh-preview — public, like /approve. For a
+// clicked link whose send never finished: emails a NEW approval preview to
+// the approver only (never to the report's recipients). Taken once.
+router.post('/approve/fresh-preview', rateLimiter({ windowMs: 10 * 60 * 1000, max: 10 }), async (req, res) => {
+  try {
+    const { token } = req.body || {}
+    if (!token) return res.status(400).send(resultPage('Missing link', 'This approval link is missing its token.', false))
+    const claim = await claimFreshPreview(token)
+    if (!claim || !FRESH_PREVIEW_TYPES.includes(claim.report_type)) return res.status(410).send(resultPage('Link expired or already used', EXPIRED_MESSAGE, false))
     if (claim.report_type === 'sales-rep-daily-report') {
       const { rows } = await db.query(`SELECT id, name, email FROM users WHERE id=$1`, [claim.rep_id])
       if (!rows[0]) return res.status(404).send(resultPage('Rep not found', 'The rep this report was for no longer exists.', false))
-      await sendRepDailyReport(rows[0], { dateStr: claim.report_date })
-      return res.send(resultPage('Sent!', `${rows[0].name || rows[0].email}'s Daily Sales Report has been sent.`, true))
+      await sendRepDailyReportForApproval(rows[0], claim.report_date)
+    } else {
+      await sendEvidentReportForApproval()
     }
-
-    if (claim.report_type === contentApprovalRequest.ARTICLES_REPORT_TYPE) {
-      await contentApprovalRequest.sendContentApprovalArticles()
-      return res.send(resultPage('Sent!', 'The articles email has been sent to leadership.', true))
-    }
-
-    if (claim.report_type === contentApprovalRequest.FOLLOWUP_REPORT_TYPE) {
-      const result = await contentApprovalRequest.sendContentApprovalFollowup()
-      if (!result.sent) return res.send(resultPage('Nothing to send', 'Every upcoming post already has a decision, so no follow-up was sent.', true))
-      return res.send(resultPage('Sent!', 'The follow-up has been sent to leadership.', true))
-    }
-
-    if (claim.report_type === contentApprovalRequest.REPORT_TYPE) {
-      await contentApprovalRequest.sendContentApprovalRequest()
-      return res.send(resultPage('Sent!', 'The content approval request has been sent to leadership.', true))
-    }
-
-    return res.status(400).send(resultPage('Unknown report type', 'This link points to a report type this server no longer recognizes.', false))
+    return res.send(resultPage('Fresh preview sent', `A new preview is on its way to ${APPROVER_EMAIL}. Approve that one.`, true))
   } catch (err) {
-    console.error('[reports] approval send failed:', err)
-    return res.status(500).send(resultPage('Something went wrong', `The report could not be sent. ${err.message || ''}`, false))
+    console.error('[reports] fresh preview failed:', err)
+    return res.status(500).send(resultPage('Something went wrong', `Couldn't send a fresh preview. ${err.message || ''}`, false))
   }
 })
+
+// Runs the real send for a claimed approval link. Returns the page to show.
+async function sendApprovedReport(claim) {
+  if (claim.report_type === 'evident-report') {
+    await runEvidentReport()
+    return { ok: true, title: 'Sent!', message: 'The Daily Leadership Dashboard has been sent to leadership.' }
+  }
+  if (claim.report_type === 'sales-rep-daily-report') {
+    const { rows } = await db.query(`SELECT id, name, email FROM users WHERE id=$1`, [claim.rep_id])
+    if (!rows[0]) return { ok: false, status: 404, title: 'Rep not found', message: 'The rep this report was for no longer exists.' }
+    await sendRepDailyReport(rows[0], { dateStr: claim.report_date })
+    return { ok: true, title: 'Sent!', message: `${rows[0].name || rows[0].email}'s Daily Sales Report has been sent.` }
+  }
+  if (claim.report_type === contentApprovalRequest.ARTICLES_REPORT_TYPE) {
+    await contentApprovalRequest.sendContentApprovalArticles()
+    return { ok: true, title: 'Sent!', message: 'The articles email has been sent to leadership.' }
+  }
+  if (claim.report_type === contentApprovalRequest.FOLLOWUP_REPORT_TYPE) {
+    const result = await contentApprovalRequest.sendContentApprovalFollowup()
+    if (!result.sent) return { ok: true, title: 'Nothing to send', message: 'Every upcoming post already has a decision, so no follow-up was sent.' }
+    return { ok: true, title: 'Sent!', message: 'The follow-up has been sent to leadership.' }
+  }
+  if (claim.report_type === contentApprovalRequest.REPORT_TYPE) {
+    await contentApprovalRequest.sendContentApprovalRequest()
+    return { ok: true, title: 'Sent!', message: 'The content approval request has been sent to leadership.' }
+  }
+  return { ok: false, status: 400, title: 'Unknown report type', message: 'This link points to a report type this server no longer recognizes.' }
+}
 
 // GET /api/reports/my-summary/csv — rep leads as downloadable CSV
 router.get('/my-summary/csv', auth, async (req, res, next) => {

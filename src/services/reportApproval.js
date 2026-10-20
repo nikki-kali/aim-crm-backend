@@ -55,26 +55,57 @@ function escapeHtml(str) {
 // report — before the human ever clicked anything. Only the POST (backed
 // by consumeApprovalToken below, triggered solely by a real click on the
 // confirmation page's button) actually claims the token.
-async function peekApprovalToken(token) {
-  const { rows } = await db.query(
-    `SELECT report_type, rep_id, to_char(report_date, 'YYYY-MM-DD') AS report_date
-     FROM report_approval_tokens
+// Single use, fail closed (never sends twice): a link is usable only while
+// unexpired and unclicked. A click that never finished sending (the server
+// restarted mid-send, 20 Oct 2026) does NOT revive the link; once
+// STALE_CLAIM_MINUTES have passed without sent_at, the link instead offers
+// a fresh preview to the approver's own inbox (claimFreshPreview), which
+// is approved as usual. sent_at is only a marker for that offer, never a
+// condition for sending.
+const STALE_CLAIM_MINUTES = 10
+const run = (sql, params) => db.query(sql, params)
+const CLAIM_FIELDS = `report_type, rep_id, to_char(report_date, 'YYYY-MM-DD') AS report_date`
+const STALE_UNSENT = `expires_at > NOW() AND used_at IS NOT NULL AND sent_at IS NULL
+  AND used_at < NOW() - make_interval(mins => ${STALE_CLAIM_MINUTES})`
+
+async function peekApprovalToken(token, query = run) {
+  const { rows } = await query(
+    `SELECT ${CLAIM_FIELDS} FROM report_approval_tokens
      WHERE token = $1 AND used_at IS NULL AND expires_at > NOW()`,
     [token]
   )
   return rows[0] || null
 }
 
-// Atomic claim: only succeeds once per token, even under a double-click
-// or the link being opened twice — the UPDATE's WHERE clause (unused,
-// unexpired) means a second attempt matches zero rows and this returns
-// null rather than re-running a real send.
-async function consumeApprovalToken(token) {
-  const { rows } = await db.query(
-    `UPDATE report_approval_tokens
-     SET used_at = NOW()
+// Atomic claim: a double-click or the page opened twice matches zero rows
+// the second time, so it returns null rather than running the send twice.
+async function consumeApprovalToken(token, query = run) {
+  const { rows } = await query(
+    `UPDATE report_approval_tokens SET used_at = NOW()
      WHERE token = $1 AND used_at IS NULL AND expires_at > NOW()
-     RETURNING report_type, rep_id, to_char(report_date, 'YYYY-MM-DD') AS report_date`,
+     RETURNING ${CLAIM_FIELDS}`,
+    [token]
+  )
+  return rows[0] || null
+}
+
+// Called once the report has actually gone out.
+async function markApprovalTokenSent(token, query = run) {
+  await query(`UPDATE report_approval_tokens SET sent_at = NOW() WHERE token = $1`, [token])
+}
+
+// A clicked link whose send never finished, or null. Read-only.
+async function peekStaleUnsentClaim(token, query = run) {
+  const { rows } = await query(`SELECT ${CLAIM_FIELDS} FROM report_approval_tokens WHERE token = $1 AND ${STALE_UNSENT}`, [token])
+  return rows[0] || null
+}
+
+// Atomically takes the one fresh-preview offer for such a link (sets
+// sent_at so it can't be taken twice). The caller only ever sends a new
+// approval PREVIEW to the approver, never the report itself.
+async function claimFreshPreview(token, query = run) {
+  const { rows } = await query(
+    `UPDATE report_approval_tokens SET sent_at = NOW() WHERE token = $1 AND ${STALE_UNSENT} RETURNING ${CLAIM_FIELDS}`,
     [token]
   )
   return rows[0] || null
@@ -108,6 +139,10 @@ module.exports = {
   createApprovalToken,
   peekApprovalToken,
   consumeApprovalToken,
+  markApprovalTokenSent,
+  peekStaleUnsentClaim,
+  claimFreshPreview,
+  STALE_CLAIM_MINUTES,
   buildApproveUrl,
   injectApprovalBanner,
 }

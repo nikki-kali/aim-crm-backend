@@ -59,3 +59,24 @@ test('injectApprovalBanner adds the Approve & Send button to the real Sales Rep 
   assert.match(bannered, /Approve &amp; Send/);
   assert.ok(bannered.indexOf('Approve &amp; Send') < bannered.indexOf('James Delaney &nbsp;'));
 });
+
+test('approval links fail closed: single use, no revival; only a stale unsent click offers a fresh preview (taken once)', async () => {
+  const A = require('../src/services/reportApproval');
+  const seen = [];
+  const query = async (sql) => { seen.push(sql); return { rows: [] }; };
+  await A.peekApprovalToken('t', query);
+  await A.consumeApprovalToken('t', query);
+  for (const sql of seen) {
+    assert.match(sql, /used_at IS NULL AND expires_at > NOW\(\)/); // only an unclicked link can send
+    assert.doesNotMatch(sql, /make_interval/); // never revived by time
+  }
+  seen.length = 0;
+  await A.peekStaleUnsentClaim('t', query);
+  await A.claimFreshPreview('t', query);
+  for (const sql of seen) {
+    assert.match(sql, /used_at IS NOT NULL AND sent_at IS NULL/);
+    assert.match(sql, new RegExp(`used_at < NOW\\(\\) - make_interval\\(mins => ${A.STALE_CLAIM_MINUTES}\\)`));
+  }
+  assert.match(seen[1], /UPDATE report_approval_tokens SET sent_at = NOW\(\)/); // the offer can be taken once
+  assert.equal(A.releaseApprovalToken, undefined); // a used link is never given back
+});
