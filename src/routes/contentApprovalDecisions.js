@@ -9,6 +9,7 @@ const STATUSES = ['', 'approved', 'edit', 'rejected']
 // row, since the id also becomes the table's primary key.
 const POST_IDS = [
   'oct05', 'oct09', 'oct11', 'scanner', 'oct13', 'oct23', 'oct23-video', 'oct27', 'oct31',
+  'oct21-howto-reel',
   // Blog articles under review (Marketing OS src/data/articleApprovals.js)
   'art-7questions', 'art-guarantee', 'art-zirconia', 'art-turnaround', 'art-diabetes',
 ]

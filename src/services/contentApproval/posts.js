@@ -8,6 +8,7 @@ const APPROVAL_POSTS = [
   { id: 'oct13', date: '2026-10-13', title: '7 Questions to Ask Before Choosing a Lab' },
   { id: 'oct09', date: '2026-10-15', title: 'Team Shout-Out' },
   { id: 'scanner', date: '2026-10-17', title: 'Scanner (carousel)' },
+  { id: 'oct21-howto-reel', date: '2026-10-21', title: 'How to Send Us a Case (reel)' },
   { id: 'oct23-video', date: '2026-10-23', title: '75 Years: 1951 to 2026 (video)' },
   { id: 'oct27', date: '2026-10-27', title: 'Zirconia or e.max' },
   { id: 'oct31', date: '2026-10-31', title: 'Lab or Natural?' },
