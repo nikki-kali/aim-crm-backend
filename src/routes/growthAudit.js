@@ -8,6 +8,7 @@ const rateLimiter = require('../middleware/rateLimiter')
 const { remakeCost, money } = require('../services/growthAudit/calc')
 const { writeReport } = require('../services/growthAudit/report')
 const { reportEmail, leadNotificationEmail } = require('../services/growthAudit/email')
+const { parseCallback, describeCallback, icsEvent } = require('../services/growthAudit/callback')
 
 // POST /api/growth-audit: the website's Growth Audit assessment (/partner).
 //
@@ -123,8 +124,15 @@ router.post('/', rateLimiter({ windowMs: 10 * 60 * 1000, max: 6 }), async (req, 
     }
     const contact = contactFor(repId, user)
 
+    // The booked call-back, in the practice's time zone (from the rep's
+    // territory). An invalid or stale slot (an old browser tab, say) never
+    // loses the lead: it's saved without one and flagged for a manual call.
+    const callback = parseCallback({ date: body.callbackDate, window: body.callbackWindow, repId })
+    const callbackText = callback ? describeCallback(callback) : 'not booked (invalid or missing slot), call the next business day'
+
     const notes = [
       `AIM rep: ${contact.name} (${routing})`,
+      `Call-back booked: ${callbackText}`,
       lead.address ? `Practice address: ${lead.address}` : '',
       `Growth Audit: ${cost.inputs.units} units/month, ${cost.inputs.remakes} remakes/month, ${cost.inputs.minutes} min per remake at ${money(cost.inputs.hourValue)}/hr, lab remake fee ${cost.inputs.labFee ? money(cost.inputs.labFee) : 'none'}.`,
       `Estimated yearly remake cost: ${money(cost.total)}.`,
@@ -155,28 +163,78 @@ router.post('/', rateLimiter({ windowMs: 10 * 60 * 1000, max: 6 }), async (req, 
     )
     const leadId = rows[0].id
 
-    res.json({ success: true, id: leadId, rep: user ? { name: contact.name, email: contact.email } : null })
+    res.json({
+      success: true,
+      id: leadId,
+      rep: user ? { name: contact.name, email: contact.email } : null,
+      callback: callback ? describeCallback(callback) : null,
+    })
 
     // After responding: the report can take a while to write.
     setImmediate(async () => {
       const { report, source } = await writeReport({ cost, pains: lead.pains, interest: lead.interest, message: lead.message, practice: lead.practice })
+      const repFirst = contact.firstName === 'the AIM team' ? 'AIM' : contact.firstName
       try {
         await sendEmail({
           to: lead.email,
           bcc: process.env.GROWTH_AUDIT_EMAIL || 'media@aimdentallab.com',
           replyTo: contact.email || 'media@aimdentallab.com',
           subject: `Your Growth Audit report: remakes are costing you about ${money(cost.total)} a year`,
-          html: reportEmail({ practice: lead.practice, cost, report, contact, repId }),
+          html: reportEmail({ practice: lead.practice, cost, report, contact, callback: callback ? describeCallback(callback) : null }),
+          // The practice's own invite: the whole window, so they expect the call.
+          attachments: callback
+            ? [{
+                filename: 'aim-call-back.ics',
+                contentType: 'text/calendar',
+                content: icsEvent({
+                  uid: `growth-audit-${leadId}-practice@aimdentallab.com`,
+                  start: callback.start,
+                  end: callback.end,
+                  summary: `Call from ${contact.name}, AIM Dental Laboratory`,
+                  description: `${contact.name} will call you about your Growth Audit results, ${describeCallback(callback)}. Questions before then? ${contact.phone}`,
+                  location: contact.phone,
+                }),
+              }]
+            : undefined,
         })
       } catch (err) {
         console.error('growth-audit: report email failed', err)
       }
       try {
+        // To the rep directly (with the call in their calendar), copied to
+        // media@. With no rep matched it goes to media@ for manual assignment.
+        const repEmail = contact.email && contact.email !== 'digital@aimdentallab.com' ? contact.email : null
+        const salesInbox = process.env.GROWTH_AUDIT_EMAIL || 'media@aimdentallab.com'
         await sendEmail({
-          to: process.env.GROWTH_AUDIT_EMAIL || 'media@aimdentallab.com',
-          cc: contact.email && contact.email !== 'digital@aimdentallab.com' ? [contact.email] : undefined,
-          subject: `New Growth Audit lead: ${lead.name}, ${lead.practice} (${money(cost.total)}/yr in remakes)`,
-          html: leadNotificationEmail({ leadId, lead, cost, contact, routing, reportSource: source }),
+          to: repEmail || salesInbox,
+          cc: repEmail ? [salesInbox] : undefined,
+          subject: callback
+            ? `Call-back booked ${callback.dayLabel}, ${callback.short}: ${lead.name}, ${lead.practice} (${money(cost.total)}/yr in remakes)`
+            : `Growth Audit lead, call next business day: ${lead.name}, ${lead.practice}`,
+          html: leadNotificationEmail({ leadId, lead, cost, contact, routing, reportSource: source, callbackText, callbackBooked: Boolean(callback) }),
+          // The rep's invite: a 30-minute hold at the start of the window,
+          // with a reminder 15 minutes before.
+          attachments: callback
+            ? [{
+                filename: 'growth-audit-call-back.ics',
+                contentType: 'text/calendar',
+                content: icsEvent({
+                  uid: `growth-audit-${leadId}-rep@aimdentallab.com`,
+                  start: callback.start,
+                  end: new Date(callback.start.getTime() + 30 * 60000),
+                  summary: `${repFirst}: call ${lead.name}, ${lead.practice} (Growth Audit)`,
+                  description: [
+                    `Call-back window: ${describeCallback(callback)}`,
+                    `Phone: ${lead.phone}`,
+                    `Email: ${lead.email}`,
+                    `Yearly remake cost: ${money(cost.total)} (${cost.annualRemakes} remakes a year)`,
+                    lead.pains.length ? `Problems: ${lead.pains.join(', ')}` : '',
+                    `CRM lead #${leadId}`,
+                  ].filter(Boolean).join('\n'),
+                  location: lead.phone,
+                }),
+              }]
+            : undefined,
         })
       } catch (err) {
         console.error('growth-audit: lead notification failed', err)

@@ -70,8 +70,9 @@ function button(href, label, bg = DEEP, color = '#ffffff') {
   return `<a href="${esc(href)}" style="display:inline-block;background:${bg};color:${color};font:bold 15px Arial,sans-serif;text-decoration:none;padding:14px 26px;border-radius:999px">${esc(label)}</a>`
 }
 
-function reportEmail({ practice, cost, report, contact, repId }) {
-  const bookUrl = siteUrl('/book-a-call', 'cta-book-call', repId ? { rep: repId } : {})
+// `callback` is the booked slot as text ("Tuesday, October 21, in the
+// morning (8 to 11 am ET)"), or null if none was booked.
+function reportEmail({ practice, cost, report, contact, callback }) {
   const sections = report.sections
     .map(
       (s) => `
@@ -120,10 +121,10 @@ function reportEmail({ practice, cost, report, contact, repId }) {
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${MIST};border-radius:14px;margin:32px 0 0"><tr><td style="padding:26px">
       <p style="margin:0 0 6px;font:normal 24px Georgia,serif;color:${INK}">Talk it through with ${esc(contact.firstName)}</p>
-      <p style="margin:0 0 16px;font:15px/1.6 Arial,sans-serif;color:${INK}">${esc(contact.name)}${contact.region ? `, your AIM rep for the ${esc(contact.region)},` : ''} will call you within one business day. Rather not wait?</p>
+      <p style="margin:0 0 16px;font:15px/1.6 Arial,sans-serif;color:${INK}">${esc(contact.name)}${contact.region ? `, your AIM rep for the ${esc(contact.region)},` : ''} ${callback ? `will call you <b>${esc(callback)}</b>. It's in the calendar invite attached to this email.` : 'will call you within one business day.'} Rather not wait?</p>
       <p style="margin:0 0 4px;font:15px Arial,sans-serif;color:${INK}"><b>Phone:</b> <a href="tel:${esc(contact.phoneTel)}" style="color:${DEEP}">${esc(contact.phone)}</a></p>
       ${contact.email ? `<p style="margin:0 0 18px;font:15px Arial,sans-serif;color:${INK}"><b>Email:</b> <a href="mailto:${esc(contact.email)}" style="color:${DEEP}">${esc(contact.email)}</a></p>` : '<p style="margin:0 0 18px"></p>'}
-      ${button(bookUrl, 'Book a 20-minute call')}
+      ${button(`tel:${contact.phoneTel}`, `Call ${contact.firstName === 'the AIM team' ? 'the lab' : contact.firstName} now`)}
     </td></tr></table>
 
     <p style="margin:24px 0 0;font:12px/1.5 Arial,sans-serif;color:${SLATE}">
@@ -141,12 +142,13 @@ function reportEmail({ practice, cost, report, contact, repId }) {
 }
 
 // Internal notification: scannable, key numbers in bold.
-function leadNotificationEmail({ leadId, lead, cost, contact, routing, reportSource }) {
+function leadNotificationEmail({ leadId, lead, cost, contact, routing, reportSource, callbackText, callbackBooked = Boolean(callbackText) }) {
   const row = (k, v) => `<tr><td style="padding:4px 12px 4px 0;font:14px Arial,sans-serif;color:${SLATE};white-space:nowrap">${esc(k)}</td><td style="padding:4px 0;font:14px Arial,sans-serif;color:${INK}">${v}</td></tr>`
   return `<!DOCTYPE html><html><body style="margin:0;padding:24px;background:#f3f6f7;font-family:Arial,sans-serif">
   <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;background:#fff;border-radius:12px"><tr><td style="padding:24px">
     <p style="margin:0 0 4px;font:13px Arial,sans-serif;color:${SLATE}">New Growth Audit lead #${leadId}</p>
     <h1 style="margin:0 0 16px;font:normal 24px Georgia,serif;color:${INK}">${esc(lead.name)}, ${esc(lead.practice)}</h1>
+    <p style="margin:0 0 14px;padding:12px 14px;background:#fff4dc;border-radius:8px;font:bold 15px Arial,sans-serif;color:${INK}">&#128197; ${callbackBooked ? `Call-back booked: ${esc(callbackText)}. It's in the attached calendar invite. The practice has the same time, so they're expecting your call.` : `No call-back time was booked. Please call ${esc(lead.name)} the next business day.`}</p>
     <p style="margin:0 0 12px;font:15px Arial,sans-serif;color:${INK}">&#10003; Call back: <b>${esc(contact.name)}</b> (${esc(routing)})<br>
     &#10003; Yearly remake cost: <b>${esc(money(cost.total))}</b><br>
     &#10003; Remake rate: <b>${esc(percent(cost.rate))}</b> (${cost.aboveBenchmark ? 'above' : 'at or below'} the 3.8% benchmark)</p>
