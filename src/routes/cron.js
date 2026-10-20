@@ -2,7 +2,7 @@ const express = require('express')
 const crypto = require('crypto')
 const { runEvidentCrmSyncJob } = require('../jobs/evidentCrmSync')
 const { runEvidentReportJob, runEvidentReportSendJob } = require('../jobs/evidentReport')
-const { runSalesRepDailyReportJob } = require('../jobs/salesRepDailyReport')
+const { runSalesRepDailyReportJob, runSalesRepDailyReportSendJob } = require('../jobs/salesRepDailyReport')
 const { runWhatsappPostJob } = require('../jobs/whatsappPost')
 const { runContentApprovalFollowupJob } = require('../jobs/contentApprovalFollowup')
 const { runShotListJob } = require('../jobs/shotLists')
@@ -25,6 +25,7 @@ const JOBS = {
   'evident-report': runEvidentReportJob,
   'evident-report-send': runEvidentReportSendJob,
   'sales-rep-daily-report': runSalesRepDailyReportJob,
+  'sales-rep-daily-report-send': runSalesRepDailyReportSendJob,
   'whatsapp-post': runWhatsappPostJob,
   'content-approval-followup': runContentApprovalFollowupJob,
   'shot-list': runShotListJob,

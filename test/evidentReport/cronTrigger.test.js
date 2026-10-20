@@ -14,7 +14,7 @@ test('cron trigger only accepts the exact secret', () => {
 });
 
 test('cron trigger exposes exactly the daily jobs', () => {
-  assert.deepEqual(Object.keys(cronRoute.JOBS).sort(), ['content-approval-followup', 'evident-crm-sync', 'evident-report', 'evident-report-send', 'sales-rep-daily-report', 'shot-list', 'whatsapp-post']);
+  assert.deepEqual(Object.keys(cronRoute.JOBS).sort(), ['content-approval-followup', 'evident-crm-sync', 'evident-report', 'evident-report-send', 'sales-rep-daily-report', 'sales-rep-daily-report-send', 'shot-list', 'whatsapp-post']);
 });
 
 test('a job is claimed once per day: first caller runs it, a second is told it already ran', async () => {

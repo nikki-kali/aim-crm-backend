@@ -8,6 +8,21 @@ const { renderGoalBarsGif } = require('./goalBarGifRenderer')
 const { checkBookedMtd, previousWeekday, sameMonth } = require('./evidentReport/bookedMtdGuard')
 const { countEviSmartNewDoctors } = require('./evidentReport/eviSmartPrimary')
 const { buildEvidentDay } = require('./evidentReport/evidentDay')
+const { buildHoldUrl } = require('./reportHold')
+const { todayEt } = require('./cronRuns')
+
+// "9:00 AM ET (9:00 PM Manila)": when the automatic rep report send runs,
+// in both time zones (Manila's side moves an hour when US clocks change).
+function repAutoSendLabel(now = new Date()) {
+  const day = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+  for (let h = 0; h < 24; h++) {
+    const t = new Date(`${day}T${String(h).padStart(2, '0')}:00:00Z`)
+    if (Number(t.toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false })) === 9) {
+      return `9:00 AM ET (${t.toLocaleString('en-US', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' })} Manila)`
+    }
+  }
+  return '9:00 AM ET'
+}
 
 // Recipients are the two real AIM reps by email, not a role query — role
 // IN ('staff','sales_rep') would also catch Yoel Klein and the TEST
@@ -751,7 +766,16 @@ async function sendRepDailyReportForApproval(rep, dateStr = lastBusinessDayEaste
 
   const token = await createApprovalToken({ reportType: 'sales-rep-daily-report', repId: rep.id, reportDate: dateStr })
   const approveUrl = buildApproveUrl(token)
-  const bannered = injectApprovalBanner(html, { reportLabel: `${rep.name || rep.email}'s Daily Sales Report`, approveUrl })
+  // When the 9:00 AM ET automatic send is on, the preview says so and offers
+  // a hold link (its own, separate from the leadership dashboard's).
+  const autoSend = process.env.SALES_REP_REPORT_AUTO_SEND === 'true'
+  const bannered = injectApprovalBanner(html, {
+    reportLabel: `${rep.name || rep.email}'s Daily Sales Report`,
+    approveUrl,
+    autoSendAt: autoSend ? repAutoSendLabel() : undefined,
+    autoSendTo: rep.name ? rep.name.split(' ')[0] : rep.email,
+    holdUrl: autoSend ? buildHoldUrl(todayEt(), 'reps') : undefined,
+  })
 
   const subject = `Approve? — Daily Sales Report — ${rep.name || rep.email} — ${dateLabel}`
   await sendEmail({ to: [APPROVER_EMAIL], subject, html: bannered })
@@ -784,6 +808,7 @@ async function sendAllSalesRepDailyReports() {
 }
 
 module.exports = {
+  repAutoSendLabel,
   monthWindow,
   MONTHLY_SALES_TARGET,
   computeMonthlySalesGoal,

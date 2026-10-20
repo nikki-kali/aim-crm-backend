@@ -14,14 +14,21 @@ const page = (title, body) => `<!DOCTYPE html>
 // GET only DESCRIBES the hold (like GET /api/reports/approve): email scanners
 // pre-open links, and a hold performed by a GET would silently block the
 // day's report. The hold itself happens only on the POST from this page's button.
+// What each hold stops, in the page wording.
+const WHAT = {
+  leadership: { name: 'The Daily Leadership Dashboard', to: 'leadership', from: 'the preview email' },
+  reps: { name: "James's and William's Daily Sales Reports", to: 'the reps', from: 'the preview emails' },
+}
+
 router.get('/', rateLimiter({ windowMs: 10 * 60 * 1000, max: 20 }), (req, res) => {
   const { day, sig } = req.query
-  if (!verifyHold(day, sig)) return res.status(400).send(page('Invalid link', '<h1 style="margin:0 0 10px;font-size:19px;color:#10353f">This link is not valid</h1><p style="margin:0;font-size:14px;color:#5b7a86">It may be incomplete or for a different day.</p>'))
+  const kind = req.query.kind || 'leadership'
+  if (!WHAT[kind] || !verifyHold(day, sig, kind)) return res.status(400).send(page('Invalid link', '<h1 style="margin:0 0 10px;font-size:19px;color:#10353f">This link is not valid</h1><p style="margin:0;font-size:14px;color:#5b7a86">It may be incomplete or for a different day.</p>'))
   res.send(page('Hold today\'s send', `
     <h1 style="margin:0 0 10px;font-size:19px;color:#10353f">Hold today's send?</h1>
-    <p style="margin:0 0 22px;font-size:14px;color:#5b7a86;line-height:1.5">The Daily Leadership Dashboard for ${esc(day)} will <b>not</b> go to leadership automatically. You can still send it yourself from the preview email with Approve &amp; Send.</p>
+    <p style="margin:0 0 22px;font-size:14px;color:#5b7a86;line-height:1.5">${WHAT[kind].name} for ${esc(day)} will <b>not</b> go to ${WHAT[kind].to} automatically. You can still send them yourself from ${WHAT[kind].from} with Approve &amp; Send.</p>
     <form method="POST" action="/api/report-hold">
-      <input type="hidden" name="day" value="${esc(day)}"><input type="hidden" name="sig" value="${esc(sig)}">
+      <input type="hidden" name="day" value="${esc(day)}"><input type="hidden" name="sig" value="${esc(sig)}"><input type="hidden" name="kind" value="${esc(kind)}">
       <button type="submit" style="padding:12px 28px;background:#b45309;color:#fff;border:none;font-weight:600;font-size:14px;border-radius:10px;cursor:pointer">Hold today's send</button>
     </form>`))
 })
@@ -29,9 +36,10 @@ router.get('/', rateLimiter({ windowMs: 10 * 60 * 1000, max: 20 }), (req, res) =
 router.post('/', rateLimiter({ windowMs: 10 * 60 * 1000, max: 20 }), express.urlencoded({ extended: false }), async (req, res) => {
   try {
     const { day, sig } = req.body || {}
-    if (!verifyHold(day, sig)) return res.status(400).send(page('Invalid link', '<h1 style="margin:0;font-size:19px;color:#10353f">This link is not valid</h1>'))
-    await holdDay(day)
-    res.send(page('Held', `<h1 style="margin:0 0 10px;font-size:19px;color:#10353f">Held</h1><p style="margin:0;font-size:14px;color:#5b7a86;line-height:1.5">Nothing will go to leadership automatically for ${esc(day)}. You can still send it from the preview email whenever you're ready.</p>`))
+    const kind = (req.body && req.body.kind) || 'leadership'
+    if (!WHAT[kind] || !verifyHold(day, sig, kind)) return res.status(400).send(page('Invalid link', '<h1 style="margin:0;font-size:19px;color:#10353f">This link is not valid</h1>'))
+    await holdDay(day, undefined, kind)
+    res.send(page('Held', `<h1 style="margin:0 0 10px;font-size:19px;color:#10353f">Held</h1><p style="margin:0;font-size:14px;color:#5b7a86;line-height:1.5">Nothing will go to ${WHAT[kind].to} automatically for ${esc(day)}. You can still send from ${WHAT[kind].from} whenever you're ready.</p>`))
   } catch (err) {
     console.error('[report-hold] failed:', err)
     res.status(500).send(page('Something went wrong', '<h1 style="margin:0 0 10px;font-size:19px;color:#10353f">Could not hold the send</h1><p style="margin:0;font-size:14px;color:#5b7a86">Please try again, or turn off the automatic send in Render.</p>'))

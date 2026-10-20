@@ -111,6 +111,45 @@ async function claimFreshPreview(token, query = run) {
   return rows[0] || null
 }
 
+// The 9:00 AM ET automatic rep report send takes over a rep's approval
+// links for that day before sending, in one locked transaction, so a click
+// on Approve & Send and the automatic send can never both go out. Returns
+// false when any link for that rep and day was already clicked (approved,
+// or being approved), in which case the automatic send skips that rep.
+async function claimRepLinksForAutoSend(repId, reportDate, pool = db) {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const { rows } = await client.query(
+      `SELECT used_at FROM report_approval_tokens
+       WHERE report_type = 'sales-rep-daily-report' AND rep_id = $1 AND report_date = $2 FOR UPDATE`,
+      [repId, reportDate]
+    )
+    if (rows.some((r) => r.used_at)) { await client.query('ROLLBACK'); return false }
+    await client.query(
+      `UPDATE report_approval_tokens SET used_at = NOW()
+       WHERE report_type = 'sales-rep-daily-report' AND rep_id = $1 AND report_date = $2 AND used_at IS NULL`,
+      [repId, reportDate]
+    )
+    await client.query('COMMIT')
+    return true
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw err
+  } finally {
+    client.release()
+  }
+}
+
+// After the automatic send went out: the day's links for that rep are sent.
+async function markRepLinksSent(repId, reportDate, query = run) {
+  await query(
+    `UPDATE report_approval_tokens SET sent_at = NOW()
+     WHERE report_type = 'sales-rep-daily-report' AND rep_id = $1 AND report_date = $2 AND sent_at IS NULL`,
+    [repId, reportDate]
+  )
+}
+
 // Inserted right inside the report's own card, above its header. Matched by
 // its stable opening (max-width:600px card, 40px auto margin) rather than
 // the full style string: the Leadership Report's card was restyled
@@ -122,10 +161,10 @@ const CARD_OPEN_RE = /<div style="max-width:600px;margin:40px auto;[^"]*">/
 
 // `autoSendAt` (e.g. '7:00 AM ET'): when set, the banner says the report goes
 // out automatically then unless the approver sends it sooner.
-function injectApprovalBanner(html, { reportLabel, approveUrl, autoSendAt, holdUrl }) {
+function injectApprovalBanner(html, { reportLabel, approveUrl, autoSendAt, autoSendTo = 'leadership', holdUrl }) {
   const banner = `
   <div style="background:#fefaf1;border-bottom:1px solid #fde68a;padding:18px 36px;text-align:center">
-    <p style="margin:0 0 10px;font-size:13px;color:#78350f;line-height:1.5">This is a preview of the <b>${escapeHtml(reportLabel)}</b>. ${autoSendAt ? `It goes to leadership automatically at <b>${escapeHtml(autoSendAt)}</b>. Click below to send it sooner.` : 'Nothing has been sent yet.'}</p>
+    <p style="margin:0 0 10px;font-size:13px;color:#78350f;line-height:1.5">This is a preview of the <b>${escapeHtml(reportLabel)}</b>. ${autoSendAt ? `It goes to ${escapeHtml(autoSendTo)} automatically at <b>${escapeHtml(autoSendAt)}</b>. Click below to send it sooner.` : 'Nothing has been sent yet.'}</p>
     <a href="${approveUrl}" style="display:inline-block;padding:11px 26px;background:#059669;color:#fff;text-decoration:none;font-weight:600;font-size:13.5px;border-radius:10px;font-family:-apple-system,sans-serif">Approve &amp; Send &#8594;</a>
     <p style="margin:10px 0 0;font-size:10.5px;color:#92702c">You'll be asked to confirm before anything sends. This link expires in 24 hours and can only be used once.</p>
     ${holdUrl ? `<p style="margin:12px 0 0;font-size:12.5px;color:#78350f">Don't want it to go out today? <a href="${holdUrl}" style="color:#b45309;font-weight:600;text-decoration:underline">Hold today's send</a></p>` : ''}
@@ -143,6 +182,8 @@ module.exports = {
   peekStaleUnsentClaim,
   claimFreshPreview,
   STALE_CLAIM_MINUTES,
+  claimRepLinksForAutoSend,
+  markRepLinksSent,
   buildApproveUrl,
   injectApprovalBanner,
 }
