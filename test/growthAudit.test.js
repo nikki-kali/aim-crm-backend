@@ -130,3 +130,91 @@ test('security: control characters cannot break the invite structure', () => {
   assert.ok(!/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(ics))
   assert.ok(ics.includes('DESCRIPTION:one\\ntwo\\nthree'))
 })
+
+const { buildReport, analyze, PROBLEMS } = require('../src/services/growthAudit/report')
+
+test('rule-based report: rate bands drive the summary', () => {
+  const mk = (remakes) => buildReport({ cost: remakeCost({ unitsPerMonth: 100, remakesPerMonth: remakes, minutesPerRemake: 45, chairHourValue: 600, labFeePerRemake: 0 }) })
+  assert.match(mk(0).summary, /no remakes/)
+  assert.match(mk(2).summary, /well below the 3\.8%/)
+  assert.match(mk(3).summary, /close to the 3\.8%/)
+  assert.match(mk(5).summary, /above the 3\.8%.*14 fewer remakes a year/)
+  assert.match(mk(8).summary, /well above the 3\.8%.*pattern/)
+})
+
+test('rule-based report: benchmark gap, levers ranked by value, priority', () => {
+  // 40 units, 3 remakes, 45 min at $700, $90 fee: 36 remakes, 18.24 at benchmark.
+  const cost = remakeCost({ unitsPerMonth: 40, remakesPerMonth: 3, minutesPerRemake: 45, chairHourValue: 700, labFeePerRemake: 90 })
+  const a = analyze(cost)
+  assert.strictEqual(a.excessRemakes, 18)
+  assert.strictEqual(a.benchmarkGap, 18 * cost.perRemake)
+  assert.deepStrictEqual(a.levers.map((l) => l.id), ['benchmark', 'fees'])
+  assert.strictEqual(a.priority, 'High')
+  const r = buildReport({ cost, firstName: 'James', callback: 'Wednesday, October 21, in the morning (8 to 11 am ET)' })
+  assert.match(r.headline, /\$14,310 a year of your remake cost is recoverable/)
+  assert.strictEqual(r.sections[1].title, 'Your biggest savings, ranked')
+  assert.match(r.sections[1].bullets[0], /^1\. .*18 fewer remakes/)
+  assert.match(r.cta.title, /Your call with James is booked/)
+  assert.match(r.cta.body, /on Wednesday, October 21.*no obligation/)
+})
+
+test('rule-based report: at-benchmark practices get the quarter-cut lever, not a gap', () => {
+  const cost = remakeCost({ unitsPerMonth: 100, remakesPerMonth: 3, minutesPerRemake: 45, chairHourValue: 600, labFeePerRemake: 0 })
+  const a = analyze(cost)
+  assert.strictEqual(a.benchmarkGap, 0)
+  assert.deepStrictEqual(a.levers.map((l) => l.id), ['quarter'])
+  assert.strictEqual(a.priority, 'Moderate')
+  const none = analyze(remakeCost({ unitsPerMonth: 100, remakesPerMonth: 0, minutesPerRemake: 45, chairHourValue: 600 }))
+  assert.strictEqual(none.priority, 'Low')
+  assert.strictEqual(buildReport({ cost: remakeCost({ unitsPerMonth: 100, remakesPerMonth: 0, minutesPerRemake: 45, chairHourValue: 600 }) }).sections.length, 3)
+})
+
+test('rule-based report: picked problems drive causes, fixes and AIM help', () => {
+  const cost = remakeCost({ unitsPerMonth: 40, remakesPerMonth: 3, minutesPerRemake: 45, chairHourValue: 700, labFeePerRemake: 90 })
+  const r = buildReport({ cost, pains: ['Shade', 'Digital scan issues'], interest: 'Implant cases' })
+  const causes = r.sections.find((s) => s.title.startsWith('Where')).bullets.join(' ')
+  assert.ok(causes.includes(PROBLEMS.Shade.cause) && causes.includes(PROBLEMS['Digital scan issues'].fix))
+  assert.match(causes, /Start with digital scan issues/)
+  const help = r.sections.find((s) => s.title.startsWith('How AIM')).bullets.join(' ')
+  assert.ok(help.includes(PROBLEMS.Shade.aim) && help.includes('$3,240 a year in remake fees'))
+  assert.match(r.next_steps[0], /16 major implant systems/)
+  assert.ok(r.next_steps.length <= 3)
+})
+
+test('rule-based report: unmatched rep reads naturally', () => {
+  const cost = remakeCost({ unitsPerMonth: 40, remakesPerMonth: 3, minutesPerRemake: 45, chairHourValue: 700 })
+  const r = buildReport({ cost, firstName: 'the AIM team' })
+  assert.match(r.cta.title, /^Our team will call you/)
+  assert.ok(!/[a-z,] Our team/.test([r.cta.body, ...r.next_steps].join(' ')))
+})
+
+test('rule-based report: same answers give the same report, with no em dashes', () => {
+  const cost = remakeCost({ unitsPerMonth: 40, remakesPerMonth: 3, minutesPerRemake: 45, chairHourValue: 700, labFeePerRemake: 0 })
+  const a = buildReport({ cost, pains: ['Margins or fit'], interest: 'Fewer remakes and adjustments' })
+  const b = buildReport({ cost, pains: ['Margins or fit'], interest: 'Fewer remakes and adjustments' })
+  assert.deepStrictEqual(a, b)
+  const all = [a.headline, a.summary, ...Object.values(a.cta), ...a.sections.flatMap((s) => [s.title, ...s.bullets]), ...a.next_steps, ...Object.values(PROBLEMS).flatMap(Object.values)].join(' ')
+  assert.ok(!/[—–]/.test(all))
+})
+
+test('printable report: print layout, no email-only wording, safe filename', () => {
+  const { reportPdfFilename } = require('../src/services/growthAudit/pdf')
+  const cost = remakeCost({ unitsPerMonth: 40, remakesPerMonth: 3, minutesPerRemake: 45, chairHourValue: 700, labFeePerRemake: 90 })
+  const cb = 'Wednesday, October 21, in the morning (8 to 11 am ET)'
+  const args = {
+    practice: 'Smile Co Dental',
+    cost,
+    callback: cb,
+    report: buildReport({ cost, pains: ['Shade'], firstName: 'James', callback: cb }),
+    contact: { name: 'James Delaney', firstName: 'James', region: 'New York City metro', email: 'james@aimdentallab.com', phone: '347-863-9787', phoneTel: '+13478639787' },
+  }
+  const print = reportEmail({ ...args, print: true })
+  assert.ok(print.includes('@page { size: Letter'))
+  assert.ok(!print.includes('attached to this email') && !print.includes('Hello!'))
+  assert.ok(print.includes('Call James: 347-863-9787'))
+  assert.ok(!/[—–]/.test(print))
+  assert.ok(reportEmail({ ...args, pdfAttached: true }).includes('printable PDF copy'))
+  assert.ok(!reportEmail(args).includes('printable PDF copy'))
+  assert.strictEqual(reportPdfFilename('Smile & Co. Dental <x>'), 'AIM-Growth-Audit-Smile-Co-Dental-x.pdf')
+  assert.strictEqual(reportPdfFilename(''), 'AIM-Growth-Audit.pdf')
+})

@@ -9,6 +9,7 @@ const { remakeCost, money } = require('../services/growthAudit/calc')
 const { writeReport } = require('../services/growthAudit/report')
 const { reportEmail, leadNotificationEmail } = require('../services/growthAudit/email')
 const { parseCallback, describeCallback, icsEvent } = require('../services/growthAudit/callback')
+const { renderReportPdf, reportPdfFilename } = require('../services/growthAudit/pdf')
 
 // POST /api/growth-audit: the website's Growth Audit assessment (/partner).
 //
@@ -17,7 +18,7 @@ const { parseCallback, describeCallback, icsEvent } = require('../services/growt
 //    in the practice address they gave instead.
 // 2. Responds straight away with that rep's name, so the page can show who
 //    will call. The page shows the cost results itself.
-// 3. In the background, writes the report (Claude, with a template fallback)
+// 3. In the background, builds the report from rules (services/growthAudit/report.js)
 //    and emails it to the practice, then notifies sales.
 //
 // Public and unauthenticated like web-leads: open CORS scoped to this route,
@@ -178,30 +179,41 @@ router.post('/', rateLimiter({ windowMs: 10 * 60 * 1000, max: 6 }), async (req, 
 
     // After responding: the report can take a while to write.
     setImmediate(async () => {
-      const { report, source } = await writeReport({ cost, pains: lead.pains, interest: lead.interest, message: lead.message, practice: lead.practice })
+      const { report, source } = await writeReport({ cost, pains: lead.pains, interest: lead.interest, firstName: contact.firstName, callback: callback ? describeCallback(callback) : null })
       const repFirst = contact.firstName === 'the AIM team' ? 'AIM' : contact.firstName
+      const callbackLine = callback ? describeCallback(callback) : null
+      const emailArgs = { practice: lead.practice, cost, report, contact, callback: callbackLine }
+      // The printable copy. If Chrome fails, the report still goes out without it.
+      let pdf = null
+      try {
+        pdf = await renderReportPdf(reportEmail({ ...emailArgs, print: true }))
+      } catch (err) {
+        console.error('growth-audit: report PDF failed, sending without it', err)
+      }
       try {
         await sendEmail({
           to: lead.email,
           bcc: process.env.GROWTH_AUDIT_EMAIL || 'media@aimdentallab.com',
           replyTo: contact.email || 'media@aimdentallab.com',
           subject: `Your Growth Audit report: remakes are costing you about ${money(cost.total)} a year`,
-          html: reportEmail({ practice: lead.practice, cost, report, contact, callback: callback ? describeCallback(callback) : null }),
-          // The practice's own invite: the whole window, so they expect the call.
-          attachments: callback
-            ? [{
-                filename: 'aim-call-back.ics',
-                contentType: 'text/calendar',
-                content: icsEvent({
-                  uid: `growth-audit-${leadId}-practice@aimdentallab.com`,
-                  start: callback.start,
-                  end: callback.end,
-                  summary: `Call from ${contact.name}, AIM Dental Laboratory`,
-                  description: `${contact.name} will call you about your Growth Audit results, ${describeCallback(callback)}. Questions before then? ${contact.phone}`,
-                  location: contact.phone,
-                }),
-              }]
-            : undefined,
+          html: reportEmail({ ...emailArgs, pdfAttached: Boolean(pdf) }),
+          // The printable report, plus the practice's own invite: the whole
+          // window, so they expect the call.
+          attachments: [
+            pdf && { filename: reportPdfFilename(lead.practice), contentType: 'application/pdf', content: pdf },
+            callback && {
+              filename: 'aim-call-back.ics',
+              contentType: 'text/calendar',
+              content: icsEvent({
+                uid: `growth-audit-${leadId}-practice@aimdentallab.com`,
+                start: callback.start,
+                end: callback.end,
+                summary: `Call from ${contact.name}, AIM Dental Laboratory`,
+                description: `${contact.name} will call you about your Growth Audit results, ${callbackLine}. Questions before then? ${contact.phone}`,
+                location: contact.phone,
+              }),
+            },
+          ].filter(Boolean),
         })
       } catch (err) {
         console.error('growth-audit: report email failed', err)
@@ -215,9 +227,9 @@ router.post('/', rateLimiter({ windowMs: 10 * 60 * 1000, max: 6 }), async (req, 
           to: repEmail || salesInbox,
           cc: repEmail ? [salesInbox] : undefined,
           subject: callback
-            ? `Call-back booked ${callback.dayLabel}, ${callback.short}: ${lead.name}, ${lead.practice} (${money(cost.total)}/yr in remakes)`
-            : `Growth Audit lead, call next business day: ${lead.name}, ${lead.practice}`,
-          html: leadNotificationEmail({ leadId, lead, cost, contact, routing, reportSource: source, callbackText, callbackBooked: Boolean(callback) }),
+            ? `[${report.priority}] Call-back booked ${callback.dayLabel}, ${callback.short}: ${lead.name}, ${lead.practice} (${money(cost.total)}/yr in remakes)`
+            : `[${report.priority}] Growth Audit lead, call next business day: ${lead.name}, ${lead.practice}`,
+          html: leadNotificationEmail({ leadId, lead, cost, contact, routing, reportSource: source, report, callbackText, callbackBooked: Boolean(callback) }),
           // The rep's invite: a 30-minute hold at the start of the window,
           // with a reminder 15 minutes before.
           attachments: callback
