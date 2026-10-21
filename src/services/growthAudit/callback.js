@@ -92,9 +92,14 @@ function parseCallback({ date, window, repId, now = new Date() }) {
   }
 }
 
+// "8 to 11 am ET"
+function windowRange(cb) {
+  return `${cb.windowLabel.replace(/^.*\((.*)\)$/, '$1')}${cb.tzLabel ? ` ${cb.tzLabel}` : ''}`
+}
+
 // "Tuesday, October 21, in the morning (8 to 11 am ET)"
 function describeCallback(cb) {
-  return `${cb.dayLabel}, in the ${cb.short} (${cb.windowLabel.replace(/^.*\((.*)\)$/, '$1')}${cb.tzLabel ? ` ${cb.tzLabel}` : ''})`
+  return `${cb.dayLabel}, in the ${cb.short} (${windowRange(cb)})`
 }
 
 const icsDate = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
@@ -126,7 +131,9 @@ function fold(line) {
 
 // A standalone event (METHOD:PUBLISH): opens as "Add to calendar" in Gmail,
 // Outlook and Apple Mail without needing a real calendar as organizer.
-function icsEvent({ uid, start, end, summary, description, location, alarmMinutes = 15 }) {
+// `transparent` marks the event as free time, so a short reminder for a
+// call-back window doesn't block the rest of someone's calendar.
+function icsEvent({ uid, start, end, summary, description, location, alarmMinutes = 15, transparent = false }) {
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
@@ -141,6 +148,7 @@ function icsEvent({ uid, start, end, summary, description, location, alarmMinute
     `SUMMARY:${icsText(summary)}`,
     `DESCRIPTION:${icsText(description)}`,
     location ? `LOCATION:${icsText(location)}` : null,
+    transparent ? 'TRANSP:TRANSPARENT' : null,
     'BEGIN:VALARM',
     'ACTION:DISPLAY',
     `DESCRIPTION:${icsText(summary)}`,
@@ -152,4 +160,4 @@ function icsEvent({ uid, start, end, summary, description, location, alarmMinute
   return Buffer.from(lines.map(fold).join('\r\n') + '\r\n', 'utf8')
 }
 
-module.exports = { WINDOWS, parseCallback, describeCallback, icsEvent, timezoneFor, todayIn, addDays }
+module.exports = { WINDOWS, parseCallback, describeCallback, windowRange, icsEvent, timezoneFor, todayIn, addDays }

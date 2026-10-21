@@ -6,6 +6,14 @@ const { money, percent, BENCHMARK_REMAKE_RATE, BENCHMARK_SOURCE, BENCHMARK_URL }
 // House style: no em dashes, a general greeting, always a clear CTA.
 
 const LOGO_URL = 'https://aimdentallab.wordpress.com/wp-content/uploads/2025/03/aim-logo-transparent-2026-2.png?w=560'
+// The PDF is printed on the server, which can't count on fetching the hosted
+// logo, so the print layout carries the same logo inline. (Email clients
+// block base64 images, so the email keeps the hosted URL.)
+const LOGO_DATA_URI = `data:image/png;base64,${require('fs').readFileSync(require('path').join(__dirname, 'assets', 'aim-logo-teal.png')).toString('base64')}`
+// The server's Chrome has no emoji font, so the PDF draws the phone icon.
+const PHONE_SVG = `<svg width="16" height="16" viewBox="0 0 24 24" style="vertical-align:-2px" aria-hidden="true"><path fill="#207290" d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"/></svg>`
+// Dark bands use the deep brand blue, matching the AIM email template.
+const DEEP_BAND = 'background:linear-gradient(135deg,#207290 0%,#1a5f7a 100%);background-color:#207290'
 const INK = '#10353f'
 const DEEP = '#207290'
 const GOLD = '#d9a441'
@@ -102,7 +110,7 @@ function leverLadder(levers) {
     .map(
       (l, i) => `
   <table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ${LINE};border-radius:12px;margin:0 0 10px"><tr>
-    <td width="50" valign="middle" style="padding:16px 0 16px 16px">${numberBadge(i + 1, i === 0 ? INK : DEEP)}</td>
+    <td width="50" valign="middle" style="padding:16px 0 16px 16px">${numberBadge(i + 1)}</td>
     <td valign="middle" style="padding:16px 12px">
       <p style="margin:0;font:bold 16px Arial,sans-serif;color:${INK}">${esc(l.label)}</p>
       <p style="margin:3px 0 0;font:13px/1.4 Arial,sans-serif;color:${SLATE}">${esc(l.detail)}</p>
@@ -158,15 +166,15 @@ function reportEmail({ practice, cost, report, contact, callback, print = false,
   const verdict = none ? 'No remakes' : above ? (cost.rate > 0.06 ? 'Well above average' : 'Above average') : 'In line or better'
 
   const hero = none
-    ? `<p style="margin:0;font:normal 52px/1 Georgia,serif;color:${GOLD}">0 remakes</p>
+    ? `<p style="margin:0;font:normal 52px/1 Georgia,serif;color:#ffffff">0 remakes</p>
        <p style="margin:10px 0 0;font:17px/1.5 Arial,sans-serif;color:#ffffff">${esc(report.headline)}</p>`
-    : `<p style="margin:0;font:normal 56px/1 Georgia,serif;color:${GOLD}">${esc(money(report.recoverable))}</p>
+    : `<p style="margin:0;font:normal 56px/1 Georgia,serif;color:#ffffff">${esc(money(report.recoverable))}</p>
        <p style="margin:8px 0 18px;font:17px/1.5 Arial,sans-serif;color:#ffffff">a year of your remake cost is recoverable</p>
        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-radius:6px;overflow:hidden"><tr>
          <td width="${Math.max(Math.round((report.recoverable / (cost.total || 1)) * 100), 3)}%" style="background:${GOLD};height:14px;font-size:0;line-height:0">&nbsp;</td>
-         <td style="background:#3d6170;height:14px;font-size:0;line-height:0">&nbsp;</td>
+         <td style="background:#4d8ba3;height:14px;font-size:0;line-height:0">&nbsp;</td>
        </tr></table>
-       <p style="margin:8px 0 0;font:13px Arial,sans-serif;color:#cfe0e6">Recoverable, out of the <b style="color:#ffffff">${esc(money(cost.total))}</b> a year remakes cost you now</p>`
+       <p style="margin:8px 0 0;font:13px Arial,sans-serif;color:#ffffff">Recoverable, out of the <b style="color:#ffffff">${esc(money(cost.total))}</b> a year remakes cost you now</p>`
 
   return `<!DOCTYPE html>
 <html>${print ? `<head><meta charset="utf-8"><title>AIM Growth Audit, ${esc(practice)}</title><style>
@@ -179,11 +187,11 @@ function reportEmail({ practice, cost, report, contact, callback, print = false,
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${print ? '#ffffff' : '#f3f6f7'}"><tr><td align="center" style="padding:${print ? '0' : '32px 12px'}">
 <table role="presentation" width="${print ? '100%' : '600'}" cellpadding="0" cellspacing="0" style="${print ? 'width:100%' : 'max-width:600px;width:100%'};background:#ffffff;border-radius:${print ? '0' : '16px'};overflow:hidden">
   <tr><td style="padding:24px 32px">
-    <img src="${LOGO_URL}" width="140" alt="AIM Dental Laboratory" style="display:block;width:140px;height:auto;border:0">
+    <img src="${print ? LOGO_DATA_URI : LOGO_URL}" width="140" alt="AIM Dental Laboratory" style="display:block;width:140px;height:auto;border:0">
   </td></tr>
 
-  <tr><td style="padding:30px 32px 32px;background:${INK}">
-    <p style="margin:0 0 14px;font:bold 12px Arial,sans-serif;letter-spacing:1.5px;text-transform:uppercase;color:#9fc3cf">Growth Audit report for ${esc(practice)}</p>
+  <tr><td style="padding:30px 32px 32px;${DEEP_BAND}">
+    <p style="margin:0 0 14px;font:bold 12px Arial,sans-serif;letter-spacing:1.5px;text-transform:uppercase;color:#ffffff">Growth Audit report for ${esc(practice)}</p>
     ${hero}
   </td></tr>
 
@@ -201,7 +209,7 @@ function reportEmail({ practice, cost, report, contact, callback, print = false,
 
     ${report.cta ? `
     <table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" style="border:2px solid ${GOLD};border-radius:14px;margin:22px 0 0"><tr><td style="padding:20px 22px">
-      <p style="margin:0 0 6px;font:bold 17px Arial,sans-serif;color:${INK}">&#128222; ${esc(report.cta.title)}</p>
+      <p style="margin:0 0 6px;font:bold 17px Arial,sans-serif;color:${INK}">${print ? PHONE_SVG : '&#128222;'} ${esc(report.cta.title)}</p>
       <p style="margin:0 0 8px;font:15px/1.6 Arial,sans-serif;color:${INK}">${esc(report.cta.body)}</p>
       <p style="margin:0 0 16px;font:14px/1.5 Arial,sans-serif;color:${SLATE}">${esc(report.cta.prep)}</p>
       ${button(`tel:${contact.phoneTel}`, print ? `Rather talk now? Call ${first}: ${contact.phone}` : `Rather talk now? Call ${first}`)}
@@ -238,7 +246,7 @@ function reportEmail({ practice, cost, report, contact, callback, print = false,
     ${report.problems[0]?.flagged ? '' : `<p style="margin:0 0 12px;font:14px/1.5 Arial,sans-serif;color:${SLATE}">You didn&rsquo;t flag a specific problem, so here are the two we see most. ${esc(contact.firstName === 'the AIM team' ? 'We' : contact.firstName)} can help pin down yours on the call.</p>`}
     ${report.problems.map(problemCard).join('')}
 
-    <table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" style="background:${INK};border-radius:12px;margin:8px 0 0"><tr>
+    <table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" style="${DEEP_BAND};border-radius:12px;margin:8px 0 0"><tr>
       <td width="44" valign="top" style="padding:18px 0 18px 18px;font:bold 22px Arial,sans-serif;color:${GOLD}">&#10003;</td>
       <td style="padding:18px 20px 18px 8px;font:15px/1.55 Arial,sans-serif;color:#ffffff">${esc(report.guarantee)}</td>
     </tr></table>

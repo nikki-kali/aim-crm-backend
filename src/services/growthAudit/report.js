@@ -94,12 +94,17 @@ function analyze(cost) {
   const benchmarkGap = excessRemakes * cost.perRemake
   const quarterCut = cost.scenarios[0].saved
   const halfCut = cost.scenarios[1].saved
+  // The guarantee saves the fee only on remakes that still happen. The ones
+  // removed by reaching the average already carry their fee in benchmarkGap,
+  // so counting all fees again would double-count them.
+  const remainingFees = (cost.annualRemakes - excessRemakes) * cost.inputs.labFee
 
-  // What lowers the cost, in dollars a year. The guarantee lever only exists
-  // when they pay their current lab for remakes.
+  // What lowers the cost, in dollars a year. The levers are additive: their
+  // sum is the recoverable headline. The guarantee lever only exists when
+  // they pay their current lab for remakes.
   const levers = [
     benchmarkGap > 0 && { id: 'benchmark', value: benchmarkGap },
-    cost.labCost > 0 && { id: 'fees', value: cost.labCost },
+    remainingFees > 0 && { id: 'fees', value: remainingFees },
     benchmarkGap === 0 && cost.annualRemakes > 0 && { id: 'quarter', value: quarterCut },
   ]
     .filter(Boolean)
@@ -116,12 +121,13 @@ function analyze(cost) {
   if (cost.annualRemakes === 0) priority = 'Low'
 
   // The biggest number we can honestly say is recoverable.
-  const recoverable = Math.max(benchmarkGap + cost.labCost, halfCut)
+  const recoverable = Math.max(benchmarkGap + remainingFees, halfCut)
 
   return {
     band,
     excessRemakes,
     benchmarkGap,
+    remainingFees,
     levers,
     driver,
     priority,
@@ -193,7 +199,7 @@ function leverSection(cost, a) {
   if (!a.levers.length) return null
   const line = {
     benchmark: (v) => `Bring your remake rate to the national average: ${plural(a.excessRemakes, 'fewer remake')} a year, worth about ${money(v)}.`,
-    fees: (v) => `Stop paying for remakes: remakes covered by AIM’s guarantee are redone at no charge, which would remove up to ${money(v)} a year in fees.`,
+    fees: (v) => `Stop paying for remakes: remakes covered by AIM’s guarantee are redone at no charge, which would remove up to ${money(v)} a year in fees${a.benchmarkGap > 0 ? ' on the remakes that remain' : ''}.`,
     quarter: (v) => `Your rate is already in line with the national average, so the lever is the remakes that remain. One in four fewer would be worth about ${money(v)} a year.`,
   }
   return {
@@ -250,7 +256,7 @@ function nextSteps({ pains, interest, cost, firstName }) {
 // Short labels for the ranked savings ladder in the email.
 const LEVER_LABELS = {
   benchmark: (a) => ({ label: 'Reach the national average', detail: `${plural(a.excessRemakes, 'fewer remake')} a year` }),
-  fees: () => ({ label: 'Stop paying for remakes', detail: 'Covered remakes are redone at no charge under AIM’s guarantee' }),
+  fees: (a) => ({ label: 'Stop paying for remakes', detail: a.benchmarkGap > 0 ? 'Fees on the remakes that remain, removed by AIM’s guarantee' : 'Covered remakes are redone at no charge under AIM’s guarantee' }),
   quarter: () => ({ label: 'One in four fewer remakes', detail: 'Your rate is already in line, so this is the remaining lever' }),
 }
 

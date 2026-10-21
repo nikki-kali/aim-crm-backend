@@ -150,8 +150,13 @@ test('rule-based report: benchmark gap, levers ranked by value, priority', () =>
   assert.strictEqual(a.benchmarkGap, 18 * cost.perRemake)
   assert.deepStrictEqual(a.levers.map((l) => l.id), ['benchmark', 'fees'])
   assert.strictEqual(a.priority, 'High')
+  // Elizabeth's check: the 18 removed remakes already carry their $90 fee in
+  // the $11,070, so only the 18 that remain add fees: $11,070 + $1,620.
+  assert.strictEqual(a.remainingFees, 18 * 90)
+  assert.strictEqual(a.recoverable, 12690)
+  assert.strictEqual(a.levers.reduce((n, l) => n + l.value, 0), a.recoverable)
   const r = buildReport({ cost, firstName: 'James', callback: 'Wednesday, October 21, in the morning (8 to 11 am ET)' })
-  assert.match(r.headline, /\$14,310 a year of your remake cost is recoverable/)
+  assert.match(r.headline, /\$12,690 a year of your remake cost is recoverable/)
   assert.strictEqual(r.sections[1].title, 'Your biggest savings, ranked')
   assert.match(r.sections[1].bullets[0], /^1\. .*18 fewer remakes/)
   assert.match(r.cta.title, /Your call with James is booked/)
@@ -217,4 +222,34 @@ test('printable report: print layout, no email-only wording, safe filename', () 
   assert.ok(!reportEmail(args).includes('printable PDF copy'))
   assert.strictEqual(reportPdfFilename('Smile & Co. Dental <x>'), 'AIM-Growth-Audit-Smile-Co-Dental-x.pdf')
   assert.strictEqual(reportPdfFilename(''), 'AIM-Growth-Audit.pdf')
+})
+
+test('review fixes: PDF carries its own logo and icon, dark bands use the brand blue', () => {
+  const cost = remakeCost({ unitsPerMonth: 40, remakesPerMonth: 3, minutesPerRemake: 45, chairHourValue: 700, labFeePerRemake: 90 })
+  const cb = 'Thursday, October 22, in the morning (8 to 11 am ET)'
+  const args = {
+    practice: 'Test Dental',
+    cost,
+    callback: cb,
+    report: buildReport({ cost, firstName: 'James', callback: cb }),
+    contact: { name: 'James Delaney', firstName: 'James', region: 'New York City metro', email: 'james@aimdentallab.com', phone: '347-863-9787', phoneTel: '+13478639787' },
+  }
+  const print = reportEmail({ ...args, print: true })
+  const mail = reportEmail(args)
+  assert.ok(print.includes('src="data:image/png;base64,'))
+  assert.ok(!print.includes('&#128222;') && print.includes('<svg'))
+  assert.ok(mail.includes('src="https://aimdentallab.wordpress.com') && !mail.includes('data:image/png'))
+  assert.ok(!/background:#10353f/i.test(print) && !/background:#10353f/i.test(mail))
+  assert.ok(mail.includes('$12,690'))
+})
+
+test('review fixes: practice invite is a short free event titled with the window', () => {
+  const { windowRange } = require('../src/services/growthAudit/callback')
+  const cb = parseCallback({ date: '2026-10-21', window: 'morning', repId: 'james', now: NOW })
+  assert.strictEqual(windowRange(cb), '8 to 11 am ET')
+  const ics = icsEvent({ uid: 'x@aim', start: cb.start, end: new Date(cb.start.getTime() + 30 * 60000), summary: `Call from James, between ${windowRange(cb)}`, description: 'd', transparent: true }).toString()
+  assert.ok(ics.includes('DTEND:20261021T123000Z'))
+  assert.ok(ics.includes('TRANSP:TRANSPARENT'))
+  assert.ok(ics.includes('SUMMARY:Call from James\\, between 8 to 11 am ET'))
+  assert.ok(!icsEvent({ uid: 'y@aim', start: cb.start, end: cb.end, summary: 's', description: 'd' }).toString().includes('TRANSP'))
 })

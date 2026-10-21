@@ -8,7 +8,7 @@ const rateLimiter = require('../middleware/rateLimiter')
 const { remakeCost, money } = require('../services/growthAudit/calc')
 const { writeReport } = require('../services/growthAudit/report')
 const { reportEmail, leadNotificationEmail } = require('../services/growthAudit/email')
-const { parseCallback, describeCallback, icsEvent } = require('../services/growthAudit/callback')
+const { parseCallback, describeCallback, windowRange, icsEvent } = require('../services/growthAudit/callback')
 const { renderReportPdf, reportPdfFilename } = require('../services/growthAudit/pdf')
 
 // POST /api/growth-audit: the website's Growth Audit assessment (/partner).
@@ -173,7 +173,9 @@ router.post('/', rateLimiter({ windowMs: 10 * 60 * 1000, max: 6 }), async (req, 
     res.json({
       success: true,
       id: leadId,
-      rep: user ? { name: contact.name, email: contact.email } : null,
+      // The same contact the report email shows, so the confirmation page
+      // and the email give the dentist one number for the person calling.
+      rep: user ? { id: repId, name: contact.name, email: contact.email, phone: contact.phone, phoneTel: contact.phoneTel } : null,
       callback: callback ? describeCallback(callback) : null,
     })
 
@@ -197,8 +199,9 @@ router.post('/', rateLimiter({ windowMs: 10 * 60 * 1000, max: 6 }), async (req, 
           replyTo: contact.email || 'media@aimdentallab.com',
           subject: `Your Growth Audit report: remakes are costing you about ${money(cost.total)} a year`,
           html: reportEmail({ ...emailArgs, pdfAttached: Boolean(pdf) }),
-          // The printable report, plus the practice's own invite: the whole
-          // window, so they expect the call.
+          // The printable report, plus the practice's own invite: a short
+          // event at the start of the window with the full window in the
+          // title, marked free so it doesn't block their calendar.
           attachments: [
             pdf && { filename: reportPdfFilename(lead.practice), contentType: 'application/pdf', content: pdf },
             callback && {
@@ -207,8 +210,9 @@ router.post('/', rateLimiter({ windowMs: 10 * 60 * 1000, max: 6 }), async (req, 
               content: icsEvent({
                 uid: `growth-audit-${leadId}-practice@aimdentallab.com`,
                 start: callback.start,
-                end: callback.end,
-                summary: `Call from ${contact.name}, AIM Dental Laboratory`,
+                end: new Date(callback.start.getTime() + 30 * 60000),
+                summary: `Call from ${contact.firstName === 'the AIM team' ? 'AIM Dental Laboratory' : `${contact.firstName}, AIM Dental Lab`}, between ${windowRange(callback)}`,
+                transparent: true,
                 description: `${contact.name} will call you about your Growth Audit results, ${callbackLine}. Questions before then? ${contact.phone}`,
                 location: contact.phone,
               }),
@@ -240,7 +244,7 @@ router.post('/', rateLimiter({ windowMs: 10 * 60 * 1000, max: 6 }), async (req, 
                   uid: `growth-audit-${leadId}-rep@aimdentallab.com`,
                   start: callback.start,
                   end: new Date(callback.start.getTime() + 30 * 60000),
-                  summary: `${repFirst}: call ${lead.name}, ${lead.practice} (Growth Audit)`,
+                  summary: `${repFirst}: call ${lead.name}, ${lead.practice}, between ${windowRange(callback)}`,
                   description: [
                     `Call-back window: ${describeCallback(callback)}`,
                     `Phone: ${lead.phone}`,
