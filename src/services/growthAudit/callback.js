@@ -97,6 +97,11 @@ function windowRange(cb) {
   return `${cb.windowLabel.replace(/^.*\((.*)\)$/, '$1')}${cb.tzLabel ? ` ${cb.tzLabel}` : ''}`
 }
 
+// "8 and 11 am ET", for "between ..." in calendar titles.
+function windowBetween(cb) {
+  return windowRange(cb).replace(' to ', ' and ')
+}
+
 // "Tuesday, October 21, in the morning (8 to 11 am ET)"
 function describeCallback(cb) {
   return `${cb.dayLabel}, in the ${cb.short} (${windowRange(cb)})`
@@ -160,4 +165,4 @@ function icsEvent({ uid, start, end, summary, description, location, alarmMinute
   return Buffer.from(lines.map(fold).join('\r\n') + '\r\n', 'utf8')
 }
 
-module.exports = { WINDOWS, parseCallback, describeCallback, windowRange, icsEvent, timezoneFor, todayIn, addDays }
+module.exports = { WINDOWS, parseCallback, describeCallback, windowRange, windowBetween, icsEvent, timezoneFor, todayIn, addDays }

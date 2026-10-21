@@ -8,7 +8,7 @@ const rateLimiter = require('../middleware/rateLimiter')
 const { remakeCost, money } = require('../services/growthAudit/calc')
 const { writeReport } = require('../services/growthAudit/report')
 const { reportEmail, leadNotificationEmail } = require('../services/growthAudit/email')
-const { parseCallback, describeCallback, windowRange, icsEvent } = require('../services/growthAudit/callback')
+const { parseCallback, describeCallback, windowBetween, icsEvent } = require('../services/growthAudit/callback')
 const { renderReportPdf, reportPdfFilename } = require('../services/growthAudit/pdf')
 
 // POST /api/growth-audit: the website's Growth Audit assessment (/partner).
@@ -211,7 +211,7 @@ router.post('/', rateLimiter({ windowMs: 10 * 60 * 1000, max: 6 }), async (req, 
                 uid: `growth-audit-${leadId}-practice@aimdentallab.com`,
                 start: callback.start,
                 end: new Date(callback.start.getTime() + 30 * 60000),
-                summary: `Call from ${contact.firstName === 'the AIM team' ? 'AIM Dental Laboratory' : `${contact.firstName}, AIM Dental Lab`}, between ${windowRange(callback)}`,
+                summary: `Call from ${contact.firstName === 'the AIM team' ? 'AIM Dental Laboratory' : `${contact.firstName}, AIM Dental Lab`}, between ${windowBetween(callback)}`,
                 transparent: true,
                 description: `${contact.name} will call you about your Growth Audit results, ${callbackLine}. Questions before then? ${contact.phone}`,
                 location: contact.phone,
@@ -244,7 +244,7 @@ router.post('/', rateLimiter({ windowMs: 10 * 60 * 1000, max: 6 }), async (req, 
                   uid: `growth-audit-${leadId}-rep@aimdentallab.com`,
                   start: callback.start,
                   end: new Date(callback.start.getTime() + 30 * 60000),
-                  summary: `${repFirst}: call ${lead.name}, ${lead.practice}, between ${windowRange(callback)}`,
+                  summary: `${repFirst}: call ${lead.name}, ${lead.practice}, between ${windowBetween(callback)}`,
                   description: [
                     `Call-back window: ${describeCallback(callback)}`,
                     `Phone: ${lead.phone}`,

@@ -244,9 +244,11 @@ test('review fixes: PDF carries its own logo and icon, dark bands use the brand 
 })
 
 test('review fixes: practice invite is a short free event titled with the window', () => {
-  const { windowRange } = require('../src/services/growthAudit/callback')
+  const { windowRange, windowBetween } = require('../src/services/growthAudit/callback')
   const cb = parseCallback({ date: '2026-10-21', window: 'morning', repId: 'james', now: NOW })
   assert.strictEqual(windowRange(cb), '8 to 11 am ET')
+  assert.strictEqual(windowBetween(cb), '8 and 11 am ET')
+  assert.strictEqual(windowBetween(parseCallback({ date: '2026-10-21', window: 'midday', repId: 'william', now: NOW })), '11 am and 2 pm PT')
   const ics = icsEvent({ uid: 'x@aim', start: cb.start, end: new Date(cb.start.getTime() + 30 * 60000), summary: `Call from James, between ${windowRange(cb)}`, description: 'd', transparent: true }).toString()
   assert.ok(ics.includes('DTEND:20261021T123000Z'))
   assert.ok(ics.includes('TRANSP:TRANSPARENT'))
