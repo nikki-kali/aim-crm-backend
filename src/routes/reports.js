@@ -576,7 +576,7 @@ async function describeClaimForConfirmation(claim) {
     return { label: `${rows[0].name || rows[0].email}'s Daily Sales Report`, detail: `This will send ${rows[0].name || rows[0].email}'s Daily Sales Report for ${claim.report_date} now.` }
   }
   if (claim.report_type === winbackApproval.REPORT_TYPE) {
-    return { label: 'the Dormant Accounts Re-engagement approval email', detail: 'This will send the Dormant Accounts Re-engagement approval email, with the playbook PDF attached, from noreply@aimdentallab.com now: ' + winbackApproval.RECIPIENTS_TEXT + '. (Email version ' + winbackApproval.VERSION + ')' }
+    return { label: 'the Dormant Accounts Re-engagement approval email', detail: 'This will send the Dormant Accounts Re-engagement approval email, with the presentation and playbook PDFs attached, from noreply@aimdentallab.com now: ' + winbackApproval.RECIPIENTS_TEXT + '. (Email version ' + winbackApproval.VERSION + ')' }
   }
   if (claim.report_type === contentApprovalRequest.ARTICLES_REPORT_TYPE) {
     return { label: 'the articles for approval email', detail: 'This will send the articles-for-approval email (with the questions for the lab) from noreply@aimdentallab.com to leadership now, as a new email: to execassistant@aimdentallab.com, cc ben@aimdentallab.com and stephenm@aimdentallab.com, bcc media@aimdentallab.com. (Email version ' + contentApprovalRequest.ARTICLES_VERSION + ')' }
