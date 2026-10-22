@@ -27,34 +27,47 @@ const { money, percent, BENCHMARK_REMAKE_RATE } = require('./calc')
 // House style: no em dashes, plain sentences, "you" for the reader.
 
 // What each problem usually comes from, a chairside fix, and how AIM helps.
+// fixShort / aimShort are the one-line versions the report shows at a glance.
 // Listed in the order we'd tackle them: fit problems cost the most chair time.
 const PROBLEMS = {
   'Margins or fit': {
+    fixShort: 'Trace the full margin before it ships',
+    aimShort: 'Magnification and a second check on every case',
     cause: 'Margin remakes usually trace back to a margin that was not fully captured: a break in the line, a drag mark, or a bubble right at the finish line.',
     fix: 'Before the case leaves, trace the margin all the way around each prep. On a scan, rescan just that area instead of retaking the whole arch.',
     aim: 'Every case is checked under high-powered magnification, and a second technician reviews it before it ships, so margin problems are caught at the bench.',
   },
   'Contacts or occlusion': {
+    fixShort: 'Send a full-arch bite with no thin spots',
+    aimShort: 'Bite and opposing arch checked at intake',
     cause: 'Tight contacts and high bites usually come from the bite record: a perforated or thin bite registration, or a partial opposing arch.',
     fix: 'Check for full-arch contact with no thin spots, and on a scan confirm the whole opposing arch and that the arches meet correctly in the software.',
     aim: 'Impressions and scans are checked at intake, including the opposing arch and bite, before any work begins.',
   },
   'Digital scan issues': {
+    fixShort: 'Review the scan before you submit',
+    aimShort: 'Every major scanner, checked before milling',
     cause: 'Scan remakes usually come from holes in the mesh, a partial opposing arch, warping from movement, or a scan body that was not identified.',
     fix: 'Review the scan on screen before you submit: margins, coverage, bite, and the scan body on implant cases.',
     aim: 'Every major intraoral scanner is accepted (STL, PLY, OBJ, DCM), and scans are checked at intake so problems are caught before milling.',
   },
   'Communication with the lab': {
+    fixShort: 'Send photos and specific notes',
+    aimShort: 'One named rep and online case tracking',
     cause: 'Many remakes start with a gap in the prescription: missing notes on materials, margins or occlusion, or no way to check on a case.',
     fix: 'Send photos and specific notes with every case, and talk complex cases through before you prep.',
     aim: 'You get one named rep who knows your practice, and you can track any case online by case number.',
   },
   Shade: {
+    fixShort: 'Shade photo with the tab, in good light',
+    aimShort: 'Shade matched on every unit',
     cause: 'Shade misses usually come from the information the lab receives: a single shade tab, mixed lighting, or no photo for reference.',
     fix: 'Take the shade in consistent light and send a photo with the shade tab next to the tooth.',
     aim: 'Shade is matched on every unit, and complex cases can get a digital design preview before milling.',
   },
   'Turnaround time': {
+    fixShort: 'Agree rush terms before you need them',
+    aimShort: '24-hour NYC rush, 2-day rush everywhere',
     cause: 'When a remake also restarts the queue, the patient waits twice and your schedule absorbs a second visit.',
     fix: 'Agree the rush terms with your lab before you need them, so a redo never waits behind new cases.',
     aim: 'AIM offers a 24-hour rush in the NYC metro for scans received by 12 PM, and a 2-day rush for every practice.',
@@ -150,6 +163,17 @@ function headlineFor(cost, a) {
   if (cost.annualRemakes === 0) return 'Your remake rate is excellent. Here is how to keep it there.'
   if (a.recoverable >= 1000) return `About ${money(a.recoverable)} a year of your remake cost is recoverable.`
   return `Remakes are costing you about ${money(cost.total)} a year.`
+}
+
+// The whole result in one sentence, for the top of the report.
+function glanceFor(cost, a) {
+  if (cost.annualRemakes === 0) return 'No remakes reported. The goal is keeping it that way as you grow.'
+  const national = `the ${percent(BENCHMARK_REMAKE_RATE)} national average`
+  const ratio = cost.rate / BENCHMARK_REMAKE_RATE
+  if (a.band === 'low') return `Your remake rate is ${percent(cost.rate)}, below ${national}.`
+  if (a.band === 'near') return `Your remake rate is ${percent(cost.rate)}, close to ${national}.`
+  if (ratio >= 1.5) return `Your remake rate is ${percent(cost.rate)}, about ${Math.round(ratio * 10) / 10}x ${national}.`
+  return `Your remake rate is ${percent(cost.rate)}, above ${national}.`
 }
 
 function summaryFor(cost, a) {
@@ -295,6 +319,7 @@ function buildReport({ cost, pains = [], interest = '', firstName = 'your AIM re
   const name = firstName === 'the AIM team' ? 'our team' : firstName
   return {
     headline: headlineFor(cost, a),
+    glance: glanceFor(cost, a),
     summary: summaryFor(cost, a),
     cta: ctaFor({ cost, a, firstName: name, callback }),
     sections: [costSection(cost, a), leverSection(cost, a), causesSection(pains), helpSection(pains, cost)].filter(Boolean),
