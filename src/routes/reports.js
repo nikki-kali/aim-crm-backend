@@ -16,6 +16,7 @@ const {
 const { runEvidentReport, sendEvidentReportForApproval } = require('../services/evidentReport')
 const { STALE_CLAIM_MINUTES, APPROVER_EMAIL, peekApprovalToken, consumeApprovalToken, markApprovalTokenSent, peekStaleUnsentClaim, claimFreshPreview } = require('../services/reportApproval')
 const contentApprovalRequest = require('../services/contentApproval/requestEmail')
+const winbackApproval = require('../services/winbackApproval')
 const { getCompanyTotalRevenue } = require('../services/clientRevenue')
 const { resolveViewableRepId, fetchRepQ4Progress } = require('../services/repProgress')
 
@@ -574,6 +575,9 @@ async function describeClaimForConfirmation(claim) {
     if (!rows[0]) return null
     return { label: `${rows[0].name || rows[0].email}'s Daily Sales Report`, detail: `This will send ${rows[0].name || rows[0].email}'s Daily Sales Report for ${claim.report_date} now.` }
   }
+  if (claim.report_type === winbackApproval.REPORT_TYPE) {
+    return { label: 'the Dormant Accounts Re-engagement approval email', detail: 'This will send the Dormant Accounts Re-engagement approval email, with the playbook PDF attached, from noreply@aimdentallab.com now: ' + winbackApproval.RECIPIENTS_TEXT + '. (Email version ' + winbackApproval.VERSION + ')' }
+  }
   if (claim.report_type === contentApprovalRequest.ARTICLES_REPORT_TYPE) {
     return { label: 'the articles for approval email', detail: 'This will send the articles-for-approval email (with the questions for the lab) from noreply@aimdentallab.com to leadership now, as a new email: to execassistant@aimdentallab.com, cc ben@aimdentallab.com and stephenm@aimdentallab.com, bcc media@aimdentallab.com. (Email version ' + contentApprovalRequest.ARTICLES_VERSION + ')' }
   }
@@ -700,6 +704,10 @@ async function sendApprovedReport(claim) {
     if (!rows[0]) return { ok: false, status: 404, title: 'Rep not found', message: 'The rep this report was for no longer exists.' }
     await sendRepDailyReport(rows[0], { dateStr: claim.report_date })
     return { ok: true, title: 'Sent!', message: `${rows[0].name || rows[0].email}'s Daily Sales Report has been sent.` }
+  }
+  if (claim.report_type === winbackApproval.REPORT_TYPE) {
+    await winbackApproval.sendWinbackApproval()
+    return { ok: true, title: 'Sent!', message: 'The Dormant Accounts Re-engagement email has been sent to leadership.' }
   }
   if (claim.report_type === contentApprovalRequest.ARTICLES_REPORT_TYPE) {
     await contentApprovalRequest.sendContentApprovalArticles()
