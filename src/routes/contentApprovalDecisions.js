@@ -12,6 +12,8 @@ const POST_IDS = [
   'oct21-howto-reel',
   // Blog articles under review (Marketing OS src/data/articleApprovals.js)
   'art-7questions', 'art-guarantee', 'art-zirconia', 'art-turnaround', 'art-diabetes',
+  // November 2026 posts (Marketing OS src/data/novemberApprovals.js)
+  'nov03', 'nov04', 'nov05', 'nov06', 'nov07', 'nov09', 'nov10', 'nov11', 'nov12', 'nov13', 'nov14', 'nov16', 'nov17', 'nov19', 'nov20', 'nov21', 'nov25', 'nov27',
 ]
 
 // The review page is open to anyone with the link (no sign-in required).

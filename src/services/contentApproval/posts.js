@@ -1,6 +1,6 @@
 // The posts listed on Marketing OS's /content-approvals page, with their
 // scheduled dates, so the automatic follow-up can say which ones still need a
-// decision. Keep in sync with Marketing OS's src/data/octoberApprovals.js
+// decision. Keep in sync with Marketing OS's src/data/octoberApprovals.js and novemberApprovals.js
 // (ids must match the ones the approvals page saves decisions under).
 const APPROVAL_POSTS = [
   { id: 'oct05', date: '2026-10-09', title: 'Real Cost of a Remake (carousel)', note: 'We refreshed the visuals and restored the approved guarantee wording on the last slide.' },
@@ -19,6 +19,25 @@ const APPROVAL_POSTS = [
   { id: 'art-zirconia', date: '2026-10-26', title: 'Article: Zirconia or e.max' },
   { id: 'art-turnaround', date: '2026-10-30', title: 'Article update: Turnaround Times and Our 2% Remake Rate' },
   { id: 'art-diabetes', date: '2026-11-03', title: 'Article: What Diabetes Means for Restorative Case Planning' },
+  // November 2026 posts
+  { id: 'nov03', date: '2026-11-03', title: "Diabetes and restorative case planning" },
+  { id: 'nov04', date: '2026-11-04', title: "Finished by Hand" },
+  { id: 'nov05', date: '2026-11-05', title: "Standard turnaround, in real days" },
+  { id: 'nov06', date: '2026-11-06', title: "Lab Notes: what's squeezing practices in 2026" },
+  { id: 'nov07', date: '2026-11-07', title: "Checked at a scale you can't see" },
+  { id: 'nov09', date: '2026-11-09', title: "Built to Blend In" },
+  { id: 'nov10', date: '2026-11-10', title: "Most remakes start on the Rx" },
+  { id: 'nov11', date: '2026-11-11', title: "Veterans Day" },
+  { id: 'nov12', date: '2026-11-12', title: "Our remake rate: 2%" },
+  { id: 'nov13', date: '2026-11-13', title: "Lab Notes: what a complete Rx includes" },
+  { id: 'nov14', date: '2026-11-14', title: "Scan with what you already use" },
+  { id: 'nov16', date: '2026-11-16', title: "Proportion and Light" },
+  { id: 'nov17', date: '2026-11-17', title: "Zirconia or e.max?" },
+  { id: 'nov19', date: '2026-11-19', title: "7 questions to ask before you send a case" },
+  { id: 'nov20', date: '2026-11-20', title: "Plan your year-end cases" },
+  { id: 'nov21', date: '2026-11-21', title: "1951. Still by hand." },
+  { id: 'nov25', date: '2026-11-25', title: "Thanksgiving thank-you" },
+  { id: 'nov27', date: '2026-11-27', title: "Lab Notes: the shared frustration" },
 ]
 
 // A follow-up only goes out for posts that are coming up soon or missed
