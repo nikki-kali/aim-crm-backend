@@ -8,7 +8,7 @@ const { createApprovalToken, buildApproveUrl } = require('../reportApproval')
 // Weekly marketing update to leadership. Each week is one HTML file in
 // ./updates named by the week-ending date (YYYY-MM-DD.html, with an
 // <!--APPROVAL_BANNER--> placeholder and its subject in <title>). The newest
-// file is the one sent. Same preview-then-"Approve & Send" flow as the other
+// file is the one sent, with any files in ./updates/<week>-attachments attached. Same preview-then-"Approve & Send" flow as the other
 // leadership emails: the preview goes to the media inbox first.
 const REPORT_TYPE = 'marketing-weekly-update'
 const PREVIEW_TO = 'media@aimdentallab.com'
@@ -27,8 +27,15 @@ function latestUpdate() {
   const file = files[files.length - 1]
   const html = fs.readFileSync(path.join(UPDATES_DIR, file), 'utf8')
   const subject = (html.match(/<title>([^<]+)<\/title>/) || [])[1] || 'Marketing weekly update'
-  const version = crypto.createHash('sha1').update(html).digest('hex').slice(0, 8)
-  return { week: file.slice(0, 10), html, subject, version }
+  // Optional attachments: every file in updates/<week>-attachments/.
+  const week = file.slice(0, 10)
+  const dir = path.join(UPDATES_DIR, `${week}-attachments`)
+  const attachments = fs.existsSync(dir)
+    ? fs.readdirSync(dir).filter((f) => !f.startsWith('.')).sort().map((f) => ({ filename: f, content: fs.readFileSync(path.join(dir, f)) }))
+    : []
+  const hash = crypto.createHash('sha1').update(html)
+  attachments.forEach((a) => hash.update(a.filename).update(a.content))
+  return { week, html, subject, attachments, version: hash.digest('hex').slice(0, 8) }
 }
 
 function bannerRow(approveUrl) {
@@ -43,13 +50,13 @@ async function sendWeeklyUpdatePreview() {
   // Retire any earlier unused preview link, so only the newest one can send.
   await db.query(`update report_approval_tokens set used_at = now() where report_type = $1 and used_at is null`, [REPORT_TYPE])
   const token = await createApprovalToken({ reportType: REPORT_TYPE, reportDate: u.week })
-  await sendEmail({ to: PREVIEW_TO, subject: u.subject, html: u.html.replace('<!--APPROVAL_BANNER-->', bannerRow(buildApproveUrl(token))) })
+  await sendEmail({ to: PREVIEW_TO, subject: u.subject, html: u.html.replace('<!--APPROVAL_BANNER-->', bannerRow(buildApproveUrl(token))), attachments: u.attachments })
   return u
 }
 
 async function sendWeeklyUpdate() {
   const u = latestUpdate()
-  await sendEmail({ ...LEADERSHIP, subject: u.subject, html: u.html.replace('<!--APPROVAL_BANNER-->', '') })
+  await sendEmail({ ...LEADERSHIP, subject: u.subject, html: u.html.replace('<!--APPROVAL_BANNER-->', ''), attachments: u.attachments })
   return u
 }
 
