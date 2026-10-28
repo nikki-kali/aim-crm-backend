@@ -1,5 +1,6 @@
 const test = require('node:test')
 const assert = require('node:assert')
+process.env.EVENT_SIGNUP_SECRET = 'test-secret'
 const { validateSignup, confirmationCode, buildNotes } = require('../src/routes/eventSignups')
 const { scoreFromLead } = require('../src/services/scoring')
 
@@ -27,9 +28,24 @@ test('validateSignup drops interests outside the list and treats consent strictl
   assert.strictEqual(data.consent, false)
 })
 
+test('validateSignup ignores inherited keys and strips HTML characters', () => {
+  for (const event of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) assert.ok(validateSignup({ ...good, event }).error, event)
+  const { data } = validateSignup({ ...good, name: '<img src=x onerror=alert(1)>Jane', practice: 'A & B "Dental"' })
+  assert.ok(!/[<>&"']/.test(data.name + data.practice))
+  assert.ok(validateSignup({ ...good, phone: '<b>call</b>' }).error)
+})
+
+test('confirmationCode depends on the server secret', () => {
+  const a = confirmationCode(42)
+  process.env.EVENT_SIGNUP_SECRET = 'other-secret'
+  const b = confirmationCode(42)
+  process.env.EVENT_SIGNUP_SECRET = 'test-secret'
+  assert.notStrictEqual(a, b)
+})
+
 test('confirmationCode is stable and short', () => {
   assert.strictEqual(confirmationCode(42), confirmationCode(42))
-  assert.match(confirmationCode(42), /^AIM-[0-9A-F]{4}$/)
+  assert.match(confirmationCode(42), /^AIM-[0-9A-F]{6}$/)
   assert.notStrictEqual(confirmationCode(42), confirmationCode(43))
 })
 

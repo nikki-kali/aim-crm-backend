@@ -13,31 +13,38 @@ const router = express.Router()
 // the staff tablet), so web-leads' 8-per-10-minutes limit would start
 // rejecting real doctors within minutes. Only events listed here are
 // accepted; the key is what the website page posts.
-const EVENTS = {
-  'gnydm-2026': { label: 'GNYDM 2026', source: 'GNYDM 2026' },
-}
+const EVENTS = Object.freeze(Object.assign(Object.create(null), {
+  'gnydm-2026': Object.freeze({ label: 'GNYDM 2026', source: 'GNYDM 2026' }),
+}))
 
 const INTERESTS = ['Crown & Bridge', 'Implant', 'Dentures', 'Ortho', 'Digital scanning', 'Not sure yet']
 
+// Strips HTML-significant characters: this is a public, unauthenticated
+// source, and lead names end up in staff-facing emails elsewhere in the CRM.
 function clean(value, max = 200) {
-  return String(value ?? '').trim().slice(0, max)
+  return String(value ?? '').replace(/[<>&"'`]/g, '').trim().slice(0, max)
 }
 
 // Returns { data } or { error }. Pure, so it can be tested without a database.
 function validateSignup(body = {}) {
-  const event = EVENTS[body.event]
-  if (!event) return { error: 'Unknown event.' }
+  // Own-key lookup only: a key like 'constructor' must not resolve to an
+  // inherited value (that would save the lead with no event and skip dedupe).
+  const key = typeof body.event === 'string' ? body.event : ''
+  if (!Object.prototype.hasOwnProperty.call(EVENTS, key)) return { error: 'Unknown event.' }
+  const event = EVENTS[key]
+  if (typeof event.source !== 'string' || !event.source) return { error: 'Unknown event.' }
   const name = clean(body.name, 120)
   const practice = clean(body.practice, 160)
   const email = clean(body.email, 200).toLowerCase()
   const phone = clean(body.phone, 40)
+  if (phone && !/^[0-9 ()+.\-x]{3,40}$/i.test(phone)) return { error: 'Please enter a valid phone number.' }
   const interest = INTERESTS.includes(body.interest) ? body.interest : ''
   if (!name) return { error: 'Please enter your name.' }
   if (!practice) return { error: 'Please enter your practice name.' }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: 'Please enter a valid email.' }
   return {
     data: {
-      event, eventKey: body.event, name, practice, email, phone, interest,
+      event, eventKey: key, name, practice, email, phone, interest,
       consent: body.consent === true,
       staffEntry: body.staff === true,
       attribution: clean(body.attribution, 300),
@@ -45,11 +52,18 @@ function validateSignup(body = {}) {
   }
 }
 
-// Short code shown on the visitor's success screen, so booth staff can see at
-// a glance that a sign-up went through before handing over a prize. Derived
-// from the lead id, so the same sign-up always shows the same code.
+// Code shown on the visitor's success screen, so booth staff can check a
+// sign-up went through before handing over a prize. Keyed with a server-side
+// secret, so it can't be worked out from the (sequential) lead id; the same
+// sign-up always shows the same code. Staff can confirm a code against the
+// lead in the CRM, where it's written into the notes.
+function signupSecret() {
+  const secret = process.env.EVENT_SIGNUP_SECRET || process.env.JWT_SECRET
+  if (!secret) throw new Error('EVENT_SIGNUP_SECRET (or JWT_SECRET) must be set')
+  return secret
+}
 function confirmationCode(leadId) {
-  return 'AIM-' + crypto.createHash('sha256').update(String(leadId)).digest('hex').slice(0, 4).toUpperCase()
+  return 'AIM-' + crypto.createHmac('sha256', signupSecret()).update(`event-signup:${leadId}`).digest('hex').slice(0, 6).toUpperCase()
 }
 
 function buildNotes(d) {
@@ -104,7 +118,10 @@ router.post('/', rateLimiter({ windowMs: 10 * 60 * 1000, max: 150 }), async (req
       [data.name, data.practice, data.phone, data.email, data.event.source, data.interest || 'General Inquiry', buildNotes(data), aiScore]
     )
 
-    res.json({ success: true, duplicate: false, code: confirmationCode(rows[0].id), name: data.name })
+    const code = confirmationCode(rows[0].id)
+    // Recorded on the lead so staff can confirm a code in the CRM.
+    await db.query("UPDATE leads SET notes = notes || $1 WHERE id = $2", [`\nConfirmation code: ${code}`, rows[0].id])
+    res.json({ success: true, duplicate: false, code, name: data.name })
   } catch (err) {
     next(err)
   }

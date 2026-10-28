@@ -4,6 +4,7 @@ const test = require('node:test')
 const assert = require('node:assert')
 const path = require('path')
 const express = require('express')
+process.env.EVENT_SIGNUP_SECRET = 'test-secret'
 
 const dbPath = path.join(__dirname, '../src/config/db.js')
 const leads = []
@@ -11,6 +12,7 @@ require.cache[require.resolve(dbPath)] = {
   id: dbPath, filename: dbPath, loaded: true,
   exports: {
     query: async (sql, params) => {
+      if (sql.startsWith('UPDATE')) { const l = leads.find((x) => x.id === params[1]); l.notes += params[0]; return { rows: [] } }
       if (sql.startsWith('SELECT')) {
         const hit = leads.find((l) => l.email === params[0] && l.referral_source === params[1])
         return { rows: hit ? [{ id: hit.id }] : [] }
@@ -37,9 +39,12 @@ test('event sign-up route: create, duplicate, validation, honeypot, CORS, booth-
   const base = `http://127.0.0.1:${server.address().port}/api/event-signups`
   try {
     const r1 = await post(base, body); const d1 = await r1.json()
-    assert.strictEqual(r1.status, 200); assert.strictEqual(d1.duplicate, false); assert.match(d1.code, /^AIM-[0-9A-F]{4}$/)
+    assert.strictEqual(r1.status, 200); assert.strictEqual(d1.duplicate, false); assert.match(d1.code, /^AIM-[0-9A-F]{6}$/)
     assert.strictEqual(r1.headers.get('access-control-allow-origin'), '*')
     assert.match(leads[0].notes, /GNYDM 2026 \(booth QR code\)/)
+    assert.ok(leads[0].notes.includes(`Confirmation code: ${d1.code}`))
+    const r0 = await post(base, { ...body, event: 'constructor', email: 'proto@example.com' })
+    assert.strictEqual(r0.status, 400)
 
     const r2 = await post(base, { ...body, email: 'TEST@example.com' }); const d2 = await r2.json()
     assert.strictEqual(d2.duplicate, true); assert.strictEqual(d2.code, d1.code); assert.strictEqual(leads.length, 1)
