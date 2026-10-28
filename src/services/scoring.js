@@ -1,7 +1,7 @@
 const SOURCE_SCORES = {
   Referral: 25, LinkedIn: 20, 'Office Visit': 20, Google: 15,
   'Website Form Submission': 15, Email: 10, 'Walk-in': 12, Facebook: 10,
-  Instagram: 10, X: 8, 'Email Marketing': 8,
+  Instagram: 10, X: 8, 'Email Marketing': 8, 'Trade Show': 15,
 }
 const CASE_SCORES = { Implant: 15, 'Crown & Bridge': 12, Ortho: 10, Dentures: 8, Partial: 5 }
 const INTENT_SCORES = { High: 20, Medium: 10, Low: 0 }
@@ -26,6 +26,8 @@ const SOURCE_ALIASES = {
   'office visit': 'Office Visit',
   'walk-in': 'Walk-in',
   'walk in': 'Walk-in',
+  'trade show': 'Trade Show',
+  tradeshow: 'Trade Show',
 }
 
 function normalizeSource(raw) {
