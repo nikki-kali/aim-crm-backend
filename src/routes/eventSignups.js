@@ -22,7 +22,14 @@ const INTERESTS = ['Crown & Bridge', 'Implant', 'Dentures', 'Ortho', 'Digital sc
 // Strips HTML-significant characters: this is a public, unauthenticated
 // source, and lead names end up in staff-facing emails elsewhere in the CRM.
 function clean(value, max = 200) {
-  return String(value ?? '').replace(/[<>&"'`]/g, '').trim().slice(0, max)
+  // Control characters and line breaks are collapsed too, so no field can
+  // add its own line (such as a fake confirmation code) to the lead's notes.
+  return String(value ?? '')
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ')
+    .replace(/[<>&"'`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max)
 }
 
 // Returns { data } or { error }. Pure, so it can be tested without a database.
@@ -57,10 +64,13 @@ function validateSignup(body = {}) {
 // secret, so it can't be worked out from the (sequential) lead id; the same
 // sign-up always shows the same code. Staff can confirm a code against the
 // lead in the CRM, where it's written into the notes.
+// A dedicated EVENT_SIGNUP_SECRET is preferred. Without one, a separate key
+// is derived from JWT_SECRET (HKDF), so the login signing key is never used
+// directly for anything else.
 function signupSecret() {
-  const secret = process.env.EVENT_SIGNUP_SECRET || process.env.JWT_SECRET
-  if (!secret) throw new Error('EVENT_SIGNUP_SECRET (or JWT_SECRET) must be set')
-  return secret
+  if (process.env.EVENT_SIGNUP_SECRET) return process.env.EVENT_SIGNUP_SECRET
+  if (!process.env.JWT_SECRET) throw new Error('EVENT_SIGNUP_SECRET (or JWT_SECRET) must be set')
+  return Buffer.from(crypto.hkdfSync('sha256', process.env.JWT_SECRET, 'aim-crm', 'event-signup-code', 32))
 }
 function confirmationCode(leadId) {
   return 'AIM-' + crypto.createHmac('sha256', signupSecret()).update(`event-signup:${leadId}`).digest('hex').slice(0, 6).toUpperCase()

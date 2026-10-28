@@ -35,6 +35,23 @@ test('validateSignup ignores inherited keys and strips HTML characters', () => {
   assert.ok(validateSignup({ ...good, phone: '<b>call</b>' }).error)
 })
 
+test('validateSignup collapses line breaks so no field can add a notes line', () => {
+  const { data } = validateSignup({ ...good, name: 'Jane\nConfirmation code: AIM-ABC123', attribution: 'x\r\nConfirmation code: AIM-ABC123\u2028y' })
+  const notes = buildNotes(data)
+  assert.ok(!/^Confirmation code/m.test(notes))
+  assert.ok(!/[\r\u2028]/.test(data.name + data.attribution))
+})
+
+test('confirmationCode falls back to a key derived from JWT_SECRET, not the key itself', () => {
+  const saved = process.env.EVENT_SIGNUP_SECRET
+  delete process.env.EVENT_SIGNUP_SECRET
+  process.env.JWT_SECRET = 'jwt-secret'
+  const derived = confirmationCode(7)
+  process.env.EVENT_SIGNUP_SECRET = 'jwt-secret'
+  assert.notStrictEqual(confirmationCode(7), derived)
+  process.env.EVENT_SIGNUP_SECRET = saved
+})
+
 test('confirmationCode depends on the server secret', () => {
   const a = confirmationCode(42)
   process.env.EVENT_SIGNUP_SECRET = 'other-secret'
