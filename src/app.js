@@ -65,6 +65,7 @@ app.use('/api/office-visits', officeVisitsRoutes) // public — Office Visit req
 app.use('/api/partner-meetings', partnerMeetingsRoutes) // public — partner meeting request form + Ben's approve / call-first links
 app.use('/api/growth-audit', require('./routes/growthAudit')) // public: website Growth Audit assessment (/partner), emails the report
 app.use('/api/event-signups', require('./routes/eventSignups')) // public: trade-show sign-ups (aimdentallab.com/gnydm booth QR + staff tablet)
+app.use('/api/job-applications', require('./routes/jobApplications')) // public: website careers Apply form, emails the hiring contact
 
 // FRONTEND_URL supports a comma-separated list so both the stable Vercel
 // domain and a custom domain can be allowed at once (e.g. while DNS for a
