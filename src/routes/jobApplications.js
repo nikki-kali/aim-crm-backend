@@ -26,7 +26,8 @@ const ALLOWED_EXTENSIONS = ['.pdf', '.doc', '.docx']
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_RESUME_BYTES, files: 1 },
+  // Text fields are capped too: the summary allows 3000 characters (up to ~12KB in UTF-8).
+  limits: { fileSize: MAX_RESUME_BYTES, files: 1, fields: 12, fieldSize: 16 * 1024, parts: 14 },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase()
     if (!ALLOWED_EXTENSIONS.includes(ext)) {
@@ -65,6 +66,15 @@ function validateApplication(body = {}) {
   if (phone && !/^[0-9 ()+.\-x]{3,40}$/i.test(phone)) return { error: 'Please enter a valid phone number.' }
   if (!summary) return { error: 'Please add a short summary of your experience.' }
   return { data: { position, name, email, phone, location, experience, summary } }
+}
+
+// The resume's name comes from the applicant's browser; keep it to a plain,
+// short file name before it is used as the attachment name and shown in the email.
+function safeFilename(name) {
+  const ext = path.extname(String(name || '')).toLowerCase()
+  const base = path.basename(String(name || ''), path.extname(String(name || '')))
+    .replace(/[^A-Za-z0-9 ._()-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80)
+  return `${base || 'resume'}${ALLOWED_EXTENSIONS.includes(ext) ? ext : ''}`
 }
 
 function recipients(env = process.env) {
@@ -113,6 +123,7 @@ router.post(
     upload.single('resume')(req, res, (err) => {
       if (err instanceof multer.MulterError) {
         if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: `Your resume must be under ${MAX_RESUME_BYTES / (1024 * 1024)}MB.` })
+        if (['LIMIT_FIELD_COUNT', 'LIMIT_FIELD_VALUE', 'LIMIT_PART_COUNT', 'LIMIT_FILE_COUNT'].includes(err.code)) return res.status(413).json({ error: 'Your application is too large. Please shorten it and try again.' })
         return res.status(400).json({ error: err.message })
       }
       if (err) return res.status(400).json({ error: err.message })
@@ -127,6 +138,7 @@ router.post(
       const { data, error } = validateApplication(req.body)
       if (error) return res.status(400).json({ error })
       if (!req.file) return res.status(400).json({ error: 'Please attach your resume.' })
+      const resumeName = safeFilename(req.file.originalname)
 
       const { to, cc } = recipients()
       if (!to.length) {
@@ -140,8 +152,8 @@ router.post(
           cc,
           replyTo: data.email,
           subject: `Application: ${data.position} - ${data.name}`,
-          html: applicationEmail(data, req.file.originalname),
-          attachments: [{ filename: req.file.originalname, content: req.file.buffer }],
+          html: applicationEmail(data, resumeName),
+          attachments: [{ filename: resumeName, content: req.file.buffer }],
         })
       } catch (sendErr) {
         console.error('job-applications: send failed', sendErr.message)
@@ -158,5 +170,6 @@ router.post(
 module.exports = router
 module.exports.validateApplication = validateApplication
 module.exports.recipients = recipients
+module.exports.safeFilename = safeFilename
 module.exports.applicationEmail = applicationEmail
 module.exports.POSITIONS = POSITIONS

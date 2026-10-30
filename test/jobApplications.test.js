@@ -1,6 +1,6 @@
 const test = require('node:test')
 const assert = require('node:assert')
-const { validateApplication, recipients, applicationEmail } = require('../src/routes/jobApplications')
+const { validateApplication, recipients, applicationEmail, safeFilename } = require('../src/routes/jobApplications')
 
 const good = { position: 'Digital Dental Technician', name: ' Alex Rivera ', email: 'Alex@Example.com', phone: '(718) 555-0100', experience: '3-5 years', summary: '3Shape daily.\nRun two printers.' }
 
@@ -36,4 +36,10 @@ test('applicationEmail escapes applicant input', () => {
   const html = applicationEmail({ ...validateApplication(good).data, summary: '<script>x</script>' }, 'cv.pdf')
   assert.ok(!html.includes('<script>'))
   assert.ok(html.includes('&lt;script&gt;'))
+})
+
+test('safeFilename keeps a plain name and the allowed extension', () => {
+  assert.strictEqual(safeFilename('Alex Rivera CV.pdf'), 'Alex Rivera CV.pdf')
+  assert.strictEqual(safeFilename('../../etc/x\r\n"<b>.docx'), 'xb.docx')
+  assert.strictEqual(safeFilename('<>.pdf'), 'resume.pdf')
 })
