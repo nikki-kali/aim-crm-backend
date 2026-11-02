@@ -29,6 +29,18 @@ function optionalUser(req) {
   }
 }
 
+// Returns { name, id } or { error }. Signed-in reviewers are identified from
+// the verified JWT; anyone else must send `reviewerName`, saved with a
+// "(not signed in)" suffix so a typed name never reads as a verified one.
+function resolveReviewer(req) {
+  const user = optionalUser(req)
+  if (user) return { name: user.name || user.email || 'Unknown', id: user.id ?? null }
+  const typed = typeof req.body?.reviewerName === 'string' ? req.body.reviewerName.trim() : ''
+  if (!typed) return { error: 'Please enter your name' }
+  if (typed.length > 80) return { error: 'Name is too long' }
+  return { name: `${typed} (not signed in)`, id: null }
+}
+
 function mapRow(row) {
   return {
     postId: row.post_id,
@@ -41,6 +53,72 @@ function mapRow(row) {
   }
 }
 
+function mapComment(row) {
+  return {
+    id: row.id,
+    postId: row.post_id,
+    parentId: row.parent_id,
+    author: row.author,
+    status: row.status,
+    body: row.body,
+    created: row.created_at,
+  }
+}
+
+// Returns { data } or { error }. Pure, so it can be tested without a database.
+function validateComment(postId, body = {}) {
+  if (!POST_IDS.includes(postId)) return { error: 'Unknown post id' }
+  const text = typeof body.body === 'string' ? body.body.trim() : ''
+  if (!text) return { error: 'Please write a comment first' }
+  if (text.length > 4000) return { error: 'Comment is too long' }
+  let parentId = null
+  if (body.parentId !== undefined && body.parentId !== null && body.parentId !== '') {
+    parentId = Number(body.parentId)
+    if (!Number.isInteger(parentId) || parentId <= 0) return { error: 'Invalid reply target' }
+  }
+  return { data: { text, parentId } }
+}
+
+// GET /api/content-approval-decisions/comments — every post's thread, oldest first
+router.get('/comments', async (req, res, next) => {
+  try {
+    const { rows } = await db.query('select * from content_approval_comments order by created_at, id')
+    res.json({ comments: rows.map(mapComment) })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// POST /api/content-approval-decisions/:postId/comments — add feedback, or a
+// reply when `parentId` is sent. Replies stay one level deep: replying to a
+// reply attaches to the same top-level entry.
+router.post('/:postId/comments', async (req, res, next) => {
+  try {
+    const { postId } = req.params
+    const { data, error } = validateComment(postId, req.body || {})
+    if (error) return res.status(400).json({ error })
+    const reviewer = resolveReviewer(req)
+    if (reviewer.error) return res.status(400).json({ error: reviewer.error })
+
+    let parentId = null
+    if (data.parentId) {
+      const { rows: parent } = await db.query(
+        'select id, parent_id from content_approval_comments where id = $1 and post_id = $2', [data.parentId, postId])
+      if (!parent.length) return res.status(400).json({ error: 'That comment no longer exists' })
+      parentId = parent[0].parent_id ?? parent[0].id
+    }
+
+    const { rows } = await db.query(
+      `insert into content_approval_comments (post_id, parent_id, author, author_id, body)
+       values ($1, $2, $3, $4, $5) returning *`,
+      [postId, parentId, reviewer.name, reviewer.id, data.text]
+    )
+    res.json({ comment: mapComment(rows[0]) })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // GET /api/content-approval-decisions — every post's decision
 router.get('/', async (req, res, next) => {
   try {
@@ -51,10 +129,8 @@ router.get('/', async (req, res, next) => {
   }
 })
 
-// PUT /api/content-approval-decisions/:postId — upsert one post's decision.
-// Signed-in reviewers are identified from the verified JWT. Anyone else must
-// send `reviewerName`; it is saved with a "(not signed in)" suffix so the
-// audit trail never presents a typed name as a verified one.
+// PUT /api/content-approval-decisions/:postId — upsert one post's current
+// decision and log it to the post's comment thread.
 router.put('/:postId', async (req, res, next) => {
   try {
     const { postId } = req.params
@@ -69,17 +145,8 @@ router.put('/:postId', async (req, res, next) => {
     if (feedback.length > 4000) {
       return res.status(400).json({ error: 'Feedback is too long' })
     }
-    const user = optionalUser(req)
-    let reviewerName
-    if (user) {
-      reviewerName = user.name || user.email || 'Unknown'
-    } else {
-      const typed = typeof req.body?.reviewerName === 'string' ? req.body.reviewerName.trim() : ''
-      if (!typed) return res.status(400).json({ error: 'Please enter your name' })
-      if (typed.length > 80) return res.status(400).json({ error: 'Name is too long' })
-      reviewerName = `${typed} (not signed in)`
-    }
-    const reviewerId = user?.id ?? null
+    const reviewer = resolveReviewer(req)
+    if (reviewer.error) return res.status(400).json({ error: reviewer.error })
 
     const { rows } = await db.query(
       `insert into content_approval_decisions (post_id, status, feedback, reviewer, reviewer_id, updated_at)
@@ -89,12 +156,23 @@ router.put('/:postId', async (req, res, next) => {
              reviewer = excluded.reviewer, reviewer_id = excluded.reviewer_id,
              updated_at = now()
        returning *`,
-      [postId, status, feedback, reviewerName, reviewerId]
+      [postId, status, feedback, reviewer.name, reviewer.id]
     )
-    res.json({ decision: mapRow(rows[0]) })
+    // Each decision is also kept in the post's comment thread, so earlier
+    // decisions and feedback stay visible after a newer one replaces them.
+    const { rows: entry } = await db.query(
+      `insert into content_approval_comments (post_id, author, author_id, status, body)
+       values ($1, $2, $3, $4, $5) returning *`,
+      // A reset to '' is logged as 'pending' so the thread shows the post was
+      // sent back for review, rather than reading as plain feedback.
+      [postId, reviewer.name, reviewer.id, status || 'pending', feedback]
+    )
+    res.json({ decision: mapRow(rows[0]), comment: mapComment(entry[0]) })
   } catch (err) {
     next(err)
   }
 })
 
 module.exports = router
+module.exports.validateComment = validateComment
+module.exports.POST_IDS = POST_IDS
