@@ -107,3 +107,11 @@ test('"Queue in Buffer" refuses requests without a valid sign-in', async () => {
     server.close()
   }
 })
+
+test('signed-in user ids that are uuids are not written to the integer id columns', () => {
+  const { integerId } = require('../src/routes/contentApprovalDecisions')
+  assert.strictEqual(integerId('c5f90ed8-8c70-4377-bf35-6b986a185994'), null)
+  assert.strictEqual(integerId(7), 7)
+  assert.strictEqual(integerId('12'), 12)
+  assert.strictEqual(integerId(undefined), null)
+})

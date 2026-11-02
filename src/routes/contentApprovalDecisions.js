@@ -34,13 +34,19 @@ function optionalUser(req) {
   }
 }
 
+// The id columns here are integers (v24/v35), but users.id is a uuid, so a
+// uuid would fail the insert. Keep the id only when it fits; the name stays.
+function integerId(id) {
+  return Number.isInteger(id) || /^\d+$/.test(String(id ?? '')) ? Number(id) : null
+}
+
 // Returns { name, id } or { error }. Signed-in reviewers are identified from
 // the verified JWT; anyone else must send `reviewerName`, saved with a
 // "(not signed in)" suffix so a typed name never reads as a verified one.
 function resolveReviewer(req) {
   const user = optionalUser(req)
   // Names only: this page is public, so an email never stands in for a name.
-  if (user) return { name: user.name || 'Signed-in reviewer', id: user.id ?? null }
+  if (user) return { name: user.name || 'Signed-in reviewer', id: integerId(user.id) }
   const typed = typeof req.body?.reviewerName === 'string' ? req.body.reviewerName.trim() : ''
   if (!typed) return { error: 'Please enter your name' }
   if (typed.length > 80) return { error: 'Name is too long' }
@@ -209,19 +215,33 @@ router.put('/:postId/buffer', auth, rateLimiter({ windowMs: 10 * 60 * 1000, max:
     if (queue) {
       const { rows } = await db.query('select status from content_approval_decisions where post_id = $1', [postId])
       if (rows[0]?.status !== 'approved') return res.status(400).json({ error: 'Only approved posts can be queued' })
-      await db.query(
-        `insert into buffer_releases (post_id, released_by, released_by_id) values ($1, $2, $3)
-         on conflict (post_id) do update set released_by = excluded.released_by, released_by_id = excluded.released_by_id, released_at = now()`,
-        [postId, name, req.user.id == null ? null : String(req.user.id)]
-      )
-    } else {
-      await db.query('delete from buffer_releases where post_id = $1', [postId])
     }
-    const { rows: entry } = await db.query(
-      `insert into content_approval_comments (post_id, author, author_id, status, body)
-       values ($1, $2, $3, '', $4) returning *`,
-      [postId, name, req.user.id ?? null, queue ? 'Queued in Buffer.' : 'Removed from Buffer.']
-    )
+    // Release and its thread entry are saved together, or not at all.
+    const client = await db.connect()
+    let entry
+    try {
+      await client.query('begin')
+      if (queue) {
+        await client.query(
+          `insert into buffer_releases (post_id, released_by, released_by_id) values ($1, $2, $3)
+           on conflict (post_id) do update set released_by = excluded.released_by, released_by_id = excluded.released_by_id, released_at = now()`,
+          [postId, name, req.user.id == null ? null : String(req.user.id)]
+        )
+      } else {
+        await client.query('delete from buffer_releases where post_id = $1', [postId])
+      }
+      ;({ rows: entry } = await client.query(
+        `insert into content_approval_comments (post_id, author, author_id, status, body)
+         values ($1, $2, $3, '', $4) returning *`,
+        [postId, name, integerId(req.user.id), queue ? 'Queued in Buffer.' : 'Removed from Buffer.']
+      ))
+      await client.query('commit')
+    } catch (err) {
+      await client.query('rollback').catch(() => {})
+      throw err
+    } finally {
+      client.release()
+    }
     // Act now rather than at the next scheduled run. Required here, not at the
     // top: the job imports POST_IDS from this file.
     require('../jobs/bufferPublish').runBufferPublishJob({ source: 'release' })
@@ -235,3 +255,4 @@ router.put('/:postId/buffer', auth, rateLimiter({ windowMs: 10 * 60 * 1000, max:
 module.exports = router
 module.exports.validateComment = validateComment
 module.exports.POST_IDS = POST_IDS
+module.exports.integerId = integerId
