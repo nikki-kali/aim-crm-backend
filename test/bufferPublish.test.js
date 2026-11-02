@@ -29,6 +29,8 @@ test('ignores entries with unknown post ids or media from another site, and caps
   assert.strictEqual(planActions({ entries: [entry({ postId: 'evil' })], approvedIds: approved, rows: new Map(), now: NOW }).create.length, 0)
   assert.strictEqual(planActions({ entries: [entry({ images: ['https://evil.example/a.jpg'] })], approvedIds: approved, rows: new Map(), now: NOW }).create.length, 0)
   assert.strictEqual(planActions({ entries: [entry({ images: ['https://marketing.aimdentallab.com/approvals/../x.jpg'] })], approvedIds: approved, rows: new Map(), now: NOW }).create.length, 0)
+  const pdf = { url: 'https://marketing.aimdentallab.com/approvals/d.pdf', title: 'T', thumbnailUrl: 'https://evil.example/t.jpg' }
+  assert.strictEqual(planActions({ entries: [entry({ platform: 'linkedin', images: undefined, document: pdf })], approvedIds: approved, rows: new Map(), now: NOW }).create.length, 0)
   const many = ['instagram', 'linkedin', 'youtube'].flatMap((platform) => ['nov04', 'nov05', 'nov06', 'nov07', 'nov09', 'nov10'].map((postId) => entry({ postId, platform })))
   const all = new Set(many.map((e) => e.postId))
   assert.strictEqual(planActions({ entries: many, approvedIds: all, rows: new Map(), now: NOW }).create.length, 15)

@@ -2,7 +2,7 @@
 const cron = require('node-cron')
 const db = require('../config/db')
 const { sendEmail } = require('../services/email')
-const { CHANNELS, createPost, deletePost } = require('../services/buffer')
+const { CHANNELS, buildPostInput, createPost, deletePost } = require('../services/buffer')
 const { POST_IDS } = require('../routes/contentApprovalDecisions')
 
 // Queues approved social posts in Buffer at their planned time. The plan is
@@ -26,10 +26,23 @@ const WITHDRAW_LEAD_MS = 5 * 60 * 1000
 
 const keyOf = (postId, platform) => `${postId}|${platform}`
 
-const mediaUrls = (e) => [...(e.images || []), e.video?.url, e.document?.url].filter((u) => u !== undefined)
-const hasSafeMedia = (e) => {
-  const urls = mediaUrls(e)
-  return urls.length > 0 && urls.every((u) => typeof u === 'string' && u.startsWith(MEDIA_ORIGIN) && !u.includes('..'))
+// Checks every url/thumbnailUrl in the payload that would actually go to
+// Buffer, so a URL field added to buildPostInput later is covered too.
+function hasSafeMedia(entry) {
+  let input
+  try { input = buildPostInput(entry) } catch { return false }
+  const urls = []
+  const walk = (v) => {
+    if (Array.isArray(v)) v.forEach(walk)
+    else if (v && typeof v === 'object') {
+      for (const [k, x] of Object.entries(v)) {
+        if (/url$/i.test(k)) urls.push(x)
+        else walk(x)
+      }
+    }
+  }
+  walk(input.assets)
+  return urls.length > 0 && urls.every((u) => u === undefined || (typeof u === 'string' && u.startsWith(MEDIA_ORIGIN) && !u.includes('..')))
 }
 
 // Decides what to do; pure, so it can be tested without Buffer or a database.
