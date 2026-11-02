@@ -2,6 +2,7 @@ const express = require('express')
 const db = require('../config/db')
 const jwt = require('jsonwebtoken')
 const rateLimiter = require('../middleware/rateLimiter')
+const auth = require('../middleware/auth')
 
 const router = express.Router()
 const STATUSES = ['', 'approved', 'edit', 'rejected']
@@ -176,10 +177,56 @@ router.put('/:postId', rateLimiter({ windowMs: 10 * 60 * 1000, max: 30 }), async
       [postId, reviewer.name, reviewer.id, status || 'pending', feedback]
     )
     res.json({ decision: mapRow(rows[0]), comment: mapComment(entry[0]) })
-    // Queue (or withdraw) the post in Buffer right away instead of waiting for
-    // the next scheduled run. The job does nothing unless it is switched on.
-    // Required here, not at the top: the job imports POST_IDS from this file.
-    require('../jobs/bufferPublish').runBufferPublishJob({ source: 'approval' }).catch((err) => console.error('[buffer-publish] approval run failed:', err))
+  } catch (err) {
+    next(err)
+  }
+})
+
+// GET /api/content-approval-decisions/buffer — which posts a signed-in user
+// has released to Buffer, and what the job did with each platform.
+router.get('/buffer', async (req, res, next) => {
+  try {
+    const { rows: releases } = await db.query('select * from buffer_releases order by post_id')
+    const { rows: posts } = await db.query('select post_id, platform, status, due_at from buffer_posts order by due_at')
+    res.json({
+      releases: releases.map((r) => ({ postId: r.post_id, releasedBy: r.released_by, releasedAt: r.released_at })),
+      posts: posts.map((p) => ({ postId: p.post_id, platform: p.platform, status: p.status, dueAt: p.due_at })),
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// PUT /api/content-approval-decisions/:postId/buffer — { queue: true | false }.
+// Signed-in users only: this is the step that actually publishes, so it can't
+// ride on the page's open, name-only approvals.
+router.put('/:postId/buffer', auth, rateLimiter({ windowMs: 10 * 60 * 1000, max: 30 }), async (req, res, next) => {
+  try {
+    const { postId } = req.params
+    if (!POST_IDS.includes(postId)) return res.status(400).json({ error: 'Unknown post id' })
+    const queue = req.body?.queue === true
+    const name = req.user.name || 'Signed-in user'
+    if (queue) {
+      const { rows } = await db.query('select status from content_approval_decisions where post_id = $1', [postId])
+      if (rows[0]?.status !== 'approved') return res.status(400).json({ error: 'Only approved posts can be queued' })
+      await db.query(
+        `insert into buffer_releases (post_id, released_by, released_by_id) values ($1, $2, $3)
+         on conflict (post_id) do update set released_by = excluded.released_by, released_by_id = excluded.released_by_id, released_at = now()`,
+        [postId, name, req.user.id == null ? null : String(req.user.id)]
+      )
+    } else {
+      await db.query('delete from buffer_releases where post_id = $1', [postId])
+    }
+    const { rows: entry } = await db.query(
+      `insert into content_approval_comments (post_id, author, author_id, status, body)
+       values ($1, $2, $3, '', $4) returning *`,
+      [postId, name, req.user.id ?? null, queue ? 'Queued in Buffer.' : 'Removed from Buffer.']
+    )
+    // Act now rather than at the next scheduled run. Required here, not at the
+    // top: the job imports POST_IDS from this file.
+    require('../jobs/bufferPublish').runBufferPublishJob({ source: 'release' })
+      .catch((err) => console.error('[buffer-publish] release run failed:', err))
+    res.json({ queued: queue, comment: mapComment(entry[0]) })
   } catch (err) {
     next(err)
   }

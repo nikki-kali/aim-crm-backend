@@ -7,10 +7,13 @@ const { POST_IDS } = require('../routes/contentApprovalDecisions')
 
 // Queues approved social posts in Buffer at their planned time. The plan is
 // Marketing OS's public/approvals/buffer-schedule.json (built from the
-// content calendar and captions); a post goes to Buffer only once it is
-// approved on /content-approvals. If an approval is taken back before the
-// post goes out, the Buffer post is deleted again. Every create, withdrawal
-// and error is recorded in buffer_posts (migration v36) and emailed to media@.
+// content calendar and captions). A post goes to Buffer only once it is
+// approved on /content-approvals AND a signed-in user has clicked "Queue in
+// Buffer" (buffer_releases), because the approvals page needs no sign-in.
+// Removing that release deletes the Buffer post again. If only the approval
+// changes after queueing, nothing is deleted (an anonymous click must not
+// pull a post); media@ is told instead. Every create, withdrawal, alert and
+// error is recorded in buffer_posts (migration v36) and emailed to media@.
 //
 // BUFFER_PUBLISH_ENABLED: 'true' queues for real, 'dryrun' only logs the
 // plan, anything else turns the job off.
@@ -46,9 +49,10 @@ function hasSafeMedia(entry) {
 }
 
 // Decides what to do; pure, so it can be tested without Buffer or a database.
-function planActions({ entries, approvedIds, rows, now = Date.now() }) {
+function planActions({ entries, approvedIds, releasedIds, rows, now = Date.now() }) {
   const create = []
   const withdraw = []
+  const changed = []
   const seen = new Set()
   for (const entry of entries) {
     const key = keyOf(entry.postId, entry.platform)
@@ -58,16 +62,20 @@ function planActions({ entries, approvedIds, rows, now = Date.now() }) {
     if (!CHANNELS[entry.platform] || Number.isNaN(due)) continue
     if (!POST_IDS.includes(entry.postId) || typeof entry.text !== 'string' || !hasSafeMedia(entry)) continue
     const row = rows.get(key)
-    const approved = approvedIds.has(entry.postId) && !entry.blocked
+    const approved = approvedIds.has(entry.postId) && releasedIds.has(entry.postId) && !entry.blocked
     if (approved && (!row || row.status === 'withdrawn') && due - now > CREATE_LEAD_MS) create.push(entry)
   }
   create.splice(MAX_CREATES_PER_RUN)
   for (const row of rows.values()) {
     if (row.status !== 'queued' || !row.buffer_post_id) continue
-    if (approvedIds.has(row.post_id)) continue
-    if (new Date(row.due_at).getTime() - now > WITHDRAW_LEAD_MS) withdraw.push(row)
+    const upcoming = new Date(row.due_at).getTime() > now
+    if (!releasedIds.has(row.post_id)) {
+      if (new Date(row.due_at).getTime() - now > WITHDRAW_LEAD_MS) withdraw.push(row)
+    } else if (!approvedIds.has(row.post_id) && upcoming && !row.approval_alerted_at) {
+      changed.push(row)
+    }
   }
-  return { create, withdraw }
+  return { create, withdraw, changed }
 }
 
 async function loadSchedule() {
@@ -100,10 +108,12 @@ async function runBufferPublishJob({ source = 'cron' } = {}) {
   try {
     const entries = await loadSchedule()
     const { rows: decisions } = await db.query("select post_id from content_approval_decisions where status = 'approved'")
+    const { rows: releases } = await db.query('select post_id from buffer_releases')
     const { rows: existing } = await db.query('select * from buffer_posts')
     const plan = planActions({
       entries,
       approvedIds: new Set(decisions.map((d) => d.post_id)),
+      releasedIds: new Set(releases.map((r) => r.post_id)),
       rows: new Map(existing.map((r) => [keyOf(r.post_id, r.platform), r])),
     })
 
@@ -120,7 +130,8 @@ async function runBufferPublishJob({ source = 'cron' } = {}) {
       const { rows: claimed } = await db.query(
         `insert into buffer_posts (post_id, platform, due_at, status) values ($1, $2, $3, 'queued')
          on conflict (post_id, platform) do update
-           set status = 'queued', buffer_post_id = null, error = null, due_at = excluded.due_at, updated_at = now()
+           set status = 'queued', buffer_post_id = null, error = null, due_at = excluded.due_at,
+               approval_alerted_at = null, updated_at = now()
            where buffer_posts.status = 'withdrawn'
          returning id`,
         [entry.postId, entry.platform, entry.dueAt]
@@ -147,10 +158,17 @@ async function runBufferPublishJob({ source = 'cron' } = {}) {
       }
     }
 
-    if (queued.length || withdrawn.length) {
-      await alert('Buffer: posts queued or removed', [
+    const changed = []
+    for (const row of plan.changed) {
+      await db.query('update buffer_posts set approval_alerted_at = now() where id = $1', [row.id])
+      changed.push(describe(row))
+    }
+
+    if (queued.length || withdrawn.length || changed.length) {
+      await alert('Buffer: posts queued, removed or needing a check', [
         ...queued.map((q) => `Queued: ${q}`),
-        ...withdrawn.map((w) => `Removed (no longer approved): ${w}`),
+        ...withdrawn.map((w) => `Removed (taken off "Queue in Buffer"): ${w}`),
+        ...changed.map((c) => `Still queued, but its approval changed: ${c}. If it should not go out, click "Remove from Buffer" on the approvals page.`),
       ])
     }
     if (failed.length) {
@@ -168,7 +186,8 @@ async function runBufferPublishJob({ source = 'cron' } = {}) {
 }
 
 function startBufferPublishScheduler() {
-  // Every 30 minutes; approvals also trigger a run (routes/contentApprovalDecisions.js).
+  // Every 30 minutes; "Queue in Buffer" clicks also trigger a run
+  // (routes/contentApprovalDecisions.js).
   cron.schedule('*/30 * * * *', () => runBufferPublishJob({ source: 'cron' }), { timezone: 'America/New_York' })
   console.log('[buffer-publish] job registered')
 }
