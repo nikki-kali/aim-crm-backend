@@ -4,7 +4,7 @@ const { buildPostInput } = require('../src/services/buffer')
 const { planActions } = require('../src/jobs/bufferPublish')
 
 const NOW = Date.parse('2026-11-04T00:00:00Z')
-const entry = (over = {}) => ({ postId: 'nov05', platform: 'instagram', dueAt: '2026-11-05T17:30:00.000Z', text: 'Hi', images: ['https://x/a.jpg'], ...over })
+const entry = (over = {}) => ({ postId: 'nov05', platform: 'instagram', dueAt: '2026-11-05T17:30:00.000Z', text: 'Hi', images: ['https://marketing.aimdentallab.com/approvals/a.jpg'], ...over })
 const row = (over = {}) => ({ id: 1, post_id: 'nov05', platform: 'instagram', due_at: '2026-11-05T17:30:00Z', buffer_post_id: 'b1', status: 'queued', ...over })
 
 test('queues an approved post that is not in Buffer yet', () => {
@@ -22,6 +22,16 @@ test('skips posts that are unapproved, blocked, already queued, failed or about 
   const soon = Date.parse('2026-11-05T17:25:00Z')
   assert.strictEqual(planActions({ entries: [entry()], approvedIds: approved, rows: new Map(), now: soon }).create.length, 0)
   assert.strictEqual(planActions({ entries: [entry({ platform: 'facebook' })], approvedIds: approved, rows: new Map(), now: NOW }).create.length, 0)
+})
+
+test('ignores entries with unknown post ids or media from another site, and caps a run', () => {
+  const approved = new Set(['nov05', 'evil'])
+  assert.strictEqual(planActions({ entries: [entry({ postId: 'evil' })], approvedIds: approved, rows: new Map(), now: NOW }).create.length, 0)
+  assert.strictEqual(planActions({ entries: [entry({ images: ['https://evil.example/a.jpg'] })], approvedIds: approved, rows: new Map(), now: NOW }).create.length, 0)
+  assert.strictEqual(planActions({ entries: [entry({ images: ['https://marketing.aimdentallab.com/approvals/../x.jpg'] })], approvedIds: approved, rows: new Map(), now: NOW }).create.length, 0)
+  const many = ['instagram', 'linkedin', 'youtube'].flatMap((platform) => ['nov04', 'nov05', 'nov06', 'nov07', 'nov09', 'nov10'].map((postId) => entry({ postId, platform })))
+  const all = new Set(many.map((e) => e.postId))
+  assert.strictEqual(planActions({ entries: many, approvedIds: all, rows: new Map(), now: NOW }).create.length, 15)
 })
 
 test('re-queues a withdrawn post once it is approved again', () => {

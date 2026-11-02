@@ -3,6 +3,7 @@ const cron = require('node-cron')
 const db = require('../config/db')
 const { sendEmail } = require('../services/email')
 const { CHANNELS, createPost, deletePost } = require('../services/buffer')
+const { POST_IDS } = require('../routes/contentApprovalDecisions')
 
 // Queues approved social posts in Buffer at their planned time. The plan is
 // Marketing OS's public/approvals/buffer-schedule.json (built from the
@@ -13,13 +14,23 @@ const { CHANNELS, createPost, deletePost } = require('../services/buffer')
 //
 // BUFFER_PUBLISH_ENABLED: 'true' queues for real, 'dryrun' only logs the
 // plan, anything else turns the job off.
-const SCHEDULE_URL = process.env.BUFFER_SCHEDULE_URL || 'https://marketing.aimdentallab.com/approvals/buffer-schedule.json'
+const SCHEDULE_URL = 'https://marketing.aimdentallab.com/approvals/buffer-schedule.json'
+// Media must come from the same site; anything else in the file is ignored.
+const MEDIA_ORIGIN = 'https://marketing.aimdentallab.com/approvals/'
+// A run never queues more than this, so a bad schedule file can't flood Buffer.
+const MAX_CREATES_PER_RUN = 15
 const ALERT_TO = ['media@aimdentallab.com']
 // Buffer needs a little time to fetch the media before the post is due.
 const CREATE_LEAD_MS = 10 * 60 * 1000
 const WITHDRAW_LEAD_MS = 5 * 60 * 1000
 
 const keyOf = (postId, platform) => `${postId}|${platform}`
+
+const mediaUrls = (e) => [...(e.images || []), e.video?.url, e.document?.url].filter((u) => u !== undefined)
+const hasSafeMedia = (e) => {
+  const urls = mediaUrls(e)
+  return urls.length > 0 && urls.every((u) => typeof u === 'string' && u.startsWith(MEDIA_ORIGIN) && !u.includes('..'))
+}
 
 // Decides what to do; pure, so it can be tested without Buffer or a database.
 function planActions({ entries, approvedIds, rows, now = Date.now() }) {
@@ -32,10 +43,12 @@ function planActions({ entries, approvedIds, rows, now = Date.now() }) {
     seen.add(key)
     const due = Date.parse(entry.dueAt)
     if (!CHANNELS[entry.platform] || Number.isNaN(due)) continue
+    if (!POST_IDS.includes(entry.postId) || typeof entry.text !== 'string' || !hasSafeMedia(entry)) continue
     const row = rows.get(key)
     const approved = approvedIds.has(entry.postId) && !entry.blocked
     if (approved && (!row || row.status === 'withdrawn') && due - now > CREATE_LEAD_MS) create.push(entry)
   }
+  create.splice(MAX_CREATES_PER_RUN)
   for (const row of rows.values()) {
     if (row.status !== 'queued' || !row.buffer_post_id) continue
     if (approvedIds.has(row.post_id)) continue
