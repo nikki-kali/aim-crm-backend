@@ -1,9 +1,13 @@
 const express = require('express')
 const db = require('../config/db')
 const jwt = require('jsonwebtoken')
+const rateLimiter = require('../middleware/rateLimiter')
 
 const router = express.Router()
 const STATUSES = ['', 'approved', 'edit', 'rejected']
+// Upper bound on one post's thread, so an anonymous writer on this public
+// page can't grow a thread (and every page load) without limit.
+const MAX_THREAD = 200
 // Fixed allowlist of review-able posts for the October review. A postId
 // outside this set is rejected rather than silently creating an arbitrary
 // row, since the id also becomes the table's primary key.
@@ -34,7 +38,8 @@ function optionalUser(req) {
 // "(not signed in)" suffix so a typed name never reads as a verified one.
 function resolveReviewer(req) {
   const user = optionalUser(req)
-  if (user) return { name: user.name || user.email || 'Unknown', id: user.id ?? null }
+  // Names only: this page is public, so an email never stands in for a name.
+  if (user) return { name: user.name || 'Signed-in reviewer', id: user.id ?? null }
   const typed = typeof req.body?.reviewerName === 'string' ? req.body.reviewerName.trim() : ''
   if (!typed) return { error: 'Please enter your name' }
   if (typed.length > 80) return { error: 'Name is too long' }
@@ -92,13 +97,16 @@ router.get('/comments', async (req, res, next) => {
 // POST /api/content-approval-decisions/:postId/comments — add feedback, or a
 // reply when `parentId` is sent. Replies stay one level deep: replying to a
 // reply attaches to the same top-level entry.
-router.post('/:postId/comments', async (req, res, next) => {
+router.post('/:postId/comments', rateLimiter({ windowMs: 10 * 60 * 1000, max: 30 }), async (req, res, next) => {
   try {
     const { postId } = req.params
     const { data, error } = validateComment(postId, req.body || {})
     if (error) return res.status(400).json({ error })
     const reviewer = resolveReviewer(req)
     if (reviewer.error) return res.status(400).json({ error: reviewer.error })
+
+    const { rows: count } = await db.query('select count(*)::int as n from content_approval_comments where post_id = $1', [postId])
+    if (count[0].n >= MAX_THREAD) return res.status(429).json({ error: 'This thread is full' })
 
     let parentId = null
     if (data.parentId) {
@@ -131,7 +139,7 @@ router.get('/', async (req, res, next) => {
 
 // PUT /api/content-approval-decisions/:postId — upsert one post's current
 // decision and log it to the post's comment thread.
-router.put('/:postId', async (req, res, next) => {
+router.put('/:postId', rateLimiter({ windowMs: 10 * 60 * 1000, max: 30 }), async (req, res, next) => {
   try {
     const { postId } = req.params
     if (!POST_IDS.includes(postId)) {
