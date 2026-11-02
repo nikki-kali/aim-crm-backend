@@ -2,6 +2,7 @@ const express = require('express')
 const db = require('../config/db')
 const jwt = require('jsonwebtoken')
 const rateLimiter = require('../middleware/rateLimiter')
+const { runBufferPublishJob } = require('../jobs/bufferPublish')
 
 const router = express.Router()
 const STATUSES = ['', 'approved', 'edit', 'rejected']
@@ -176,6 +177,9 @@ router.put('/:postId', rateLimiter({ windowMs: 10 * 60 * 1000, max: 30 }), async
       [postId, reviewer.name, reviewer.id, status || 'pending', feedback]
     )
     res.json({ decision: mapRow(rows[0]), comment: mapComment(entry[0]) })
+    // Queue (or withdraw) the post in Buffer right away instead of waiting for
+    // the next scheduled run. The job does nothing unless it is switched on.
+    runBufferPublishJob({ source: 'approval' }).catch((err) => console.error('[buffer-publish] approval run failed:', err))
   } catch (err) {
     next(err)
   }
