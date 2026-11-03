@@ -76,6 +76,13 @@ function doctorDisplayName(cell) {
   return `${first} ${last}`
 }
 
+// One-off exceptions to "counted in the month of the first booking", by
+// customer code: the date the doctor counts as new from instead. A4159
+// (A.R Assadian, William) first booked Fri 30 Oct 2026, but the team treats
+// him as a November signing (user decision, 2026-11-03); he counts from the
+// Mon 2 Nov report, so that day's post congratulates William.
+const NEW_DOCTOR_COUNTED_FROM = { A4159: '2026-11-02' }
+
 // "New Doctors - James/William": one row per doctor with First Booking
 // (YYYY-MM-DD), Cases (Total) and Sales Value (Total), newest first. Returns
 // the doctors whose first booking falls in runDate's month and in the month
@@ -97,12 +104,14 @@ function parseNewDoctors(html, runDate) {
   const previous = []
   for (const row of rows) {
     const obj = rowToObj(headers, row)
-    const iso = String(obj[firstCol] || '').trim().slice(0, 10)
+    const firstBooking = String(obj[firstCol] || '').trim().slice(0, 10)
+    const code = codeCol ? String(obj[codeCol] || '').trim() : ''
+    const iso = NEW_DOCTOR_COUNTED_FROM[code] || firstBooking
     if (!/^\d{4}-\d{2}-\d{2}$/.test(iso) || iso > runDate) continue
     const doctor = {
-      code: codeCol ? String(obj[codeCol] || '').trim() : '',
+      code,
       name: nameCol ? doctorDisplayName(obj[nameCol]) : '',
-      firstCase: iso,
+      firstCase: firstBooking,
       firstCaseIso: iso,
       cases: casesCol ? toNum(obj[casesCol]) : 0,
     }
@@ -192,4 +201,4 @@ function buildEvidentDay(messages, runDate) {
   return { totals, extras }
 }
 
-module.exports = { doctorDisplayName, buildEvidentDay, parseLastMonthVsMtd, parseNewDoctors, dailyCustomersFrom, monthIndexFromCell }
+module.exports = { NEW_DOCTOR_COUNTED_FROM, doctorDisplayName, buildEvidentDay, parseLastMonthVsMtd, parseNewDoctors, dailyCustomersFrom, monthIndexFromCell }

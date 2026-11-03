@@ -162,3 +162,13 @@ test('Last Month vs MTD real 13 Oct layout: "Month (Booking)" column with "Sep 2
   assert.equal(b.current.count, 702)
   assert.equal(b.last.value, 172621.17)
 })
+
+test('new doctors: A4159 (A.R Assadian) counts for November from 2 Nov, not October (user decision 2026-11-03)', () => {
+  const html = table(['Ref', 'Customer', 'First Booking', 'Cases (Total)', 'Sales Value (Total)'],
+    [['A4159', 'A4159 - ASSADIAN, A.R', '2026-10-30', '4', '715.86'], ['A4154', 'A4154 - LOPEZ, LESLIE GRACE', '2026-10-29', '4', '485.94'], ['', '', '', '8', '1201.8']])
+  const oct30 = parseNewDoctors(html, '2026-10-30')
+  assert.deepEqual(oct30.current.map((d) => d.code), ['A4154'], 'not counted for October')
+  const nov2 = parseNewDoctors(html, '2026-11-02')
+  assert.deepEqual(nov2.current.map((d) => [d.code, d.name, d.firstCaseIso, d.firstCase]), [['A4159', 'A.R ASSADIAN', '2026-11-02', '2026-10-30']])
+  assert.deepEqual(nov2.previous.map((d) => d.code), ['A4154'], 'every other doctor keeps the first-booking rule')
+})

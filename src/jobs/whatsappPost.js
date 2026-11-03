@@ -1,6 +1,6 @@
 // The daily WhatsApp team progress post: builds the picture and caption and
-// emails them to the person who posts it in the group. Started by n8n (see
-// n8n/6-whatsapp-post.json) through routes/cron.js. The post always uses the
+// emails them to the person who posts it in the group. Started by cron-job.org
+// (see docs/scheduled-jobs.md) through routes/cron.js. The post always uses the
 // day's EviSmart report, which can arrive late, so an early attempt with no
 // report just waits and a later attempt tries again; only the final attempt
 // raises an alert. Gated behind WHATSAPP_POST_ENABLED, once per day.
@@ -16,9 +16,11 @@ const WHATSAPP_POST_RECIPIENT = 'nadinekate.d.limjoco@gmail.com'
 
 const escapeHtml = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 
-// A caption with a dash, "undefined" or "NaN" where a number belongs means a
-// figure was unavailable. The quoted motivational line is exempt.
-const hasMissingNumbers = (caption) => /—|undefined|NaN/.test(String(caption).replace(/"[^"]*"/g, ''))
+// The picture shows every figure, so a rep's billed or booked figure that
+// Evident didn't provide (null) must stop the post. The caption carries no
+// figures, but "undefined" or "NaN" in it still means something broke.
+const hasMissingNumbers = (post) => (post.reps || []).some((r) => [r.salesCur, r.bookedCur].some((v) => v === null || v === undefined || Number.isNaN(v)))
+  || /undefined|NaN/.test(String(post.caption))
 
 // Pure orchestration (every dependency passed in) so each outcome is tested.
 // Returns 'waiting-for-evismart' | 'held' | 'failed' | 'sent'.
@@ -31,7 +33,7 @@ async function runWhatsappPost({ dateStr, hasEviSmart, buildPost, buildImageHtml
   try {
     const post = await buildPost()
     if (!post) throw new Error('there is no rep goal data to build the post from')
-    if (hasMissingNumbers(post.caption)) throw new Error('a figure in the post is unavailable (it shows a dash), so it was not sent')
+    if (hasMissingNumbers(post)) throw new Error('a figure in the post is unavailable (it would show a dash), so it was not sent')
     const png = await render(buildImageHtml(post, pickMessage()))
     await send({
       to: [WHATSAPP_POST_RECIPIENT],

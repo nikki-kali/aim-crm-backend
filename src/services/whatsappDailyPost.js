@@ -5,8 +5,7 @@ const {
   computeMonthlyDoctorsGoal,
   businessDaysLeftInMonth,
   lastBusinessDayEasternDateString,
-  listNewDoctorNamesOnDate,
-  eviSmartNewDoctorNamesForRep,
+  eviSmartNewDoctorsForRep,
   evidentMtdForRep,
 } = require('./salesRepDailyReport')
 const { PUSH_QUOTES } = require('./email')
@@ -41,6 +40,61 @@ function pickDailyMessage(dayOfMonth) {
   return PUSH_QUOTES[dayOfMonth % PUSH_QUOTES.length]
 }
 
+const previousWeekday = (iso) => {
+  const d = new Date(`${iso}T00:00:00Z`)
+  do d.setUTCDate(d.getUTCDate() - 1); while (d.getUTCDay() === 0 || d.getUTCDay() === 6)
+  return d.toISOString().slice(0, 10)
+}
+
+// Doctors whose first booking falls after the previous weekday's post, up to
+// the report day (so a weekend first booking is congratulated on Monday).
+function newDoctorsSinceLastPost(list, dateStr) {
+  const after = previousWeekday(dateStr)
+  return (list || []).filter((d) => d.firstCaseIso > after && d.firstCaseIso <= dateStr)
+}
+
+// Weekdays in dateStr's month up to and including dateStr.
+function businessDaysElapsed(dateStr) {
+  let count = 0
+  const cur = new Date(`${dateStr.slice(0, 7)}-01T00:00:00Z`)
+  for (const end = new Date(`${dateStr}T00:00:00Z`); cur <= end; cur.setUTCDate(cur.getUTCDate() + 1)) {
+    if (cur.getUTCDay() !== 0 && cur.getUTCDay() !== 6) count += 1
+  }
+  return count
+}
+
+// On track = month-to-date billed is at least 90% of where an even pace
+// across the month's weekdays would put it by the report day.
+const PACE_TOLERANCE = 0.9
+function isOnPace(rep, dateStr) {
+  if (rep.salesCur === null || rep.salesCur === undefined || !(rep.salesTarget > 0)) return false
+  const elapsed = businessDaysElapsed(dateStr)
+  const share = elapsed / (elapsed + businessDaysLeftInMonth(dateStr))
+  return rep.salesCur / rep.salesTarget >= PACE_TOLERANCE * share
+}
+
+const joinNames = (names) => (names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`)
+
+// The caption carries no figures (user request, 2026-11-03: the picture
+// already shows them). A good-morning line, congratulations for doctors
+// signed since the last post, "good work" for a rep on pace for the monthly
+// sales goal, and one neutral team-wide nudge when anyone is behind pace.
+// The nudge never names a rep, so no one is singled out negatively.
+function buildCaption({ reps, dateStr, monthName }) {
+  const lines = ['*Good morning, team!*', '']
+  for (const r of reps) {
+    if (r.signedSinceLastPost && r.signedSinceLastPost.length) lines.push(`Congratulations, ${r.firstName}, on bringing in ${joinNames(r.signedSinceLastPost)}!`)
+  }
+  const onPace = reps.filter((r) => isOnPace(r, dateStr))
+  for (const r of onPace) lines.push(`Great work, ${r.firstName}: you're on track for your ${monthName} sales goal. Keep it going!`)
+  if (onPace.length < reps.length) {
+    lines.push("Some of our numbers are moving slower than we'd like. Let's use today to follow up with our doctors and get more cases booked.")
+  } else {
+    lines.push("Let's keep the momentum going today!")
+  }
+  return lines.join('\n')
+}
+
 // The daily team post for the reps' WhatsApp group (Elizabeth relaying Ben,
 // 2026-09-26): one picture with the team's combined progress plus each rep,
 // and a short caption with a little motivation. Pure text and a picture URL,
@@ -62,21 +116,20 @@ async function buildWhatsappDailyPost(dateStr = lastBusinessDayEasternDateString
     // Booked is also Evident's MTD figure (Report #12) and is shown beside
     // billed (#40) on each card (user request, 2026-10-06); billed alone
     // drives the Monthly sales bar.
-    const [sales, doctors, wonToday, salesBilled, salesBooked, newDoctorNames] = await Promise.all([
+    const [sales, doctors, salesBilled, salesBooked, newDoctors] = await Promise.all([
       computeMonthlySalesGoal(u.email, dateStr),
       computeMonthlyDoctorsGoal(u.email, dateStr),
-      listNewDoctorNamesOnDate(u.id, dateStr),
       evidentMtdForRep(u.email, dateStr, 'billed'),
       evidentMtdForRep(u.email, dateStr, 'booked'),
-      eviSmartNewDoctorNamesForRep(u.email, dateStr),
+      eviSmartNewDoctorsForRep(u.email, dateStr),
     ])
     if (!sales || !doctors) continue
     reps.push({
       firstName: u.name.split(' ')[0],
       salesCur: salesBilled, bookedCur: salesBooked, salesTarget: Number(sales.target),
       docsCur: Number(doctors.current_value), docsTarget: Number(doctors.target),
-      wonToday,
-      newDoctorNames: newDoctorNames || [],
+      newDoctorNames: (newDoctors || []).map((d) => d.name),
+      signedSinceLastPost: newDoctorsSinceLastPost(newDoctors, dateStr).map((d) => d.name),
     })
   }
   if (reps.length === 0) return null
@@ -88,30 +141,7 @@ async function buildWhatsappDailyPost(dateStr = lastBusinessDayEasternDateString
   }), { salesCur: 0, bookedCur: 0, salesTarget: 0, docsCur: 0, docsTarget: 0 })
 
   const monthName = new Date(`${dateStr}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' })
-  const daysLeft = businessDaysLeftInMonth(dateStr)
-  const quote = pickDailyMessage(dayOfMonth)
-  // "Won today" names (Ben's request, 2026-10-01) — only for today's real
-  // wins, not a month-to-date list, so it's omitted entirely on a quiet
-  // day rather than padded out with repeated names.
-  const line = (r) => [
-    `*${r.firstName}*`,
-    `Sales: ${money(r.salesCur)} of ${whole(r.salesTarget)} (${pctText(r.salesCur, r.salesTarget)})`,
-    `Booked: ${money(r.bookedCur)} · Billed: ${money(r.salesCur)}`,
-    `New doctors: ${r.docsCur} of ${r.docsTarget} (${pctOf(r.docsCur, r.docsTarget)}%)`,
-    ...(r.newDoctorNames.length ? [`New: ${r.newDoctorNames.join(', ')}`] : []),
-    ...(r.wonToday.length ? [`Won today: ${r.wonToday.join(', ')}`] : []),
-  ].join('\n')
-
-  const caption = [
-    `*Good morning, team!* Here is where we stand for ${monthName}.`,
-    '',
-    `*Team*\nSales: ${money(team.salesCur)} of ${whole(team.salesTarget)} (${pctText(team.salesCur, team.salesTarget)})\nBooked: ${money(team.bookedCur)} · Billed: ${money(team.salesCur)}\nNew doctors: ${team.docsCur} of ${team.docsTarget} (${pctOf(team.docsCur, team.docsTarget)}%)`,
-    '',
-    ...reps.flatMap((r) => [line(r), '']),
-    `"${quote}"`,
-    '',
-    `Every doctor we sign and every case we book moves these bars${daysLeft > 0 ? `, and we still have ${daysLeft} business day${daysLeft === 1 ? '' : 's'} this month` : ''}. Let's make today count!`,
-  ].join('\n')
+  const caption = buildCaption({ reps, dateStr, monthName })
 
   const rowFor = (label, salesCur, salesTarget, docsCur, docsTarget) => ({
     label, salesPct: pctOf(salesCur, salesTarget), doctorsPct: pctOf(docsCur, docsTarget),
@@ -181,4 +211,4 @@ function buildWhatsappImageHtml(post, message) {
 </div></body></html>`
 }
 
-module.exports = { buildWhatsappDailyPost, buildWhatsappImageHtml, pickDailyMessage }
+module.exports = { buildWhatsappDailyPost, buildWhatsappImageHtml, pickDailyMessage, buildCaption, isOnPace, newDoctorsSinceLastPost }

@@ -314,11 +314,19 @@ async function eviSmartReportAvailable(dateStr) {
 // EviSmart table the count uses; null when the day's report has no such table
 // or cannot be read (callers then show no names rather than guess).
 async function eviSmartNewDoctorNamesForRep(repEmail, dateStr) {
+  const list = await eviSmartNewDoctorsForRep(repEmail, dateStr)
+  return list ? list.map((d) => d.name) : null
+}
+
+// The same list with each doctor's first booking date ({ name, firstCaseIso }),
+// so the WhatsApp caption can congratulate only the doctors signed since the
+// last post.
+async function eviSmartNewDoctorsForRep(repEmail, dateStr) {
   try {
     const key = EVIDENT_REP_KEY_BY_EMAIL[repEmail]
     const { extras } = await eviSmartDayFor(dateStr)
     const list = key && extras && extras.newDoctors && extras.newDoctors[key]
-    return list ? list.map((d) => d.name) : null
+    return list || null
   } catch (err) {
     console.error('[sales-rep-daily-report] EviSmart new doctor names lookup failed:', err.message)
     return null
@@ -833,6 +841,7 @@ module.exports = {
   pickMtdByRepAsOf,
   acceptBookedByRep,
   eviSmartNewDoctorNamesForRep,
+  eviSmartNewDoctorsForRep,
   eviSmartReportAvailable,
   pickMtdSource,
   summarizeBilledRows,

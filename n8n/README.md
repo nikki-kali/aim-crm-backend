@@ -1,4 +1,6 @@
-# n8n workflows for the daily reports
+# n8n workflows for the daily reports (retired)
+
+> **Not in use since 2026-11-03.** The VPS that ran n8n was shut down, and the timers now live on cron-job.org: see [`docs/scheduled-jobs.md`](../docs/scheduled-jobs.md). These files are kept only for reference.
 
 n8n only **starts** the jobs on time and checks that the Evident emails arrived. All the report logic stays on the server (`aim-crm-backend` on Render), so n8n holds no Gmail access and no report code.
 

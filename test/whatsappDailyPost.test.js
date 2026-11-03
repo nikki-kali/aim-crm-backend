@@ -1,54 +1,19 @@
 require('dotenv').config()
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const crypto = require('crypto')
 const db = require('../src/config/db')
 // Sales figures come from Evident's MTD billed email; tests have no Gmail
 // access, so stub that one lookup BEFORE whatsappDailyPost reads it.
 const salesRepDailyReport = require('../src/services/salesRepDailyReport')
 let mtdStub = async () => 1000
 salesRepDailyReport.evidentMtdForRep = (...args) => mtdStub(...args)
-// New doctor names come from EviSmart's report; no Gmail in tests either.
+// New doctors come from Evident's "New Doctors" emails; no Gmail in tests either.
 let namesStub = async () => null
-salesRepDailyReport.eviSmartNewDoctorNamesForRep = (...args) => namesStub(...args)
-const { buildWhatsappDailyPost, buildWhatsappImageHtml, pickDailyMessage } = require('../src/services/whatsappDailyPost')
-
-async function makeTestDoctor(repId, firstCaseDate) {
-  const doctorName = `TEST DOCTOR WAPOST ${crypto.randomBytes(3).toString('hex')}`
-  await db.query(
-    `INSERT INTO clients (doctor_name, assigned_to, created_at, brand) VALUES ($1,$2,$3,'Aim Dental')`,
-    [doctorName, repId, firstCaseDate]
-  )
-  await db.query(
-    `INSERT INTO cases (case_number, client_name, created_at, status) VALUES ($1,$2,$3,'Case Received')`,
-    [`TEST-${crypto.randomBytes(4).toString('hex')}`, doctorName, firstCaseDate]
-  )
-  return doctorName
+salesRepDailyReport.eviSmartNewDoctorsForRep = async (...args) => {
+  const names = await namesStub(...args)
+  return names && names.map((name) => ({ name, firstCaseIso: '2026-10-01' }))
 }
-
-async function cleanup(doctorName) {
-  await db.query(`DELETE FROM cases WHERE client_name = $1`, [doctorName])
-  await db.query(`DELETE FROM clients WHERE doctor_name = $1`, [doctorName])
-}
-
-test('the caption includes a "Won today" line with the real doctor name when a rep has one', async () => {
-  const { rows: [james] } = await db.query(`SELECT id FROM users WHERE email='james@aimdentallab.com'`)
-  const dateStr = '2026-09-15'
-  const doctorName = await makeTestDoctor(james.id, dateStr)
-  try {
-    const post = await buildWhatsappDailyPost(dateStr, 1)
-    assert.ok(post, 'post should build successfully')
-    assert.match(post.caption, new RegExp(`Won today: .*${doctorName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))
-  } finally {
-    await cleanup(doctorName)
-  }
-})
-
-test('the caption omits "Won today" entirely for a rep with no real wins that day', async () => {
-  // A date with no real new-doctor activity for either rep.
-  const post = await buildWhatsappDailyPost('1999-01-01', 1)
-  if (post) assert.doesNotMatch(post.caption, /Won today:/)
-})
+const { buildWhatsappDailyPost, buildWhatsappImageHtml, pickDailyMessage, buildCaption, isOnPace, newDoctorsSinceLastPost } = require('../src/services/whatsappDailyPost')
 
 test('the image and caption have no "acquired this week" section either', async () => {
   const post = await buildWhatsappDailyPost('2026-10-02', 2)
@@ -91,7 +56,7 @@ test('monthly sales come from Evident MTD billed (sales = billed), not the CRM c
     const post = await buildWhatsappDailyPost('2026-10-01', 2)
     const william = post.reps.find((r) => r.firstName === 'William')
     assert.equal(william.salesCur, 569.96)
-    assert.match(post.caption, /\*William\*\nSales: \$570 of \$15,000/)
+    assert.doesNotMatch(post.caption, /\$/, 'the caption carries no figures')
   } finally {
     mtdStub = async () => 1000
   }
@@ -103,7 +68,6 @@ test('when the Evident MTD billed email is unavailable, sales show "—" instead
     const post = await buildWhatsappDailyPost('2026-10-01', 2)
     assert.ok(post.reps.every((r) => r.salesCur === null))
     assert.equal(post.team.salesCur, null)
-    assert.match(post.caption, /Sales: — of/)
     const html = buildWhatsappImageHtml(post, 'msg')
     assert.match(html, />—</)
     assert.doesNotMatch(html, /NaN/)
@@ -112,7 +76,7 @@ test('when the Evident MTD billed email is unavailable, sales show "—" instead
   }
 })
 
-test('each rep shows month-to-date BOOKED and BILLED (both from Evident) on the image and in the caption', async () => {
+test('each rep shows month-to-date BOOKED and BILLED (both from Evident) on the image, not in the caption', async () => {
   mtdStub = async (email, dateStr, kind) => {
     const william = email === 'williama@aimdentallab.com'
     if (kind === 'billed') return william ? 569.96 : 0
@@ -126,9 +90,7 @@ test('each rep shows month-to-date BOOKED and BILLED (both from Evident) on the 
     assert.equal(william.bookedCur, 532.49)
     assert.equal(james.bookedCur, 261)
     assert.equal(post.team.bookedCur, 793.49)
-    assert.match(post.caption, /\*William\*\nSales: \$570 of \$15,000 \(4%\)\nBooked: \$532 · Billed: \$570/)
-    assert.match(post.caption, /\*James\*\nSales: \$0 of \$50,000 \(0%\)\nBooked: \$261 · Billed: \$0/)
-    assert.match(post.caption, /\*Team\*\nSales: \$570 of \$65,000 \(1%\)\nBooked: \$793 · Billed: \$570/)
+    assert.doesNotMatch(post.caption, /\$|Booked|Billed/)
     const text = buildWhatsappImageHtml(post, 'msg').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
     assert.match(text, /William Alexander|William/)
     assert.match(text, /Booked \$532 Billed \$570/)
@@ -144,7 +106,6 @@ test('a booked figure Evident did not provide shows a dash, not a made-up number
     const post = await buildWhatsappDailyPost('2026-10-05', 6)
     assert.ok(post.reps.every((r) => r.bookedCur === null && r.salesCur === 100))
     assert.equal(post.team.bookedCur, null)
-    assert.match(post.caption, /Booked: — · Billed: \$100/)
     const html = buildWhatsappImageHtml(post, 'msg')
     assert.doesNotMatch(html, /NaN|undefined/)
   } finally {
@@ -152,16 +113,14 @@ test('a booked figure Evident did not provide shows a dash, not a made-up number
   }
 })
 
-test('the new doctor or practice names appear under each rep on the image and in the caption', async () => {
+test('the new doctor or practice names appear under each rep on the image', async () => {
   namesStub = async (email) => (email === 'james@aimdentallab.com' ? ['Dr. Idelle Brand', 'Domino Dental'] : [])
   try {
     const post = await buildWhatsappDailyPost('2026-10-08', 9)
     const james = post.reps.find((r) => r.firstName === 'James')
     assert.deepEqual(james.newDoctorNames, ['Dr. Idelle Brand', 'Domino Dental'])
-    assert.match(post.caption, /\*James\*\n[^\n]*\n[^\n]*\nNew doctors: \d+ of 18 \(\d+%\)\nNew: Dr\. Idelle Brand, Domino Dental/)
     const william = post.reps.find((r) => r.firstName === 'William')
     assert.deepEqual(william.newDoctorNames, [])
-    assert.doesNotMatch(post.caption.split('*William*')[1], /New: /)   // no names, no line
     const text = buildWhatsappImageHtml(post, 'msg').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
     assert.match(text, /Dr\. Idelle Brand/)
     assert.match(text, /Domino Dental/)
@@ -182,6 +141,57 @@ test('names are escaped on the image, and an unavailable names lookup shows noth
   }
   const post2 = await buildWhatsappDailyPost('2026-10-08', 9)
   assert.ok(post2.reps.every((r) => Array.isArray(r.newDoctorNames) && r.newDoctorNames.length === 0))
-  assert.doesNotMatch(post2.caption, /New: /)
   assert.doesNotMatch(buildWhatsappImageHtml(post2, 'msg'), /undefined|NaN/)
+})
+
+// The caption: no figures, just the greeting, congratulations, good work and
+// one neutral nudge (user request, 2026-11-03). Pure, so no DB or Gmail.
+const rep = (over) => ({ firstName: 'Rep', salesCur: 0, salesTarget: 20000, signedSinceLastPost: [], ...over })
+
+test('caption: greets the team and carries no numbers', () => {
+  const c = buildCaption({ reps: [rep({ firstName: 'James', salesCur: 1234.56 })], dateStr: '2026-11-16', monthName: 'November' })
+  assert.match(c, /^\*Good morning, team!\*/)
+  assert.doesNotMatch(c, /\d/)
+})
+
+test('caption: congratulates a rep by name for each doctor signed since the last post', () => {
+  const c = buildCaption({ reps: [rep({ firstName: 'William', signedSinceLastPost: ['A.R Assadian', 'Leslie Lopez'] }), rep({ firstName: 'James' })], dateStr: '2026-11-16', monthName: 'November' })
+  assert.match(c, /Congratulations, William, on bringing in A\.R Assadian and Leslie Lopez!/)
+  assert.doesNotMatch(c, /Congratulations, James/)
+})
+
+test('caption: "great work" only for a rep on pace for the monthly sales goal', () => {
+  // 16 Nov 2026 is the 11th of 21 weekdays: even pace is 52%, on track from 47%.
+  const c = buildCaption({ reps: [rep({ firstName: 'William', salesCur: 10000 }), rep({ firstName: 'James', salesCur: 2000 })], dateStr: '2026-11-16', monthName: 'November' })
+  assert.match(c, /Great work, William: you're on track for your November sales goal/)
+  assert.doesNotMatch(c, /Great work, James/)
+})
+
+test('caption: one neutral team-wide line when anyone is behind, naming no one', () => {
+  const c = buildCaption({ reps: [rep({ firstName: 'William', salesCur: 10000 }), rep({ firstName: 'James', salesCur: 0 })], dateStr: '2026-11-16', monthName: 'November' })
+  const neutral = c.split('\n').filter((l) => /slower than we'd like/.test(l))
+  assert.equal(neutral.length, 1)
+  assert.doesNotMatch(neutral[0], /James|William/)
+})
+
+test('caption: everyone on pace gets a momentum line instead of the neutral one', () => {
+  const c = buildCaption({ reps: [rep({ firstName: 'William', salesCur: 15000 })], dateStr: '2026-11-16', monthName: 'November' })
+  assert.doesNotMatch(c, /slower/)
+  assert.match(c, /keep the momentum going/)
+})
+
+test('pace: an unavailable figure is never "on track"', () => {
+  assert.equal(isOnPace(rep({ salesCur: null }), '2026-11-16'), false)
+  assert.equal(isOnPace(rep({ salesCur: 1e9, salesTarget: 0 }), '2026-11-16'), false)
+})
+
+test('new since last post: the report day, plus a weekend before a Monday, but not the Friday before', () => {
+  const list = [
+    { name: 'Fri', firstCaseIso: '2026-10-30' },
+    { name: 'Sat', firstCaseIso: '2026-10-31' },
+    { name: 'Mon', firstCaseIso: '2026-11-02' },
+  ]
+  assert.deepEqual(newDoctorsSinceLastPost(list, '2026-11-02').map((d) => d.name), ['Sat', 'Mon'])
+  assert.deepEqual(newDoctorsSinceLastPost(list, '2026-10-30').map((d) => d.name), ['Fri'])
+  assert.deepEqual(newDoctorsSinceLastPost(null, '2026-11-02'), [])
 })

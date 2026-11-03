@@ -4,7 +4,8 @@ const { runWhatsappPost, WHATSAPP_POST_RECIPIENT } = require('../src/jobs/whatsa
 
 const POST = {
   dateStr: '2026-10-08',
-  caption: '*Good morning, team!*\n\n*James*\nSales: $234 of $50,000 (0%)\nNew doctors: 1 of 18 (6%)\nNew: Dr. Idelle Brand\n\n"Every no is one step closer to a yes."',
+  reps: [{ salesCur: 234, bookedCur: 300 }],
+  caption: '*Good morning, team!*\n\nCongratulations, James, on bringing in Dr. Idelle Brand!',
 }
 const make = (over = {}) => {
   const calls = { render: [], send: [], alert: [] }
@@ -50,7 +51,7 @@ test('a good day: renders the picture and emails it, with the caption, only to t
   const m = calls.send[0]
   assert.deepEqual(m.to, ['nadinekate.d.limjoco@gmail.com'])
   assert.match(m.subject, /2026-10-08/)
-  assert.match(m.html, /New: Dr\. Idelle Brand/)
+  assert.match(m.html, /Congratulations, James, on bringing in Dr\. Idelle Brand!/)
   assert.equal(m.attachments[0].filename, 'sales-rep-progress-2026-10-08.png')
   assert.equal(m.attachments[0].contentType, 'image/png')
   assert.equal(m.attachments[0].content.toString(), 'PNGDATA')
@@ -64,17 +65,25 @@ test('the caption is escaped in the email body', async () => {
   assert.match(calls.send[0].html, /&lt;b&gt;X&lt;\/b&gt; &amp; Co/)
 })
 
-test('a caption with missing numbers (a dash, undefined, NaN) is never sent; the approver is alerted', async () => {
-  for (const bad of ['Sales: — of $50,000', 'Sales: undefined of 1', 'Sales: NaN of 1']) {
-    const { deps, calls } = make({ buildPost: async () => ({ ...POST, caption: bad }) })
+test('a figure Evident did not provide (null) is never sent; the approver is alerted', async () => {
+  for (const reps of [[{ salesCur: null, bookedCur: 5 }], [{ salesCur: 5, bookedCur: null }], [{ salesCur: NaN, bookedCur: 5 }]]) {
+    const { deps, calls } = make({ buildPost: async () => ({ ...POST, reps }) })
     assert.equal(await runWhatsappPost(deps), 'failed')
     assert.equal(calls.send.length, 0)
     assert.equal(calls.alert.length, 1)
   }
 })
 
-test('a dash inside the quoted motivational line is fine (it is not a number)', async () => {
-  const { deps, calls } = make({ buildPost: async () => ({ ...POST, caption: 'Sales: $5 of $10\n\n"Plan — then act."' }) })
+test('a caption showing "undefined" or "NaN" is never sent', async () => {
+  for (const bad of ['Great work, undefined!', 'NaN']) {
+    const { deps, calls } = make({ buildPost: async () => ({ ...POST, caption: bad }) })
+    assert.equal(await runWhatsappPost(deps), 'failed')
+    assert.equal(calls.send.length, 0)
+  }
+})
+
+test('a dash in the caption is fine now that it carries no figures', async () => {
+  const { deps, calls } = make({ buildPost: async () => ({ ...POST, caption: 'Plan — then act.' }) })
   assert.equal(await runWhatsappPost(deps), 'sent')
   assert.equal(calls.send.length, 1)
 })
