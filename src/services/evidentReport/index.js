@@ -95,8 +95,8 @@ function applyEvidentMtdToGoals(repGoals, mtdByRep) {
 // Since 2026-10-13 the figures come from Evident's own 7 PM emails
 // (evidentDay.js); the old EviSmart email is only a fallback for a day
 // Evident's emails can't cover.
-async function fetchEviSmartDay(runDate, evidentMessages = []) {
-  const fromEvident = buildEvidentDay(evidentMessages, runDate)
+async function fetchEviSmartDay(runDate, evidentMessages = [], arrivalsMessages = []) {
+  const fromEvident = buildEvidentDay(evidentMessages, runDate, arrivalsMessages)
   if (fromEvident) return fromEvident
   const hit = pickEviSmartMessageForDate(await fetchEviSmartEmails(), runDate)
   return { totals: hit ? hit.totals : null, extras: hit ? extractEviSmartExtras(hit.message.html) : null }
@@ -175,10 +175,22 @@ async function runEvidentReport({ requireEviSmart = false } = {}) {
   }
 
   console.log('[evident-report] fetching EviSmart Daily Sales Report...')
-  const eviDay = await fetchEviSmartDay(runDate, messages)
+  const eviDay = await fetchEviSmartDay(runDate, messages, allMessages)
   const eviSmartRaw = eviDay.totals
   applyEviSmartPrimaryTo(aggregate, eviSmartRaw)
   aggregate.eviSmart = applyEmailMtdTotals(eviSmartRaw, aggregate)
+  // Booked by arrival date from the next morning's "Daily Arrivals by Day"
+  // email (evidentDay.js) replaces the 8 PM booking-date figures.
+  if (eviSmartRaw && eviSmartRaw.bookedSource === 'arrivals') {
+    Object.assign(aggregate.eviSmart, {
+      dailyBookedValue: eviSmartRaw.dailyBookedValue, dailyBookedCount: eviSmartRaw.dailyBookedCount,
+      mtdBookedValue: eviSmartRaw.mtdBookedValue, mtdBookedCount: eviSmartRaw.mtdBookedCount, bookedSource: 'arrivals',
+    })
+    aggregate.companyDailyBooked = eviSmartRaw.dailyBookedValue
+    aggregate.companyDailyBookedCount = eviSmartRaw.dailyBookedCount
+  } else {
+    console.warn(`[evident-report] no "Daily Arrivals by Day" email with ${runDate} yet; booked uses the 8 PM booking-date emails`)
+  }
   aggregate.eviSmart.lastMonth = await evidentLastMonth(runDate, eviDay.extras)
   if (!eviSmartRaw) {
     console.warn('[evident-report] EviSmart Daily Sales Report unavailable — Daily Billed will show as N/A; every other figure comes from the Evident emails')

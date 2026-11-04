@@ -145,13 +145,99 @@ function dailyCustomersFrom(html) {
   return [...byCustomer.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 
+// "Daily Arrivals by Day - AIM CRM" (Evident report 111, schedule 48): one
+// row per ARRIVAL date from the start of last month, emailed 5:00 AM ET
+// Mon-Sat. Booked figures come from it (user decision, 2026-11-04): Ben reads
+// booked from Evident's Daily Activity Report (EviSmart #13), which counts by
+// arrival date, while the 8 PM booking-date emails both used another date
+// field and cut the day off early (2 Nov: $8,706.28 by booking vs $9,284.25
+// by arrival vs $9,509.00 in #13; 3 Nov: $7,764.22 vs $10,558.63 vs
+// $10,643.63).
+const ARRIVALS_SUBJECT = /^Daily Arrivals by Day/i
+const MONTH_ABBR = MONTHS.map((m) => m.slice(0, 3))
+
+// "2026-11-02", "11/2/2026", "11/2/26", "2 Nov 2026", "2 Nov 26", "Nov 2, 2026"
+// as YYYY-MM-DD; null for anything else (the total row, blanks).
+function isoFromCell(text) {
+  const s = String(text || '').trim()
+  const pad = (n) => String(n).padStart(2, '0')
+  const year = (y) => (String(y).length === 2 ? `20${y}` : String(y))
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
+  if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/)
+  if (m) return `${year(m[3])}-${pad(m[1])}-${pad(m[2])}`
+  m = s.match(/^(\d{1,2})\s+([A-Za-z]{3})[A-Za-z]*\.?\s+(\d{2}|\d{4})$/)
+  if (m && MONTH_ABBR.includes(m[2].toLowerCase())) return `${year(m[3])}-${pad(MONTH_ABBR.indexOf(m[2].toLowerCase()) + 1)}-${pad(m[1])}`
+  m = s.match(/^([A-Za-z]{3})[A-Za-z]*\.?\s+(\d{1,2}),?\s+(\d{2}|\d{4})$/)
+  if (m && MONTH_ABBR.includes(m[1].toLowerCase())) return `${year(m[3])}-${pad(MONTH_ABBR.indexOf(m[1].toLowerCase()) + 1)}-${pad(m[2])}`
+  return null
+}
+
+// Rows of a "Daily Arrivals by Day" email: [{ date, count, value, byRep }].
+// The date may sit under "Date (Arrival)" or in the first (Ref) column, so
+// each row takes the first cell that reads as a date.
+function parseArrivalsByDay(html) {
+  const table = parseTable(html || '')
+  if (!table) return null
+  const { headers, rows } = table
+  const valueCol = findCol(headers, 'Sales Value (Total)')
+  if (!valueCol) return null
+  const countCol = findCol(headers, 'Cases (Total)')
+  const naCol = findCol(headers, 'N/A')
+  const jamesCol = findCol(headers, 'Delaney')
+  const williamCol = findCol(headers, 'Alexander')
+  const out = []
+  for (const row of rows) {
+    const obj = rowToObj(headers, row)
+    const date = row.map(isoFromCell).find(Boolean)
+    if (!date) continue
+    out.push({
+      date,
+      count: countCol ? toNum(obj[countCol]) : null,
+      value: toNum(obj[valueCol]),
+      byRep: { na: naCol ? toNum(obj[naCol]) : 0, james: jamesCol ? toNum(obj[jamesCol]) : 0, william: williamCol ? toNum(obj[williamCol]) : 0 },
+    })
+  }
+  return out
+}
+
+const round2 = (n) => Math.round(n * 100) / 100
+
+// runDate's booked figures from the newest arrivals email sent AFTER runDate
+// (so the day is complete) that has a row for it: the day itself and the
+// month to date. null when no such email has arrived; callers then keep the
+// booking-date figures.
+function arrivalsFor(messages, runDate) {
+  const candidates = (messages || [])
+    .filter((m) => ARRIVALS_SUBJECT.test(String(m.subject || '').trim()) && m.date && m.date > runDate)
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+  for (const m of candidates) {
+    const rows = parseArrivalsByDay(m.html)
+    const day = rows && rows.find((r) => r.date === runDate)
+    if (!day) continue
+    const month = rows.filter((r) => r.date.slice(0, 7) === runDate.slice(0, 7) && r.date <= runDate)
+    const sum = (f) => round2(month.reduce((t, r) => t + (f(r) || 0), 0))
+    return {
+      daily: { count: day.count, value: day.value, byRep: day.byRep },
+      mtd: {
+        count: month.every((r) => r.count !== null) ? month.reduce((t, r) => t + r.count, 0) : null,
+        value: sum((r) => r.value),
+        byRep: { na: sum((r) => r.byRep.na), james: sum((r) => r.byRep.james), william: sum((r) => r.byRep.william) },
+      },
+    }
+  }
+  return null
+}
+
 const pickEmail = (messages, re) => messages.find((m) => re.test(String(m.subject || '').trim()))
 
 // Builds { totals, extras } for runDate from that day's Evident emails, or
 // null when the day's report isn't usable yet (the daily booked and billed
 // emails, or any month-to-date source, haven't arrived). A figure whose email
-// is missing is left out (shown as N/A), never zero.
-function buildEvidentDay(messages, runDate) {
+// is missing is left out (shown as N/A), never zero. With a later "Daily
+// Arrivals by Day" email in `arrivalsMessages`, booked (day, month to date,
+// per rep) comes from it instead.
+function buildEvidentDay(messages, runDate, arrivalsMessages = []) {
   const day = (messages || []).filter((m) => !m.date || m.date === runDate)
   const agg = parseAndAggregate(day, { runDate })
   const has = (label) => !agg.missing.includes(label)
@@ -198,7 +284,16 @@ function buildEvidentDay(messages, runDate) {
     newDoctors: nj && nw ? { james: nj.current, william: nw.current } : null,
     newDoctorsPrevMonth: nj && nw ? { james: nj.previous, william: nw.previous } : null,
   }
+  const arrivals = arrivalsFor(arrivalsMessages, runDate)
+  if (arrivals) {
+    totals.dailyBookedCount = arrivals.daily.count
+    totals.dailyBookedValue = arrivals.daily.value
+    totals.mtdBookedCount = arrivals.mtd.count
+    totals.mtdBookedValue = arrivals.mtd.value
+    if (mtdBilled) totals.repMtd = { booked: { ...arrivals.mtd.byRep, company: arrivals.mtd.value }, billed: rep(mtdBilled) }
+    totals.bookedSource = 'arrivals'
+  }
   return { totals, extras }
 }
 
-module.exports = { NEW_DOCTOR_COUNTED_FROM, doctorDisplayName, buildEvidentDay, parseLastMonthVsMtd, parseNewDoctors, dailyCustomersFrom, monthIndexFromCell }
+module.exports = { ARRIVALS_SUBJECT, isoFromCell, parseArrivalsByDay, arrivalsFor, NEW_DOCTOR_COUNTED_FROM, doctorDisplayName, buildEvidentDay, parseLastMonthVsMtd, parseNewDoctors, dailyCustomersFrom, monthIndexFromCell }

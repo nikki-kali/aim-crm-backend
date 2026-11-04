@@ -172,3 +172,67 @@ test('new doctors: A4159 (A.R Assadian) counts for November from 2 Nov, not Octo
   assert.deepEqual(nov2.current.map((d) => [d.code, d.name, d.firstCaseIso, d.firstCase]), [['A4159', 'A.R ASSADIAN', '2026-11-02', '2026-10-30']])
   assert.deepEqual(nov2.previous.map((d) => d.code), ['A4154'], 'every other doctor keeps the first-booking rule')
 })
+
+// "Daily Arrivals by Day - AIM CRM" (report 111): booked by arrival date, sent
+// the next morning (user decision 2026-11-04). Figures are the real 2 and 3 Nov
+// rows Evident showed for it.
+const { isoFromCell, parseArrivalsByDay, arrivalsFor } = require('../../src/services/evidentReport/evidentDay')
+const arrivalsHtml = table(
+  ['Date (Arrival)', 'Cases (Total)', 'Sales Value (Total)', 'N/A', 'Delaney, James', 'Alexander, WIlliam'],
+  [
+    ['2026-10-30', '90', '9000', '8000', '500', '500'],
+    ['2026-11-02', '93', '9284.25', '8013.9', '87', '1183.35'],
+    ['2026-11-03', '108', '10558.63', '9470.27', '', '1088.36'],
+    ['', '291', '28842.88', '25484.17', '587', '2771.71'],
+  ])
+const arrivalsEmail = (date, html = arrivalsHtml) => ({ subject: 'Daily Arrivals by Day - AIM CRM', html, date })
+
+test('arrivals: reads Evident date cells in every format it may use', () => {
+  assert.equal(isoFromCell('2026-11-03'), '2026-11-03')
+  assert.equal(isoFromCell('11/3/2026'), '2026-11-03')
+  assert.equal(isoFromCell('11/3/26'), '2026-11-03')
+  assert.equal(isoFromCell('3 Nov 26'), '2026-11-03')
+  assert.equal(isoFromCell('3 November 2026'), '2026-11-03')
+  assert.equal(isoFromCell('Nov 3, 2026'), '2026-11-03')
+  assert.equal(isoFromCell(''), null)
+  assert.equal(isoFromCell('291'), null)
+})
+
+test('arrivals: one row per day, the total row skipped, a date in the Ref column also found', () => {
+  const rows = parseArrivalsByDay(arrivalsHtml)
+  assert.deepEqual(rows.map((r) => r.date), ['2026-10-30', '2026-11-02', '2026-11-03'])
+  assert.deepEqual(rows[2], { date: '2026-11-03', count: 108, value: 10558.63, byRep: { na: 9470.27, james: 0, william: 1088.36 } })
+  const withRef = table(['Ref', 'Date (Arrival)', 'Cases (Total)', 'Sales Value (Total)'], [['3 Nov 26', '3 Nov 26', '108', '10558.63']])
+  assert.equal(parseArrivalsByDay(withRef)[0].date, '2026-11-03')
+})
+
+test('arrivals: the day and month to date for runDate, from the next morning\'s email only', () => {
+  const a = arrivalsFor([arrivalsEmail('2026-11-04')], '2026-11-03')
+  assert.deepEqual(a.daily, { count: 108, value: 10558.63, byRep: { na: 9470.27, james: 0, william: 1088.36 } })
+  assert.deepEqual(a.mtd, { count: 201, value: 19842.88, byRep: { na: 17484.17, james: 87, william: 2271.71 } }, 'October rows are left out')
+  assert.equal(arrivalsFor([arrivalsEmail('2026-11-03')], '2026-11-03'), null, 'a same-day email is not complete yet')
+  assert.equal(arrivalsFor([arrivalsEmail('2026-11-04')], '2026-11-05'), null, 'no row for the day')
+  assert.equal(arrivalsFor([], '2026-11-03'), null)
+})
+
+test('arrivals: Friday is read from Saturday\'s (or Monday\'s) email; the newest wins', () => {
+  const sat = arrivalsEmail('2026-10-31', table(['Date (Arrival)', 'Cases (Total)', 'Sales Value (Total)'], [['2026-10-30', '90', '9000']]))
+  const mon = arrivalsEmail('2026-11-02', table(['Date (Arrival)', 'Cases (Total)', 'Sales Value (Total)'], [['2026-10-30', '91', '9100']]))
+  assert.equal(arrivalsFor([sat], '2026-10-30').daily.value, 9000)
+  assert.equal(arrivalsFor([sat, mon], '2026-10-30').daily.value, 9100)
+})
+
+test('buildEvidentDay: booked (day, MTD, per rep) comes from the arrivals email when it is in; billed is untouched', () => {
+  const plain = buildEvidentDay([bookingReport, billedReport, lmBooked, lmBilled], RUN)
+  const arr = { subject: 'Daily Arrivals by Day - AIM CRM', date: '2026-10-13', html: table(['Date (Arrival)', 'Cases (Total)', 'Sales Value (Total)', 'N/A', 'Delaney, James', 'Alexander, WIlliam'], [['2026-10-01', '50', '5000', '4800', '100', '100'], ['2026-10-12', '60', '6000', '5500', '200', '300']]) }
+  const day = buildEvidentDay([bookingReport, billedReport, lmBooked, lmBilled], RUN, [arr])
+  assert.equal(day.totals.bookedSource, 'arrivals')
+  assert.equal(day.totals.dailyBookedValue, 6000)
+  assert.equal(day.totals.dailyBookedCount, 60)
+  assert.equal(day.totals.mtdBookedValue, 11000)
+  assert.equal(day.totals.mtdBookedCount, 110)
+  assert.deepEqual(day.totals.repMtd.booked, { na: 10300, james: 300, william: 400, company: 11000 })
+  assert.deepEqual(day.totals.repMtd.billed, plain.totals.repMtd.billed)
+  assert.equal(day.totals.dailyBilledValue, plain.totals.dailyBilledValue)
+  assert.equal(plain.totals.bookedSource, undefined, 'without the email nothing changes')
+})

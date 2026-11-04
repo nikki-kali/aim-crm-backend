@@ -163,7 +163,7 @@ async function dailyBookedTotalFor(dateStr) {
 const eviSmartDayCache = new Map()
 async function loadDayReport(dateStr) {
   const evident = await fetchEvidentEmailsInRange(`after:${gmailDate(dateStr, -1)} before:${gmailDate(dateStr, 2)}`)
-  const built = buildEvidentDay(evident.filter((m) => m.date === dateStr), dateStr)
+  const built = buildEvidentDay(evident.filter((m) => m.date === dateStr), dateStr, evident)
   if (built) return built
   const found = pickEviSmartMessageForDate(await fetchEviSmartEmails(), dateStr)
   return { totals: found ? found.totals : null, extras: found ? extractEviSmartExtras(found.message.html) : null }
