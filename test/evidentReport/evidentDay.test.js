@@ -125,6 +125,8 @@ test('1 November: a backup MTD email still showing October is ignored (N/A), nev
   assert.equal(emailMonthMatches(octBooked, '2026-10-30'), true)
   assert.equal(emailMonthMatches(octBooked, '2026-11-02'), false)
   assert.equal(emailMonthMatches('<p>no month line</p>', '2026-11-02'), true)
+  assert.equal(emailMonthMatches('<p>MTD Booked Daily Update month (arrival)=October 2026</p>', '2026-11-02'), false)
+  assert.equal(emailMonthMatches('<p>MTD Booked Daily Update month (arrival)=November 2026</p>', '2026-11-02'), true)
   const nov = '2026-11-02'
   const agg = parseAndAggregate([
     { subject: 'MTD Booked Daily Update', html: octBooked, date: nov },

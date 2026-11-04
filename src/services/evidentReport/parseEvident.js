@@ -571,11 +571,12 @@ function applyEmailMtdTotals(eviSmart, agg) {
 }
 
 // True unless the email names a month ("month (booking)=October 2026") that
-// differs from runDate's. An email without that line is accepted.
+// differs from runDate's. An email without that line is accepted. "arrival"
+// too: the EA moved the booked reports to arrival date on 2026-11-05.
 const MONTH_NAMES = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
 function emailMonthMatches(html, runDate) {
   const text = String(html || '').replace(/<[^>]+>/g, ' ');
-  const m = text.match(/month\s*\((?:booking|invoice)\)\s*=\s*([A-Za-z]+)\s+(\d{4})/i);
+  const m = text.match(/month\s*\((?:booking|arrival|invoice)\)\s*=\s*([A-Za-z]+)\s+(\d{4})/i);
   if (!m) return true;
   const month = MONTH_NAMES.indexOf(m[1].toLowerCase()) + 1;
   return `${m[2]}-${String(month).padStart(2, '0')}` === runDate.slice(0, 7);
