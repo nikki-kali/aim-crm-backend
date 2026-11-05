@@ -56,4 +56,46 @@ async function upsertSubscriberRow({ email, status, source }) {
   }
 }
 
-module.exports = { upsertSubscriberRow }
+// Appends one row to a log-style sheet (one row per event), writing the
+// header first if the sheet is empty. Used for trade-show offer redemptions:
+// the sheet is shared with the team, so it reads as a plain list. Returns
+// false when the sheet isn't configured, so callers can skip quietly.
+//
+// Two ways to reach the sheet:
+//  - webhook (preferred): an Apps Script web app bound to the sheet, running
+//    as the sheet's owner (media@). No service account or Google Cloud key,
+//    and the sheet never has to be shared outside the AIM workspace. The
+//    script checks the shared secret and appends the row itself. See
+//    docs/gnydm-redemptions-sheet-apps-script.gs.
+//  - service account: the Sheets API with GOOGLE_SERVICE_ACCOUNT_EMAIL/KEY.
+async function appendLogRow({ spreadsheetId, webhookUrl, webhookSecret, tab = 'Sheet1', header, row }) {
+  if (webhookUrl) {
+    if (!webhookSecret) return false
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secret: webhookSecret, tab, header, row }),
+      redirect: 'follow',
+    })
+    const text = await res.text()
+    let ok = false
+    try { ok = JSON.parse(text).ok === true } catch { ok = false }
+    if (!res.ok || !ok) throw new Error(`sheet webhook rejected the row (HTTP ${res.status})`)
+    return true
+  }
+  if (!spreadsheetId || !process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL) return false
+  const sheets = getSheetsClient()
+  const range = `${tab}!A:A`
+  const { data } = await sheets.spreadsheets.values.get({ spreadsheetId, range })
+  const values = (data.values || []).length === 0 ? [header, row] : [row]
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range,
+    valueInputOption: 'RAW',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values },
+  })
+  return true
+}
+
+module.exports = { upsertSubscriberRow, appendLogRow }
