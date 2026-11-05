@@ -5,6 +5,7 @@ const db = require('../config/db')
 const { scoreFromLead } = require('../services/scoring')
 const { sendEmail } = require('../services/email')
 const { appendLogRow } = require('../services/sheets')
+const { welcomeEmail, teamAlertEmail } = require('../services/redemptionEmails')
 const rateLimiter = require('../middleware/rateLimiter')
 
 const router = express.Router()
@@ -213,40 +214,13 @@ function esc(v) {
   return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
+// Designed emails live in services/redemptionEmails.js.
+const SHEET_URL = 'https://docs.google.com/spreadsheets/d/1sSvR3WXzaRrLIiGTgXuKHtkIJUGBlEWSTghc5j_OMz8/edit'
 function teamEmail(d, s, r) {
-  const review = r.status === 'needs_review'
-  const subject = (d.event.test ? '[TEST] ' : '') + (review
-    ? `Registered Practice won: ${s.prize} - needs review (${d.practice})`
-    : `Registered New Practice won: ${s.prize} (${d.practice})`)
-  const rows = [
-    ['Prize won', s.prize], ['Status', review ? `Needs review: ${r.review_reason}` : 'Verified new practice'],
-    ['Doctor', d.name], ['Practice', d.practice], ['Email', d.email], ['Phone', d.phone],
-    ['Address', `${d.street}, ${d.city}, ${d.state} ${d.zip}`], ['Scanner', d.scanner || 'Not given'],
-    ['Sends most', d.interest || 'Not given'], ['Marketing emails', d.consent ? 'Opted in' : 'Not opted in'],
-    ['First case due', d.event.deadlineLabel], ['Redemption', `${r.count} of ${s.limit}`],
-  ]
-  const html = `<div style="font-family:Arial,Helvetica,sans-serif;color:#10353F;max-width:600px">
-  <p style="font-size:12px;letter-spacing:2px;color:#207290;margin:0 0 4px">MARKETING UPDATES &amp; ALERTS</p>
-  <h1 style="font-size:20px;margin:0 0 6px">${review ? 'A practice registered, but needs a check' : 'A new practice registered for the show offer'}</h1>
-  <p style="font-size:14px;margin:0 0 16px">${esc(d.practice)} claimed <b>${esc(s.prize)}</b> from the ${esc(d.event.label)} scratch card.${review ? ' It matches an existing AIM client or clinic, so please confirm it qualifies before the offer is applied.' : ''}</p>
-  <table cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-size:14px;width:100%">
-    ${rows.map(([k, v]) => `<tr><td style="border-bottom:1px solid #E5E7EB;color:#5B7A86;width:150px">${esc(k)}</td><td style="border-bottom:1px solid #E5E7EB">${esc(v)}</td></tr>`).join('')}
-  </table>
-  <p style="font-size:12px;color:#5B7A86;margin-top:16px">${d.event.test ? 'TEST registration: not added to the CRM. It appears in the shared sheet labeled "TEST - ignore".' : `Also added to the CRM as a ${esc(d.event.label)} lead and to the shared redemptions sheet.`}</p>
-</div>`
-  return { subject, html }
+  return teamAlertEmail(d, s, r, { sheetUrl: SHEET_URL })
 }
-
-function doctorEmail(d, s) {
-  const subject = `${d.event.test ? '[TEST] ' : ''}Your ${d.event.label} offer from AIM is registered`
-  const html = `<div style="font-family:Arial,Helvetica,sans-serif;color:#10353F;max-width:600px">
-  <h1 style="font-size:20px;margin:0 0 10px">Thank you, ${esc(d.name)}.</h1>
-  <p style="font-size:14px;line-height:1.5">${esc(d.practice)} is registered for your ${esc(d.event.label)} offer: <b>${esc(s.prize)}</b>.</p>
-  <p style="font-size:14px;line-height:1.5">To use it, send your first case so it reaches us by <b>${esc(d.event.deadlineLabel)}</b>. You can upload a scan or schedule a pickup at <a href="https://aimdentallab.com/contact" style="color:#207290">aimdentallab.com/contact</a>, or call us at (718) 854-3900.</p>
-  <p style="font-size:14px;line-height:1.5">Full offer terms: <a href="https://aimdentallab.com/gnydm/redeem" style="color:#207290">aimdentallab.com/gnydm/redeem</a></p>
-  <p style="font-size:13px;color:#5B7A86;margin-top:18px">AIM Dental Laboratory, 802 Myrtle Avenue, Brooklyn, NY 11206</p>
-</div>`
-  return { subject, html }
+function doctorEmail(d, s, r) {
+  return welcomeEmail(d, s, r)
 }
 
 const SHEET_HEADER = ['Registered (New York time)', 'Status', 'Review note', 'Prize won', 'Doctor', 'Practice', 'Email', 'Phone',
@@ -431,7 +405,7 @@ router.post('/', rateLimiter({ windowMs: 10 * 60 * 1000, max: 60 }), async (req,
   const teamCc = d.event.test ? [] : TEAM_CC
   tasks.push(sendEmail({ to: teamTo, cc: teamCc, replyTo: d.email, subject: team.subject, html: team.html })
     .catch((e) => console.error('event-redemptions: team email failed', e.message)))
-  const doc = doctorEmail(d, s)
+  const doc = doctorEmail(d, s, record)
   tasks.push(sendEmail({ to: d.email, replyTo: 'media@aimdentallab.com', subject: doc.subject, html: doc.html })
     .catch((e) => console.error('event-redemptions: doctor email failed', e.message)))
   tasks.push(appendLogRow({ spreadsheetId: s.sheetId, webhookUrl: s.sheetWebhook, webhookSecret: s.sheetSecret, header: SHEET_HEADER, row: sheetRow(d, s, record) })
