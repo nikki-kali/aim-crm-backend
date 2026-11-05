@@ -264,5 +264,5 @@ test('Scanner doctors: MTD from MTD Booked Daily Update, the day from Daily Book
   const agg = { runDate: '2026-11-04', missing: [], eviSmart: { scannerDoctors: rows } }
   let html = ''
   try { html = buildCombinedLeadershipEmail(agg, [], []).html } catch (e) { return } // full builder needs more data; section helper checked below
-  assert.match(html, /Scanner Doctors \(8 doctors, 7 with no case on Wed, Nov 4\)/)
+  assert.match(html, /Intraoral Scanner Accounts · 1 of 8 sent cases on Wed, Nov 4/)
 })

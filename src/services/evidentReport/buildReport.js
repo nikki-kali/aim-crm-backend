@@ -675,7 +675,7 @@ function scannerDoctorsSection(rows, runDate) {
   const cell = (html, width, right, extra = '') => `<td width="${width}" style="padding:5px 0;border-bottom:1px solid ${HAIRLINE};font-size:11.5px;line-height:1.35;color:${BRAND.ink};${right ? `text-align:right;font-family:${FONT_DATA};white-space:nowrap;` : 'word-break:break-word;'}${extra}">${html}</td>`;
   return `
     <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
-      ${sectionLabel(`Scanner Doctors (${rows.length} doctors, ${quiet} with no case on ${escapeHtml(day)})`)}
+      ${sectionLabel(`Intraoral Scanner Accounts · ${rows.length - quiet} of ${rows.length} sent cases on ${escapeHtml(day)}`)}
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed">
         <tr>${head('Doctor', '38%')}${head('Sales rep', '20%')}${head(escapeHtml(day), '20%', true)}${head('MTD', '22%', true)}</tr>
         ${rows.map((r) => `
