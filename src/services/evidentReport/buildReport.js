@@ -671,11 +671,20 @@ function scannerDoctorsSection(rows, runDate) {
   if (!rows || rows.length === 0) return '';
   const day = new Date(`${runDate}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
   const quiet = rows.filter((r) => r.todayCases === 0).length;
+  const round = (n) => Math.round(n * 100) / 100;
+  const mtdTotal = round(rows.reduce((s, r) => s + r.mtdValue, 0));
+  const dayTotal = round(rows.reduce((s, r) => s + r.todayValue, 0));
+  const dayCases = rows.reduce((s, r) => s + r.todayCases, 0);
+  const activeMtd = rows.filter((r) => r.mtdValue > 0).length;
   const head = (text, width, right) => `<td width="${width}" style="padding:0 0 5px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}${right ? ';text-align:right' : ''}">${text}</td>`;
   const cell = (html, width, right, extra = '') => `<td width="${width}" style="padding:5px 0;border-bottom:1px solid ${HAIRLINE};font-size:11.5px;line-height:1.35;color:${BRAND.ink};${right ? `text-align:right;font-family:${FONT_DATA};white-space:nowrap;` : 'word-break:break-word;'}${extra}">${html}</td>`;
   return `
     <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
       ${sectionLabel(`Intraoral Scanner Accounts · ${rows.length - quiet} of ${rows.length} sent cases on ${escapeHtml(day)}`)}
+      <div style="margin:0 0 14px">${cardRow([
+        statCard('Scanner Accounts MTD', fmtMoney(mtdTotal), [{ text: `${activeMtd} of ${rows.length} accounts sent cases this month` }]),
+        statCard(escapeHtml(day), fmtMoney(dayTotal), [{ text: `${dayCases} case${dayCases === 1 ? '' : 's'} from ${rows.length - quiet} account${rows.length - quiet === 1 ? '' : 's'}` }]),
+      ])}</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed">
         <tr>${head('Doctor', '38%')}${head('Sales rep', '20%')}${head(escapeHtml(day), '20%', true)}${head('MTD', '22%', true)}</tr>
         ${rows.map((r) => `
