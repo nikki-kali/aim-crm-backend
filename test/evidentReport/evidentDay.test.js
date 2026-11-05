@@ -258,7 +258,8 @@ test('Scanner doctors: MTD from MTD Booked Daily Update, the day from Daily Book
   assert.deepEqual(rows[0], { code: 'A1304', name: 'Dr. Ehab Samaan', rep: 'William', todayCases: 1, todayValue: 65, mtdValue: 780 })
   assert.equal(rows[1].code, 'KH2216')
   assert.equal(rows[1].todayCases, 0)
-  assert.equal(rows.find((r) => r.code === 'A3101').mtdValue, 0)
+  assert.equal(rows.find((r) => r.code === 'A4154').mtdValue, 0)
+  assert.equal(rows.find((r) => r.code === 'A3101'), undefined, 'Dr. Saldana has no scanner')
   assert.equal(scannerDoctorRows(undefined, daily), null)
 
   const agg = { runDate: '2026-11-04', missing: [], eviSmart: { scannerDoctors: rows } }
