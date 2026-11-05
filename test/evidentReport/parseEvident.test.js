@@ -536,7 +536,7 @@ test('combined email explains where the numbers come from, and flags cumulative 
   sep22.eviSmart = extractEviSmartTotals(fixture('evismart-daily-sales-report-sep22-populated.html'));
   const { html } = buildCombinedLeadershipEmail(sep22, [], [], {});
   assert.match(html, /Where these numbers come from/);
-  assert.match(html, /Booked comes from Evident&#39;s 8 PM booking-date emails/);
+  assert.match(html, /Booked counts cases by arrival date, from Evident&#39;s 8 PM daily emails/);
   assert.match(html, /their own Evident emails/);
   assert.doesNotMatch(html, /come from the EviSmart Daily Sales Report/);
   const arrivalsDay = { ...sep22, eviSmart: { ...sep22.eviSmart, bookedSource: 'arrivals' } };
