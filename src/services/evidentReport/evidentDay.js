@@ -246,9 +246,11 @@ function buildEvidentDay(messages, runDate, arrivalsMessages = []) {
   const booked = lmBooked ? parseLastMonthVsMtd(lmBooked.html, runDate, 'booked') : null
   const billed = lmBilled ? parseLastMonthVsMtd(lmBilled.html, runDate, 'billed') : null
 
-  const mtdBooked = booked && booked.current
-    ? { company: booked.current.value, count: booked.current.count, ...booked.current.byRep }
-    : has('MTD Booked Daily Update') && agg.companyMtdBookedByRep ? { company: agg.companyMtdBooked, count: null, ...agg.companyMtdBookedByRep } : null
+  // "MTD Booked Daily Update" first: it is by arrival date since 2026-11-05,
+  // while "Last Month vs MTD Booked (rolling)" is still by booking date.
+  const mtdBooked = has('MTD Booked Daily Update') && agg.companyMtdBookedByRep
+    ? { company: agg.companyMtdBooked, count: null, ...agg.companyMtdBookedByRep }
+    : booked && booked.current ? { company: booked.current.value, count: booked.current.count, ...booked.current.byRep } : null
   const mtdBilled = billed && billed.current
     ? { company: billed.current.value, ...billed.current.byRep }
     : has('Daily MTD Total Billed') && agg.companyMtdBilledByRep ? { company: agg.companyMtdBilled, ...agg.companyMtdBilledByRep } : null

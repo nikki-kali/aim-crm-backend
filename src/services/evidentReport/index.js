@@ -142,6 +142,22 @@ function lastBusinessDayEasternDateString() {
 // come through (throws code EVISMART_UNAVAILABLE BEFORE anything is sent), so
 // an automatic send to leadership never goes out with "pull didn't come
 // through" notices and missing totals. Used by the automatic daily send.
+// Booked by arrival date from the next morning's "Daily Arrivals by Day"
+// email (Report 111, evidentDay.js) replaces the 8 PM emails' booked
+// figures. Shared by the preview and the send so the two always match.
+function applyArrivalsBooked(aggregate, eviSmartRaw, runDate) {
+  if (eviSmartRaw && eviSmartRaw.bookedSource === 'arrivals') {
+    Object.assign(aggregate.eviSmart, {
+      dailyBookedValue: eviSmartRaw.dailyBookedValue, dailyBookedCount: eviSmartRaw.dailyBookedCount,
+      mtdBookedValue: eviSmartRaw.mtdBookedValue, mtdBookedCount: eviSmartRaw.mtdBookedCount, bookedSource: 'arrivals',
+    })
+    aggregate.companyDailyBooked = eviSmartRaw.dailyBookedValue
+    aggregate.companyDailyBookedCount = eviSmartRaw.dailyBookedCount
+  } else {
+    console.warn(`[evident-report] no "Daily Arrivals by Day" email with ${runDate} yet; booked uses the 8 PM emails`)
+  }
+}
+
 async function runEvidentReport({ requireEviSmart = false } = {}) {
   const runDate = lastBusinessDayEasternDateString()
 
@@ -179,18 +195,7 @@ async function runEvidentReport({ requireEviSmart = false } = {}) {
   const eviSmartRaw = eviDay.totals
   applyEviSmartPrimaryTo(aggregate, eviSmartRaw)
   aggregate.eviSmart = applyEmailMtdTotals(eviSmartRaw, aggregate)
-  // Booked by arrival date from the next morning's "Daily Arrivals by Day"
-  // email (evidentDay.js) replaces the 8 PM booking-date figures.
-  if (eviSmartRaw && eviSmartRaw.bookedSource === 'arrivals') {
-    Object.assign(aggregate.eviSmart, {
-      dailyBookedValue: eviSmartRaw.dailyBookedValue, dailyBookedCount: eviSmartRaw.dailyBookedCount,
-      mtdBookedValue: eviSmartRaw.mtdBookedValue, mtdBookedCount: eviSmartRaw.mtdBookedCount, bookedSource: 'arrivals',
-    })
-    aggregate.companyDailyBooked = eviSmartRaw.dailyBookedValue
-    aggregate.companyDailyBookedCount = eviSmartRaw.dailyBookedCount
-  } else {
-    console.warn(`[evident-report] no "Daily Arrivals by Day" email with ${runDate} yet; booked uses the 8 PM booking-date emails`)
-  }
+  applyArrivalsBooked(aggregate, eviSmartRaw, runDate)
   aggregate.eviSmart.lastMonth = await evidentLastMonth(runDate, eviDay.extras)
   if (!eviSmartRaw) {
     console.warn('[evident-report] EviSmart Daily Sales Report unavailable — Daily Billed will show as N/A; every other figure comes from the Evident emails')
@@ -269,13 +274,15 @@ async function runEvidentReport({ requireEviSmart = false } = {}) {
 async function sendEvidentReportForApproval() {
   const runDate = lastBusinessDayEasternDateString()
   const historyRows = await getHistory()
-  const messages = (await fetchEvidentEmails()).filter((m) => m.date === runDate)
+  const allMessages = await fetchEvidentEmails()
+  const messages = allMessages.filter((m) => m.date === runDate)
   const aggregate = parseAndAggregate(messages, { runDate })
   await applyBookedMtdGuard(aggregate, runDate, (d) => evidentMtdCompanyTotal(d, 'booked'))
-  const eviDay = await fetchEviSmartDay(runDate, messages)
+  const eviDay = await fetchEviSmartDay(runDate, messages, allMessages)
   const eviSmartRaw = eviDay.totals
   applyEviSmartPrimaryTo(aggregate, eviSmartRaw)
   aggregate.eviSmart = applyEmailMtdTotals(eviSmartRaw, aggregate)
+  applyArrivalsBooked(aggregate, eviSmartRaw, runDate)
   aggregate.eviSmart.lastMonth = await evidentLastMonth(runDate, eviDay.extras)
   const repGoals = applyEviSmartNewDoctors(applyEvidentMtdToGoals(await fetchRepGoalsWithProgress(runDate), aggregate.companyMtdBilledByRep), eviDay.extras)
   const { subject, html } = buildCombinedLeadershipEmail(aggregate, historyRows, repGoals, {})
