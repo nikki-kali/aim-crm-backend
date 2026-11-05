@@ -664,6 +664,34 @@ function buildReport3Email(agg, historyRows = [], repGoals = []) {
 // the longest section) very last, since it's reference detail someone
 // scrolls to on purpose, not something that should push the headline
 // numbers below the fold.
+// Doctors who received a scanner from AIM (Ben, 2026-11-04): rep, the
+// report day's cases, and month-to-date value; anyone with no case that day
+// is flagged. Rows come from scannerDoctors.js; omitted when there are none.
+function scannerDoctorsSection(rows, runDate) {
+  if (!rows || rows.length === 0) return '';
+  const day = new Date(`${runDate}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+  const quiet = rows.filter((r) => r.todayCases === 0).length;
+  const head = (text, width, right) => `<td width="${width}" style="padding:0 0 5px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}${right ? ';text-align:right' : ''}">${text}</td>`;
+  const cell = (html, width, right, extra = '') => `<td width="${width}" style="padding:5px 0;border-bottom:1px solid ${HAIRLINE};font-size:11.5px;line-height:1.35;color:${BRAND.ink};${right ? `text-align:right;font-family:${FONT_DATA};white-space:nowrap;` : 'word-break:break-word;'}${extra}">${html}</td>`;
+  return `
+    <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
+      ${sectionLabel(`Scanner Doctors (${rows.length} doctors, ${quiet} with no case on ${escapeHtml(day)})`)}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed">
+        <tr>${head('Doctor', '38%')}${head('Sales rep', '20%')}${head(escapeHtml(day), '20%', true)}${head('MTD', '22%', true)}</tr>
+        ${rows.map((r) => `
+          <tr>
+            ${cell(escapeHtml(`${r.name} (${r.code})`), '38%')}
+            ${cell(r.rep ? escapeHtml(r.rep) : `<span style="color:${BRAND.slate}">Not assigned</span>`, '20%')}
+            ${r.todayCases > 0
+              ? cell(`${r.todayCases} · ${fmtMoney(r.todayValue)}`, '20%', true, `color:${BRAND.slate};`)
+              : cell('No case', '20%', true, `color:${BRAND.danger};font-weight:600;`)}
+            ${cell(fmtMoney(r.mtdValue), '22%', true, `color:${BRAND.slate};`)}
+          </tr>`).join('')}
+      </table>
+      <p style="margin:10px 0 0;font-size:10.5px;line-height:1.5;color:${BRAND.slate}">Doctors tagged &quot;Intraoral Scanner&quot; in Evident, with the rep from their customer record. Values count cases by arrival date, the same as the Scanner Doctors report (#112).</p>
+    </div>`;
+}
+
 function buildCombinedLeadershipEmail(agg, historyRows = [], repGoals = [], overrides = {}) {
   const dateLabel = dateLabelFor(agg.runDate);
   const { headlineSection, bookedRowsTable, sheetRow } = buildReport1Body(agg, historyRows, overrides);
@@ -701,6 +729,7 @@ function buildCombinedLeadershipEmail(agg, historyRows = [], repGoals = [], over
   ${groupDivider('Sales Performance by Representative')}
   ${report2Body}
 
+  ${scannerDoctorsSection(es && es.scannerDoctors, agg.runDate)}
   ${bookedRowsTable}
   ${sourceNote}`;
 

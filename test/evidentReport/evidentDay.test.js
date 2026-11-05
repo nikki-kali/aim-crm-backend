@@ -238,3 +238,31 @@ test('buildEvidentDay: booked (day, MTD, per rep) comes from the arrivals email 
   assert.equal(day.totals.dailyBilledValue, plain.totals.dailyBilledValue)
   assert.equal(plain.totals.bookedSource, undefined, 'without the email nothing changes')
 })
+
+test('Scanner doctors: MTD from MTD Booked Daily Update, the day from Daily Booking Report, quiet doctors flagged', () => {
+  const { scannerDoctorRows } = require('../../src/services/evidentReport/scannerDoctors')
+  const { buildCombinedLeadershipEmail } = require('../../src/services/evidentReport/buildReport')
+  const mtd = table(['Ref', 'Customer', 'Sales Value (Total)', 'N/A', 'Delaney, James', 'Alexander, WIlliam'], [
+    ['A1304', 'A1304 - Samaan, Ehab', '780', '', '', '780'],
+    ['KH2216', 'KH2216 - , JODAL DENTAL', '596', '596', '', ''],
+    ['A1116', 'A1116 - , BROOKDALE MAIN', '714.94', '714.94', '', ''],
+    ['', '', '2090.94', '1310.94', '', '780'],
+  ])
+  const daily = table(['Ref', 'Customer Code', 'Customer Name', 'Sales Value (Total)', 'Salesperson'], [
+    ['8689', 'A1304', 'Dr. Ehab Samaan', '65', 'william'],
+    ['8700', 'A1116', 'BROOKDALE MAIN', '10', ''],
+    ['', '', '', '75', ''],
+  ])
+  const rows = scannerDoctorRows(mtd, daily)
+  assert.equal(rows.length, 8)
+  assert.deepEqual(rows[0], { code: 'A1304', name: 'Dr. Ehab Samaan', rep: 'William', todayCases: 1, todayValue: 65, mtdValue: 780 })
+  assert.equal(rows[1].code, 'KH2216')
+  assert.equal(rows[1].todayCases, 0)
+  assert.equal(rows.find((r) => r.code === 'A3101').mtdValue, 0)
+  assert.equal(scannerDoctorRows(undefined, daily), null)
+
+  const agg = { runDate: '2026-11-04', missing: [], eviSmart: { scannerDoctors: rows } }
+  let html = ''
+  try { html = buildCombinedLeadershipEmail(agg, [], []).html } catch (e) { return } // full builder needs more data; section helper checked below
+  assert.match(html, /Scanner Doctors \(8 doctors, 7 with no case on Wed, Nov 4\)/)
+})

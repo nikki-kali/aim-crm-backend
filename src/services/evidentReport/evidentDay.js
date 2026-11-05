@@ -13,6 +13,7 @@
 // doctors from "New Doctors - James/William". Never reads the "Case Number"
 // column: Evident puts patient names there.
 const { parseAndAggregate, parseTable, findCol, rowToObj, toNum } = require('./parseEvident')
+const { scannerDoctorRows } = require('./scannerDoctors')
 
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']
 
@@ -270,6 +271,10 @@ function buildEvidentDay(messages, runDate, arrivalsMessages = []) {
     lastMonth: null,
     repMtd: mtdBooked && mtdBilled ? { booked: rep(mtdBooked), billed: rep(mtdBilled) } : null,
     dailyCustomers: dailyCustomersFrom((pickEmail(day, /^Daily Booking Report\s*-\s*Nadine/i) || {}).html),
+    scannerDoctors: scannerDoctorRows(
+      (pickEmail(day, /^MTD Booked Daily Update/i) || {}).html,
+      (pickEmail(day, /^Daily Booking Report\s*-\s*Nadine/i) || {}).html,
+    ),
     cumulativeAsOf: null,
     source: 'evident',
   }
