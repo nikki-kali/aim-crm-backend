@@ -80,6 +80,30 @@ async function fetchEvidentEmails() {
   return fetchEvidentEmailsInRange('newer_than:5d')
 }
 
+// Evident's "This Month" report with the Debtors line (Report Schedule 49,
+// "Debtors Daily - AIM CRM", 2026-11-10; see debtors.js). Kept apart from
+// fetchEvidentEmails so no other report sees these emails. The one test send
+// came from noreply@evidentlabs.com while the scheduled ones come from
+// support@, so both are allowed, but only emails that carry "Debtors Total".
+const DEBTORS_QUERY = 'from:(support@evidentlabs.com OR noreply@evidentlabs.com) "Debtors Total" newer_than:5d'
+
+async function fetchDebtorsEmails() {
+  const auth = getGmailAuth()
+  const gmail = google.gmail({ version: 'v1', auth })
+  const listRes = await gmail.users.messages.list({ userId: 'me', q: DEBTORS_QUERY, maxResults: 10 })
+  const ids = (listRes.data.messages || []).map((m) => m.id)
+  const messages = []
+  for (const id of ids.slice(0, 5)) {
+    const res = await gmail.users.messages.get({ userId: 'me', id, format: 'full' })
+    const { subject, html } = extractSubjectAndHtml(res.data)
+    const internalDate = Number(res.data.internalDate)
+    const date = new Date(internalDate).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+    messages.push({ subject, html, date, internalDate })
+    await sleep(THROTTLE_MS)
+  }
+  return messages
+}
+
 // Fetches the "EviSmart Daily Sales Report" email — the sole real source
 // for the Leadership Report's Daily/MTD/YTD Booked+Billed figures as of
 // 2026-09-23 (user instruction, replacing the old multi-report parsing
@@ -188,4 +212,4 @@ async function fetchEviSmartHeaders() {
   return out
 }
 
-module.exports = { fetchEviSmartHeaders, fetchEvidentSubjects, EVISMART_SENDERS, EVISMART_QUERY, fetchEvidentEmails, fetchEviSmartEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }
+module.exports = { fetchEviSmartHeaders, fetchEvidentSubjects, EVISMART_SENDERS, EVISMART_QUERY, fetchEvidentEmails, fetchDebtorsEmails, DEBTORS_QUERY, fetchEviSmartEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }

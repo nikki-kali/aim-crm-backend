@@ -697,8 +697,46 @@ function scannerDoctorsSection(rows, runDate) {
             ${cell(fmtMoney(r.mtdValue), '22%', true, `color:${BRAND.slate};`)}
           </tr>`).join('')}
       </table>
-      <p style="margin:10px 0 0;font-size:10.5px;line-height:1.5;color:${BRAND.slate}">Doctors tagged &quot;Intraoral Scanner&quot; in Evident, with the rep from their customer record. Values count cases by arrival date, the same as the Scanner Doctors report (#112).</p>
+      <p style="margin:10px 0 0;font-size:10.5px;line-height:1.5;color:${BRAND.slate}">Doctors who received an intraoral scanner from AIM, with the rep from their customer record. Values count cases by arrival date, the same as the Scanner Doctors report (#112).</p>
     </div>`;
+}
+
+// Outstanding to collect (Debtors), first thing in the email in bold red so
+// it can't be missed (Ben, 2026-11-10). `d` comes from debtors.js:
+// undefined = not looked up (renders nothing), null = looked up but no email,
+// which says so instead of showing an old or made-up number. Whole dollars,
+// as Evident shows them.
+const DEBTORS_RED = '#c8102e';
+function debtorsSection(d) {
+  if (d === undefined) return '';
+  if (!d) {
+    return `
+    <div style="margin:28px 36px 0;padding:16px 19px;background:#fff;border:2px solid ${DEBTORS_RED};border-radius:14px">
+      <p style="margin:0;font-size:13.5px;line-height:1.55;font-weight:600;color:${DEBTORS_RED}">Outstanding to collect (Debtors): this morning's figure from Evident did not come through.</p>
+    </div>`;
+  }
+  const whole = (n) => (n === null || n === undefined ? '—' : '$' + Math.round(n).toLocaleString('en-US'));
+  const bucket = (label, value) => `
+    <td width="23.5%" style="vertical-align:top;background:rgba(255,255,255,.14);border-radius:10px;padding:9px 10px">
+      <p style="margin:0 0 3px;font-family:${FONT_DATA};font-size:9px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;color:rgba(255,255,255,.85)">${label}</p>
+      <p style="margin:0;font-family:${FONT_DATA};font-size:14px;font-weight:600;color:#fff;white-space:nowrap">${whole(value)}</p>
+    </td>`;
+  const gap = '<td width="2%"></td>';
+  return `
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:28px 0 0">
+    <tr><td style="padding:0 36px">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr><td bgcolor="${DEBTORS_RED}" style="background-color:${DEBTORS_RED};border-radius:16px;padding:20px 18px;box-shadow:0 8px 24px rgba(200,16,46,.28)">
+          <p style="margin:0 0 6px;font-family:${FONT_DATA};font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#fff">Outstanding to collect (Debtors)</p>
+          <p style="margin:0;font-family:${FONT_DATA};font-size:32px;font-weight:700;color:#fff;letter-spacing:-.02em;white-space:nowrap">${whole(d.total)}</p>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:14px 0 0;table-layout:fixed"><tr>
+            ${bucket('Current', d.current)}${gap}${bucket('30 Day', d.d30)}${gap}${bucket('60 Day', d.d60)}${gap}${bucket('90 Day', d.d90)}
+          </tr></table>
+          <p style="margin:12px 0 0;font-size:11px;line-height:1.5;color:rgba(255,255,255,.9)">From Evident&#39;s This Month report${d.asOf ? `, as of ${escapeHtml(d.asOf)}` : ''}. Rounded, not exact.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>`;
 }
 
 function buildCombinedLeadershipEmail(agg, historyRows = [], repGoals = [], overrides = {}) {
@@ -732,6 +770,7 @@ function buildCombinedLeadershipEmail(agg, historyRows = [], repGoals = [], over
   </div>`;
 
   const body = `
+  ${debtorsSection(agg.debtors)}
   ${headlineSection}
   ${kpiSection}
 
@@ -749,4 +788,4 @@ function buildCombinedLeadershipEmail(agg, historyRows = [], repGoals = [], over
   };
 }
 
-module.exports = { buildReport1Email, buildReport2Email, buildReport3Email, buildCombinedLeadershipEmail, goalBar, emailShell };
+module.exports = { buildReport1Email, buildReport2Email, buildReport3Email, buildCombinedLeadershipEmail, goalBar, emailShell, debtorsSection };

@@ -1,4 +1,5 @@
-const { fetchEvidentEmails, fetchEviSmartEmails } = require('./gmailFetch')
+const { fetchEvidentEmails, fetchEviSmartEmails, fetchDebtorsEmails } = require('./gmailFetch')
+const { latestDebtors } = require('./debtors')
 const { parseAndAggregate, pickEviSmartMessageForDate, extractEviSmartExtras, applyEmailMtdTotals, repKeyFromSalesperson } = require('./parseEvident')
 const { applyEviSmartMtdPrimary, applyEviSmartNewDoctors } = require('./eviSmartPrimary')
 const { buildEvidentDay } = require('./evidentDay')
@@ -158,6 +159,19 @@ function applyArrivalsBooked(aggregate, eviSmartRaw, runDate) {
   }
 }
 
+// Outstanding to collect (Debtors) from the newest "This Month" email, shared
+// by the preview and the send. A failed fetch never blocks the dashboard: the
+// card then says the figure didn't come through.
+async function applyDebtors(aggregate) {
+  try {
+    aggregate.debtors = latestDebtors(await fetchDebtorsEmails())
+  } catch (e) {
+    console.warn(`[evident-report] Debtors email fetch failed: ${e.message}`)
+    aggregate.debtors = null
+  }
+  if (!aggregate.debtors) console.warn('[evident-report] no Debtors ("This Month") email found in the last 5 days')
+}
+
 async function runEvidentReport({ requireEviSmart = false } = {}) {
   const runDate = lastBusinessDayEasternDateString()
 
@@ -197,6 +211,7 @@ async function runEvidentReport({ requireEviSmart = false } = {}) {
   aggregate.eviSmart = applyEmailMtdTotals(eviSmartRaw, aggregate)
   applyArrivalsBooked(aggregate, eviSmartRaw, runDate)
   aggregate.eviSmart.lastMonth = await evidentLastMonth(runDate, eviDay.extras)
+  await applyDebtors(aggregate)
   if (!eviSmartRaw) {
     console.warn('[evident-report] EviSmart Daily Sales Report unavailable — Daily Billed will show as N/A; every other figure comes from the Evident emails')
   }
@@ -284,6 +299,7 @@ async function sendEvidentReportForApproval() {
   aggregate.eviSmart = applyEmailMtdTotals(eviSmartRaw, aggregate)
   applyArrivalsBooked(aggregate, eviSmartRaw, runDate)
   aggregate.eviSmart.lastMonth = await evidentLastMonth(runDate, eviDay.extras)
+  await applyDebtors(aggregate)
   const repGoals = applyEviSmartNewDoctors(applyEvidentMtdToGoals(await fetchRepGoalsWithProgress(runDate), aggregate.companyMtdBilledByRep), eviDay.extras)
   const { subject, html } = buildCombinedLeadershipEmail(aggregate, historyRows, repGoals, {})
 
