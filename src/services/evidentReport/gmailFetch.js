@@ -167,8 +167,9 @@ async function fetchEvidentEmailsInRange(extraQuery) {
   for (const id of ids) {
     const res = await gmail.users.messages.get({ userId: 'me', id, format: 'full' })
     const { subject, html } = extractSubjectAndHtml(res.data)
-    const date = new Date(Number(res.data.internalDate)).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
-    messages.push({ subject, html, date })
+    const internalDate = Number(res.data.internalDate)
+    const date = new Date(internalDate).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+    messages.push({ subject, html, date, internalDate })
     await sleep(THROTTLE_MS)
   }
   return messages

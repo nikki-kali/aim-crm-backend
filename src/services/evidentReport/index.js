@@ -171,6 +171,12 @@ async function applyLabTotals(aggregate, evidentMessages, runDate) {
   } catch (e) {
     console.warn(`[evident-report] "This Month" email fetch failed: ${e.message}`)
   }
+  // The first live run (2026-11-12 preview) got nothing from that fetch, so
+  // fall back to the This Month emails already in the main Evident fetch.
+  if (thisMonthMessages.length === 0) {
+    thisMonthMessages = (evidentMessages || []).filter((m) => /^This Month\b/i.test(String(m.subject || '').trim()) || /Debtors/i.test(String(m.html || '')))
+    console.warn(`[evident-report] "This Month" fetch returned nothing; using ${thisMonthMessages.length} This Month email(s) from the main Evident fetch`)
+  }
   aggregate.debtors = latestDebtors(thisMonthMessages)
   if (!aggregate.debtors) console.warn('[evident-report] no Debtors ("This Month") email found in the last 5 days')
   aggregate.labTotals = labTotalsFor({ thisMonthMessages, evidentMessages, runDate })
