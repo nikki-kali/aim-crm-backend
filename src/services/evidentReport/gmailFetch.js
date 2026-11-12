@@ -90,10 +90,10 @@ const DEBTORS_QUERY = 'from:(support@evidentlabs.com OR noreply@evidentlabs.com)
 async function fetchDebtorsEmails() {
   const auth = getGmailAuth()
   const gmail = google.gmail({ version: 'v1', auth })
-  const listRes = await gmail.users.messages.list({ userId: 'me', q: DEBTORS_QUERY, maxResults: 10 })
+  const listRes = await gmail.users.messages.list({ userId: 'me', q: DEBTORS_QUERY, maxResults: 12 })
   const ids = (listRes.data.messages || []).map((m) => m.id)
   const messages = []
-  for (const id of ids.slice(0, 5)) {
+  for (const id of ids.slice(0, 12)) {
     const res = await gmail.users.messages.get({ userId: 'me', id, format: 'full' })
     const { subject, html } = extractSubjectAndHtml(res.data)
     const internalDate = Number(res.data.internalDate)

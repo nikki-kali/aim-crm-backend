@@ -296,6 +296,7 @@ function buildReport1Body(agg, historyRows = [], overrides = {}) {
   const bookedRowsTable = bookedByCustomer.length === 0 ? '' : `
     <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
       ${sectionLabel(`Today's Booked Cases (${bookedCaseCount} cases, ${bookedByCustomer.length} customers)`)}
+      ${agg.labTotals !== undefined ? `<p style="margin:-8px 0 12px;font-size:11px;line-height:1.45;color:${BRAND.slate}">Every case booked that day, including repeats, remakes and cases returning for production, so the total is higher than New Jobs.</p>` : ''}
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed">
         <tr>
           <td width="56%" style="padding:0 0 5px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}">Customer</td>
@@ -336,6 +337,25 @@ function buildReport1Body(agg, historyRows = [], overrides = {}) {
   // #2/#3's content, since it's by far the longest section). Standalone
   // buildReport1Email below reassembles them in their original order, so
   // this split doesn't change that email's own layout at all.
+  // Ben's numbers (2026-11-11), when the lab totals were looked up: New Jobs,
+  // Invoiced, Receipts and Work in progress replace the Booked/Billed cards.
+  // The old banners are about the Booked/Billed sources, so they go too.
+  if (agg.labTotals !== undefined) {
+    return {
+      headlineSection: `
+  ${labTotalsSection(agg.labTotals)}
+
+  <div style="padding:20px 36px 0">
+    ${cardRow([
+      statCard('YTD Sales Value Total', fmtOrDash(companyYtdSalesValueTotal), [{ text: 'Includes $1,243,759 from the previous system' }]),
+    ])}
+    ${ytdGoalCard}
+  </div>`,
+      bookedRowsTable,
+      sheetRow: buildSheetRow(agg),
+    };
+  }
+
   const headlineSection = `
   ${eviSmartMissingBanner}
   ${missingBanner}
@@ -361,7 +381,13 @@ function buildReport1Body(agg, historyRows = [], overrides = {}) {
     ${ytdGoalCard}
   </div>`;
 
-  const sheetRow = {
+  return { headlineSection, bookedRowsTable, sheetRow: buildSheetRow(agg) };
+}
+
+// The daily log row (day-over-day deltas, trend chart). Unchanged by the
+// lab-totals layout.
+function buildSheetRow(agg) {
+  return {
     date: agg.runDate,
     booked_daily_count: agg.booked.daily.count,
     booked_daily_value: agg.booked.daily.value,
@@ -380,8 +406,44 @@ function buildReport1Body(agg, historyRows = [], overrides = {}) {
     company_daily_booked_count: agg.companyDailyBookedCount,
     company_daily_billed_value: agg.companyDailyBilled,
   };
+}
 
-  return { headlineSection, bookedRowsTable, sheetRow };
+// Ben's morning numbers, exactly as Elizabeth asked (2026-11-11): month
+// totals from Evident's This Month report, in her order: Receipts, New Jobs,
+// Work in progress (In Lab by due month, On Hold), Invoiced. See labTotals.js.
+// One value column so it fits a phone. Whole dollars, as the report shows
+// them. A missing figure reads N/A, never $0.
+function labTotalsSection(lt) {
+  const t = lt || {};
+  const money = (n) => (n === null || n === undefined ? 'N/A' : '$' + Math.round(n).toLocaleString('en-US'));
+  const sub = (text) => `<br><span style="font-size:10.5px;font-weight:400;color:${BRAND.slate}">${text}</span>`;
+  const cases = (n) => (n === null || n === undefined ? '' : sub(`${Number(n).toLocaleString('en-US')} case${n === 1 ? '' : 's'}`));
+  const part = (o, k) => (o ? o[k] : null);
+  const row = (label, note, value, last) => `
+        <tr>
+          <td width="55%" style="padding:11px 0;${last ? '' : `border-bottom:1px solid ${HAIRLINE};`}vertical-align:top">
+            <p style="margin:0;font-size:14px;font-weight:600;color:${BRAND.ink}">${label}</p>
+            ${note ? `<p style="margin:2px 0 0;font-size:10.5px;line-height:1.35;color:${BRAND.slate}">${note}</p>` : ''}
+          </td>
+          <td width="45%" style="padding:11px 0;${last ? '' : `border-bottom:1px solid ${HAIRLINE};`}vertical-align:top;text-align:right;font-family:${FONT_DATA};font-size:16px;font-weight:600;color:${BRAND.ink};white-space:nowrap">${value}</td>
+        </tr>`;
+  const nj = t.newJobs || {};
+  const inLab = t.inLab
+    ? `${money(t.inLab.thisMonth)}${sub('due this month')}<br>${money(t.inLab.nextMonth)}${sub('due next month')}`
+    : 'N/A';
+  return `
+  <div style="padding:22px 36px 0">
+    ${sectionLabel('This Month')}
+    <div style="padding:6px 16px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed">
+        ${row('Receipts', 'Money collected', money(part(t.receipts, 'mtd')))}
+        ${row('New Jobs', 'New business only', money(part(nj.mtd, 'value')) + cases(part(nj.mtd, 'count')))}
+        ${row('Work in progress: In Lab', t.inLab ? `${Number(t.inLab.count).toLocaleString('en-US')} cases, by due date` : 'By due date', inLab)}
+        ${row('Work in progress: On Hold', 'Waiting for new impressions from the doctor', money(part(t.onHold, 'value')) + cases(part(t.onHold, 'count')))}
+        ${row('Invoiced', 'Billed', money(part(t.invoiced, 'mtd')), true)}
+      </table>
+    </div>
+  </div>`;
 }
 
 function buildReport1Email(agg, historyRows = [], overrides = {}) {
@@ -716,12 +778,14 @@ function debtorsSection(d) {
     </div>`;
   }
   const whole = (n) => (n === null || n === undefined ? '—' : '$' + Math.round(n).toLocaleString('en-US'));
+  // Two rows of two: four across overlapped on phones (Ben's Gmail app,
+  // 2026-11-11, "$150,650$58,770..." ran together).
   const bucket = (label, value) => `
-    <td width="23.5%" style="vertical-align:top;background:rgba(255,255,255,.14);border-radius:10px;padding:9px 10px">
-      <p style="margin:0 0 3px;font-family:${FONT_DATA};font-size:9px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;color:rgba(255,255,255,.85)">${label}</p>
-      <p style="margin:0;font-family:${FONT_DATA};font-size:14px;font-weight:600;color:#fff;white-space:nowrap">${whole(value)}</p>
+    <td width="48%" style="vertical-align:top;background:rgba(255,255,255,.14);border-radius:10px;padding:10px 12px">
+      <p style="margin:0 0 4px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.85);white-space:nowrap">${label}</p>
+      <p style="margin:0;font-family:${FONT_DATA};font-size:17px;font-weight:600;color:#fff;white-space:nowrap">${whole(value)}</p>
     </td>`;
-  const gap = '<td width="2%"></td>';
+  const gap = '<td width="4%"></td>';
   return `
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:28px 0 0">
     <tr><td style="padding:0 36px">
@@ -730,7 +794,9 @@ function debtorsSection(d) {
           <p style="margin:0 0 6px;font-family:${FONT_DATA};font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#fff">Outstanding to collect (Debtors)</p>
           <p style="margin:0;font-family:${FONT_DATA};font-size:32px;font-weight:700;color:#fff;letter-spacing:-.02em;white-space:nowrap">${whole(d.total)}</p>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:14px 0 0;table-layout:fixed"><tr>
-            ${bucket('Current', d.current)}${gap}${bucket('30 Day', d.d30)}${gap}${bucket('60 Day', d.d60)}${gap}${bucket('90 Day', d.d90)}
+            ${bucket('Current', d.current)}${gap}${bucket('30 Day', d.d30)}
+          </tr><tr><td colspan="3" style="height:8px;line-height:8px;font-size:0">&nbsp;</td></tr><tr>
+            ${bucket('60 Day', d.d60)}${gap}${bucket('90 Day', d.d90)}
           </tr></table>
           <p style="margin:12px 0 0;font-size:11px;line-height:1.5;color:rgba(255,255,255,.9)">From Evident&#39;s This Month report${d.asOf ? `, as of ${escapeHtml(d.asOf)}` : ''}. Rounded, not exact.</p>
         </td></tr>
@@ -769,6 +835,33 @@ function buildCombinedLeadershipEmail(agg, historyRows = [], repGoals = [], over
     ${asOfNote}
   </div>`;
 
+  // Ben's simpler layout (2026-11-11): the month-over-month booked/billed
+  // comparison counts every incoming case (returns included), so it is left
+  // out. The booked-cases-by-customer list stays (user, 2026-11-11), with a
+  // note that its total is higher than New Jobs.
+  if (agg.labTotals !== undefined) {
+    const labSourceNote = `
+  <div style="margin:24px 36px 0;padding:14px 18px;background:${BRAND.blueMist};border:1px solid ${HAIRLINE};border-radius:14px">
+    <p style="margin:0 0 6px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${BRAND.slate}">Where these numbers come from</p>
+    <p style="margin:0;font-size:11px;line-height:1.5;color:${BRAND.slate}">Debtors, Invoiced, Receipts, In Lab and On Hold come from Evident&#39;s This Month report (Case Reports). New Jobs is new business only by booking date, the same as Evident&#39;s Report 10, and leaves out repeats, remakes and cases returning for production. James and William&#39;s figures come from their own Evident emails, and the booked cases list from Evident&#39;s daily booking email. YTD and goal progress are unchanged.</p>
+  </div>`;
+    const labBody = `
+  ${debtorsSection(agg.debtors)}
+  ${headlineSection}
+
+  ${groupDivider('Sales Performance by Representative')}
+  ${report2Body}
+
+  ${scannerDoctorsSection(es && es.scannerDoctors, agg.runDate)}
+  ${bookedRowsTable}
+  ${labSourceNote}`;
+    return {
+      subject: `Daily Leadership Dashboard - ${dateLabel}`,
+      html: emailShell('Daily Leadership Dashboard', dateLabel, labBody),
+      sheetRow,
+    };
+  }
+
   const body = `
   ${debtorsSection(agg.debtors)}
   ${headlineSection}
@@ -788,4 +881,4 @@ function buildCombinedLeadershipEmail(agg, historyRows = [], repGoals = [], over
   };
 }
 
-module.exports = { buildReport1Email, buildReport2Email, buildReport3Email, buildCombinedLeadershipEmail, goalBar, emailShell, debtorsSection };
+module.exports = { buildReport1Email, buildReport2Email, buildReport3Email, buildCombinedLeadershipEmail, goalBar, emailShell, debtorsSection, labTotalsSection };
