@@ -243,7 +243,7 @@ router.post(
       const isKHPickup = isPickup && leadBrand === 'Kings Highway'
       const recipient =
         formType === 'scanner-program'
-          ? (standaloneScanner ? 'williama@aimdentallab.com' : process.env.WEB_LEADS_EMAIL || 'digital@aimdentallab.com')
+          ? (standaloneScanner ? (repKey === 'james' ? 'media@aimdentallab.com' : 'williama@aimdentallab.com') : process.env.WEB_LEADS_EMAIL || 'digital@aimdentallab.com')
           : isKHPickup
             ? process.env.KH_PICKUP_FORM_EMAIL || 'media@aimdentallab.com'
             : isPickup
@@ -266,7 +266,7 @@ router.post(
         await sendEmail({
           to: recipient,
           cc,
-          ...(standaloneScanner ? { bcc: ['media@aimdentallab.com'], replyTo: email } : {}),
+          ...(standaloneScanner ? { ...(repKey === 'james' ? {} : { bcc: ['media@aimdentallab.com'] }), replyTo: email } : {}),
           subject:
             (isPickup && isRecurring ? 'RECURRING — ' : '') +
             (formType === 'scanner-program'
