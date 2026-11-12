@@ -140,7 +140,7 @@ router.post(
       const {
         name, practice, email, phone, caseType, message, monthlyVolume, company, topic, brand,
         pickupAddress, pickupDate, pickupWindow, caseCount, instructions, verificationToken,
-        isRecurring, recurringDays, scannerSignup, city, state, scanner, contact, consent,
+        isRecurring, recurringDays, scannerSignup, city, state, scanner, contact, consent, rep, utm_source, utm_medium, utm_campaign, utm_content, utm_term,
       } = req.body
 
       // Honeypot: real visitors never see or fill this field. Pretend success
@@ -191,7 +191,10 @@ router.post(
       const notesParts = []
       if (monthlyVolume) notesParts.push(`Est. monthly volume: ${monthlyVolume}`)
       if (message) notesParts.push(message)
-      const notes = standaloneScanner ? JSON.stringify({ name, practice, email, phone, city, state, monthlyVolume, scanner, contact, message, consent: true }) : notesParts.join('\n\n')
+      const repKey = String(rep || utm_source || '').toLowerCase()
+      const repName = repKey === 'william' ? 'William Alexander' : repKey === 'james' ? 'James Delaney' : 'Unassigned'
+      const attribution = Object.fromEntries(Object.entries({ utm_source, utm_medium, utm_campaign, utm_content, utm_term }).map(([k,v]) => [k, typeof v === 'string' ? v.slice(0,200) : '']))
+      const notes = standaloneScanner ? JSON.stringify({ name, practice, email, phone, city, state, monthlyVolume, scanner, contact, message, consent: true, rep: repName, ...attribution }) : notesParts.join('\n\n')
 
       const leadData = {
         doctor_name: name.trim(),
@@ -272,7 +275,7 @@ router.post(
                 ? 'New Case Pickup Request - Kings Highway Dental Laboratory'
                 : `New website contact — ${name.trim()}`),
           html: webLeadEmail({
-            formType, name: name.trim(), practice, email, phone, caseType, message: standaloneScanner ? `Lead ID: IOS-${rows[0].id}\nLocation: ${city || ''}, ${state}\nScanner: ${scanner || 'Not specified'}\nPreferred contact: ${contact || 'Either'}\nConsent: Yes\n${message || ''}` : message, monthlyVolume,
+            formType, name: name.trim(), practice, email, phone, caseType, message: standaloneScanner ? `Lead ID: IOS-${rows[0].id}\nReferred by: ${repName}\nUTM source: ${attribution.utm_source || 'Direct'}\nUTM medium: ${attribution.utm_medium}\nUTM campaign: ${attribution.utm_campaign}\nLocation: ${city || ''}, ${state}\nScanner: ${scanner || 'Not specified'}\nPreferred contact: ${contact || 'Either'}\nConsent: Yes\n${message || ''}` : message, monthlyVolume,
             leadId: rows[0].id, isPickup, brand: leadBrand, isRecurring, recurringDays, pickupWindow,
           }),
         })
