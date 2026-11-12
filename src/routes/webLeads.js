@@ -1,4 +1,5 @@
 const express = require('express')
+const crypto = require('node:crypto')
 const cors = require('cors')
 const db = require('../config/db')
 const { scoreFromLead } = require('../services/scoring')
@@ -106,6 +107,27 @@ function webLeadEmail({ formType, name, practice, email, phone, caseType, messag
   `
 }
 
+// Private pull endpoint: the team-owned Sheets script authenticates server to server.
+router.post('/scanner-sync', rateLimiter({ windowMs: 60000, max: 30 }), async (req, res, next) => {
+  const expected = process.env.SCANNER_SYNC_SECRET || ''
+  const supplied = req.get('authorization') || ''
+  const wanted = 'Bearer ' + expected
+  const suppliedBytes = Buffer.from(supplied), wantedBytes = Buffer.from(wanted)
+  if (!expected || suppliedBytes.length !== wantedBytes.length || !crypto.timingSafeEqual(suppliedBytes, wantedBytes)) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+  try {
+    const after = req.body.after || '1970-01-01T00:00:00.000Z'
+    const afterId = String(req.body.afterId || '')
+    if (!Number.isFinite(Date.parse(after))) return res.status(400).json({ error: 'Invalid cursor' })
+    const { rows } = await db.query(
+      `SELECT id::text, created_at, created_at::text AS cursor, notes FROM leads WHERE created_via = 'scanner-signup'
+       AND (created_at > $1::timestamptz OR (created_at = $1::timestamptz AND id::text > $2))
+       ORDER BY created_at, id::text LIMIT 100`, [after, afterId])
+    res.json({ rows: rows.map(r => ({ id: r.id, createdAt: r.created_at, cursor: r.cursor, data: JSON.parse(r.notes) })) })
+  } catch (err) { next(err) }
+})
+
 // POST /api/web-leads — public endpoint for the marketing website's Contact
 // and Scanner Program forms. No API key (it's called from browser JS, so a
 // key here would just be public); relies on a honeypot field + IP rate
@@ -118,7 +140,7 @@ router.post(
       const {
         name, practice, email, phone, caseType, message, monthlyVolume, company, topic, brand,
         pickupAddress, pickupDate, pickupWindow, caseCount, instructions, verificationToken,
-        isRecurring, recurringDays,
+        isRecurring, recurringDays, scannerSignup, city, state, scanner, contact, consent,
       } = req.body
 
       // Honeypot: real visitors never see or fill this field. Pretend success
@@ -130,6 +152,17 @@ router.post(
       if (!name?.trim()) return res.status(400).json({ error: 'name is required' })
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || '')) {
         return res.status(400).json({ error: 'a valid email is required' })
+      }
+
+      const standaloneScanner = scannerSignup === true && topic === 'Scanner Placement Program'
+      if (standaloneScanner) {
+        const required = { name, practice, email, phone, state, monthlyVolume }
+        if (Object.values(required).some(v => typeof v !== 'string' || !v.trim() || v.length > 250) || consent !== true) {
+          return res.status(400).json({ error: 'Complete the required fields and consent checkbox.' })
+        }
+        if ([city, scanner, contact, message].some(v => v != null && (typeof v !== 'string' || v.length > 1000))) {
+          return res.status(400).json({ error: 'Invalid application details.' })
+        }
       }
 
       // AIM's own site never sends this field, so it defaults to Aim Dental —
@@ -158,7 +191,7 @@ router.post(
       const notesParts = []
       if (monthlyVolume) notesParts.push(`Est. monthly volume: ${monthlyVolume}`)
       if (message) notesParts.push(message)
-      const notes = notesParts.join('\n\n')
+      const notes = standaloneScanner ? JSON.stringify({ name, practice, email, phone, city, state, monthlyVolume, scanner, contact, message, consent: true }) : notesParts.join('\n\n')
 
       const leadData = {
         doctor_name: name.trim(),
@@ -174,7 +207,7 @@ router.post(
           (doctor_name, clinic_name, brand, phone, email, lead_source, referral_source,
            case_interest, notes, status, intent_level, ai_score, created_via, created_at, updated_at, last_contacted_at, pickup_status,
            pickup_date, pickup_window, pickup_address, case_count)
-         VALUES ($1,$2,$3,$4,$5,'Website Form Submission',$6,$7,$8,'Lead','Medium',$9,'web-leads-api',NOW(),NOW(),NOW(),$10,$11,$12,$13,$14)
+         VALUES ($1,$2,$3,$4,$5,'Website Form Submission',$6,$7,$8,'Lead','Medium',$9,$15,NOW(),NOW(),NOW(),$10,$11,$12,$13,$14)
          RETURNING id`,
         [
           name.trim(),
@@ -191,6 +224,7 @@ router.post(
           isPickup ? (pickupWindow || '') : null,
           isPickup ? (pickupAddress || '') : null,
           isPickup ? (caseCount || null) : null,
+          standaloneScanner ? 'scanner-signup' : 'web-leads-api',
         ]
       )
 
@@ -206,7 +240,7 @@ router.post(
       const isKHPickup = isPickup && leadBrand === 'Kings Highway'
       const recipient =
         formType === 'scanner-program'
-          ? process.env.WEB_LEADS_EMAIL || 'digital@aimdentallab.com'
+          ? (standaloneScanner ? 'williama@aimdentallab.com' : process.env.WEB_LEADS_EMAIL || 'digital@aimdentallab.com')
           : isKHPickup
             ? process.env.KH_PICKUP_FORM_EMAIL || 'media@aimdentallab.com'
             : isPickup
@@ -229,6 +263,7 @@ router.post(
         await sendEmail({
           to: recipient,
           cc,
+          ...(standaloneScanner ? { bcc: ['media@aimdentallab.com'], replyTo: email } : {}),
           subject:
             (isPickup && isRecurring ? 'RECURRING — ' : '') +
             (formType === 'scanner-program'
@@ -237,7 +272,7 @@ router.post(
                 ? 'New Case Pickup Request - Kings Highway Dental Laboratory'
                 : `New website contact — ${name.trim()}`),
           html: webLeadEmail({
-            formType, name: name.trim(), practice, email, phone, caseType, message, monthlyVolume,
+            formType, name: name.trim(), practice, email, phone, caseType, message: standaloneScanner ? `Lead ID: IOS-${rows[0].id}\nLocation: ${city || ''}, ${state}\nScanner: ${scanner || 'Not specified'}\nPreferred contact: ${contact || 'Either'}\nConsent: Yes\n${message || ''}` : message, monthlyVolume,
             leadId: rows[0].id, isPickup, brand: leadBrand, isRecurring, recurringDays, pickupWindow,
           }),
         })

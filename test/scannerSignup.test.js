@@ -1,0 +1,11 @@
+const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs')
+function setup(){
+ const routes={},writes=[],mails=[],router={use(){},post(p,...h){routes[p]=h.at(-1)}}
+ const mocks={express:{Router:()=>router,json:()=>()=>{}},cors:()=>()=>{},'../config/db':{query:async(sql,params)=>{writes.push({sql,params});return{rows:sql.startsWith('SELECT')?[]:[{id:'test-lead'}]}}},'../services/scoring':{scoreFromLead:()=>0},'../services/email':{sendEmail:async m=>mails.push(m),pickupBrand:()=>({color:'#000',footer:'AIM'})},'../middleware/rateLimiter':()=>()=>{},'./intake':{},'../services/emailVerification':{}}
+ vm.runInNewContext(fs.readFileSync(require.resolve('../src/routes/webLeads'),'utf8'),{require:id=>id==='node:crypto'?require(id):mocks[id],module:{exports:{}},process:{env:{SCANNER_SYNC_SECRET:'test-secret'}},Buffer,console})
+ return{writes,mails,async call(p,body,auth=''){const res={code:200,status(c){this.code=c;return this},json(v){this.body=v;return this}};await routes[p]({body,get:()=>auth},res,e=>{throw e});return res}}
+}
+const valid={name:'Test Doctor',practice:'Test Practice',email:'media@aimdentallab.com',phone:'2125550100',state:'NY',monthlyVolume:'11–25',consent:true,scannerSignup:true,topic:'Scanner Placement Program'}
+test('scanner saves application and routes To/BCC correctly',async()=>{const f=setup(),r=await f.call('/',valid);assert.equal(r.body.success,true);assert.equal(f.writes[0].params[14],'scanner-signup');assert.equal(JSON.parse(f.writes[0].params[7]).consent,true);assert.equal(f.mails[0].to,'williama@aimdentallab.com');assert.equal(f.mails[0].bcc.join(','),'media@aimdentallab.com');assert.equal(f.mails[0].replyTo,valid.email)})
+test('missing consent rejected without side effects',async()=>{const f=setup();assert.equal((await f.call('/',{...valid,consent:false})).code,400);assert.equal(f.writes.length,0);assert.equal(f.mails.length,0)})
+test('private feed authenticates before accessing leads',async()=>{const f=setup();for(const auth of ['', 'Bearer wrong','Bearer ééééééééééé'])assert.equal((await f.call('/scanner-sync',{},auth)).code,401);assert.equal(f.writes.length,0);assert.equal((await f.call('/scanner-sync',{},'Bearer test-secret')).code,200);assert.match(f.writes[0].sql,/created_via = 'scanner-signup'/)})
