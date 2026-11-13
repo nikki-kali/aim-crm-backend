@@ -56,6 +56,8 @@ function parseThisMonth(html) {
   }
   const lab = text.match(/In Lab\s*:\s*(-?[\d,.]+)\s*\+\s*(-?[\d,.]+)\s*\((\d+)\)/i)
   const hold = text.match(/On Hold\s*:\s*(-?[\d,.]+)\s*\((\d+)\)/i)
+  // WIP "New Jobs" is the current day only (no month total): value (count).
+  const jobs = text.match(/New Jobs\s*:\s*(-?[\d,.]+)\s*\((\d+)\)/i)
   const receipts = account('Receipts')
   const invoiced = account('Invoices')
   if (!receipts && !invoiced && !lab && !hold) return null
@@ -66,6 +68,7 @@ function parseThisMonth(html) {
     invoiced,
     inLab: lab ? { thisMonth: num(lab[1]), nextMonth: num(lab[2]), count: Number(lab[3]) } : null,
     onHold: hold ? { value: num(hold[1]), count: Number(hold[2]) } : null,
+    newJobs: jobs ? { value: num(jobs[1]), count: Number(jobs[2]) } : null,
     debtors: parseDebtors(html),
   }
 }
@@ -93,6 +96,8 @@ function thisMonthFor(messages, runDate) {
       receipts: p.receipts ? { day: p.receipts.day, mtd: p.receipts.mtd } : null,
       invoiced: p.invoiced ? { day: p.invoiced.day, mtd: p.invoiced.mtd } : null,
       inLab: p.inLab, onHold: p.onHold, debtors: p.debtors,
+      // Only the evening email holds the whole day's New Jobs.
+      newJobs: p.newJobs,
     }
   }
   // Earliest morning email after runDate that is still in runDate's month.
@@ -152,7 +157,9 @@ function labTotalsFor({ thisMonthMessages = [], evidentMessages = [], runDate })
   const tm = thisMonthFor(thisMonthMessages, runDate)
   return {
     runDate,
-    newJobs: newJobsFor(evidentMessages, runDate),
+    // New Jobs from the This Month report too (user, 2026-11-13): its WIP
+    // "New Jobs" line, the day's new business, the same figure as Report 10.
+    newJobs: tm && tm.newJobs ? { day: tm.newJobs } : null,
     receipts: tm ? tm.receipts : null,
     invoiced: tm ? tm.invoiced : null,
     inLab: tm ? tm.inLab : null,

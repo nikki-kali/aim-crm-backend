@@ -83,3 +83,16 @@ test('labTotalsFor: missing sources stay null', () => {
   assert.equal(t.receipts, null)
   assert.equal(t.inLab, null)
 })
+
+test('New Jobs comes from the evening This Month email (WIP New Jobs line, day only)', () => {
+  const html = `<DIV>12 Nov 2026 22:01</DIV><DIV class=title>This Month - 12 Nov 2026 </DIV>
+<H3>Accounts</H3>Receipts: <B>5,147 (4) = 67,461</B><BR>Invoices: <B>7,274 (98) = 71,012</B><BR>
+<H3>Debtors</H3>Total: <B>303,635</B><BR>
+<H3>WIP</H3>New Jobs: <B>7,336 (60)</B><BR>On Hold: <B>1,409 (22)</B><BR>In Lab: <B>64,085+1,405 (540)</B>`
+  const morning = html.replace('12 Nov 2026 22:01', '13 Nov 2026 04:00').replace('This Month - 12 Nov', 'This Month - 13 Nov').replace('7,336 (60)', '0 (0)')
+  const t = labTotalsFor({ thisMonthMessages: [{ html, internalDate: 1 }], runDate: '2026-11-12' })
+  assert.deepEqual(t.newJobs, { day: { value: 7336, count: 60 } })
+  // A booked-report email alone no longer supplies New Jobs.
+  const noEvening = labTotalsFor({ thisMonthMessages: [{ html: morning, internalDate: 2 }], evidentMessages: [{ subject: 'Booked Today - AIM CRM', date: '2026-11-12', html: '<table><tr><td>Sales Value</td></tr><tr><td>1</td></tr></table>' }], runDate: '2026-11-12' })
+  assert.equal(noEvening.newJobs, null)
+})

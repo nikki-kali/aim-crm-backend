@@ -413,9 +413,9 @@ function buildSheetRow(agg) {
 // Work in progress (In Lab by due month, On Hold), Invoiced. See labTotals.js.
 // One value column so it fits a phone. Whole dollars, as the report shows
 // them. A missing figure reads N/A, never $0.
-// New Jobs is the day's figure from Report 10 ("Booked Today", user
-// 2026-11-13). Its month version (report 114) drops cases once they ship, so
-// the month total shrank (555 on 11 Nov, 527 on 12 Nov) and is not shown.
+// New Jobs is the This Month report's WIP "New Jobs" line (user,
+// 2026-11-13): that day's new business, the same number as Report 10. The
+// report gives no month total for it.
 const newJobsDay = (runDate) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(runDate || ''))) return 'that day';
   const d = new Date(`${runDate}T12:00:00Z`);
@@ -446,7 +446,7 @@ function labTotalsSection(lt) {
     <div style="padding:6px 16px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed">
         ${row('Receipts', 'Money collected', money(part(t.receipts, 'mtd')))}
-        ${row('New Jobs', `New business booked ${newJobsDay(t.runDate)} (Evident Report 10)`, money(part(nj.day, 'value')) + cases(part(nj.day, 'count')))}
+        ${row('New Jobs', `New business only, booked ${newJobsDay(t.runDate)} (same as Report 10)`, money(part(nj.day, 'value')) + cases(part(nj.day, 'count')))}
         ${row('Work in progress: In Lab', t.inLab ? `${Number(t.inLab.count).toLocaleString('en-US')} cases, by due date` : 'By due date', inLab)}
         ${row('Work in progress: On Hold', 'Waiting for new impressions from the doctor', money(part(t.onHold, 'value')) + cases(part(t.onHold, 'count')))}
         ${row('Invoiced', 'Billed', money(part(t.invoiced, 'mtd')), true)}
@@ -852,7 +852,7 @@ function buildCombinedLeadershipEmail(agg, historyRows = [], repGoals = [], over
     const labSourceNote = `
   <div style="margin:24px 36px 0;padding:14px 18px;background:${BRAND.blueMist};border:1px solid ${HAIRLINE};border-radius:14px">
     <p style="margin:0 0 6px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${BRAND.slate}">Where these numbers come from</p>
-    <p style="margin:0;font-size:11px;line-height:1.5;color:${BRAND.slate}">Debtors, Invoiced, Receipts, In Lab and On Hold come from Evident&#39;s This Month report (Case Reports). New Jobs is the day&#39;s new business from Evident&#39;s Report 10 (by booking date), and leaves out repeats, remakes and cases returning for production. James and William&#39;s figures come from their own Evident emails, and the booked cases list from Evident&#39;s daily booking email. YTD and goal progress are unchanged.</p>
+    <p style="margin:0;font-size:11px;line-height:1.5;color:${BRAND.slate}">Debtors, Receipts, New Jobs, In Lab, On Hold and Invoiced come from Evident&#39;s This Month report (Case Reports). New Jobs is that day&#39;s new business, the same number as Report 10, and leaves out repeats, remakes and cases returning for production. James and William&#39;s figures come from their own Evident emails, and the booked cases list from Evident&#39;s daily booking email. YTD and goal progress are unchanged.</p>
   </div>`;
     const labBody = `
   ${debtorsSection(agg.debtors)}
