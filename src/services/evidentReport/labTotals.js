@@ -151,6 +151,11 @@ function newJobsFor(messages, runDate) {
   return day || mtd ? { day, mtd } : null
 }
 
+function newJobsWithMonth(day, booked) {
+  const mtd = booked && booked.mtd ? booked.mtd : null
+  return day || mtd ? { day: day || null, mtd } : null
+}
+
 // Everything the dashboard's top section shows, or null for a part that is
 // missing (shown as N/A, never as zero).
 function labTotalsFor({ thisMonthMessages = [], evidentMessages = [], runDate }) {
@@ -159,7 +164,11 @@ function labTotalsFor({ thisMonthMessages = [], evidentMessages = [], runDate })
     runDate,
     // New Jobs from the This Month report too (user, 2026-11-13): its WIP
     // "New Jobs" line, the day's new business, the same figure as Report 10.
-    newJobs: tm && tm.newJobs ? { day: tm.newJobs } : null,
+    // Month to date from "Booked This Month - AIM CRM" (report 114, Report
+    // 10's filters for the whole month, without "not Sent" since 2026-11-13,
+    // so shipped cases stay in: $90,123 / 930 cases on 13 Nov, as Ben
+    // expects). The day from the This Month report's WIP New Jobs line.
+    newJobs: newJobsWithMonth(tm && tm.newJobs, newJobsFor(evidentMessages, runDate)),
     receipts: tm ? tm.receipts : null,
     invoiced: tm ? tm.invoiced : null,
     inLab: tm ? tm.inLab : null,
