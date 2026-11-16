@@ -449,6 +449,8 @@ async function computeRepDailyEvidentStats(repEmail, dateStr, repId) {
     ])
     const bookingMsg = bookingMessages.find((m) => m.date === dateStr)
     const billedMsg = billedMessages.find((m) => m.date === dateStr)
+    // Neither of the day's Evident emails could be read: the real send stops.
+    if (!bookingMsg && !billedMsg) return { ...empty, unavailable: true }
     const bookingRows = bookingMsg
       ? extractBookingRows(bookingMsg.html).filter((r) => ownedNames.has(normalizeDoctorName(r.customerName)))
       : null
@@ -463,7 +465,7 @@ async function computeRepDailyEvidentStats(repEmail, dateStr, repId) {
     }
   } catch (err) {
     console.error(`[sales-rep-daily-report] failed to fetch daily booked/billed for ${repEmail}:`, err.message)
-    return empty
+    return { ...empty, unavailable: true }
   }
 }
 
@@ -736,7 +738,7 @@ async function buildDailyReportHtml(repName, repEmail, dateStr, status, { test =
   const enrichedStatus = { ...status, doctors, submittedCount, notSubmittedCount: doctors.length - submittedCount }
 
   const html = salesRepDailyReportEmail({ repName, dateLabel, dateStr, ...enrichedStatus, test, salesGoal, doctorsGoal, daysLeft, barsGifUrl, dailyStats })
-  return { html, dateLabel }
+  return { html, dateLabel, dailyStats }
 }
 
 // Sends one rep's daily report. `to`/`cc` overrides exist for the
@@ -748,7 +750,13 @@ async function buildDailyReportHtml(repName, repEmail, dateStr, status, { test =
 // leadership-facing/sales-rep report email in this codebase).
 async function sendRepDailyReport(rep, { to, cc = REPORT_CC, test = false, dateStr = lastBusinessDayEasternDateString() } = {}) {
   const status = await computeDailyDoctorStatus(rep.id, dateStr)
-  const { html, dateLabel } = await buildDailyReportHtml(rep.name || rep.email, rep.email, dateStr, status, { test, repId: rep.id })
+  const { html, dateLabel, dailyStats } = await buildDailyReportHtml(rep.name || rep.email, rep.email, dateStr, status, { test, repId: rep.id })
+  // Never send a rep a report with blank Booked and Billed cards (16 Nov
+  // 2026: both reps got dashes because the Evident emails could not be read
+  // at send time, though the approved preview had the numbers).
+  if (!test && dailyStats && dailyStats.unavailable) {
+    throw Object.assign(new Error(`The day's Evident booked and billed emails for ${dateStr} could not be read just now, so ${rep.name || rep.email}'s report was NOT sent. Nothing went out.`), { code: 'DAY_FIGURES_UNAVAILABLE' })
+  }
   await sendEmail({
     to: to || rep.email,
     ...(cc?.length ? { cc } : {}),
