@@ -63,22 +63,6 @@ function getGmailAuth() {
   return client
 }
 
-// The business day an Evident email's figures are for (YYYY-MM-DD, Eastern).
-// Normally the day it arrived. Evident sends Friday's daily emails on
-// Saturday (found 2026-11-16: "Daily Booking/Billed Report - Nadine" for
-// Friday 13 Nov arrived on the 14th, so Monday's rep reports showed dashes
-// and no Friday was ever logged), so a weekend arrival counts as the Friday
-// before it. The next-morning "Daily Arrivals by Day" report is the one
-// exception: evidentDay.js expects it dated the day after.
-const NEXT_MORNING_SUBJECT = /^Daily Arrivals by Day/i
-function evidentBusinessDate(internalDate, subject = '') {
-  const received = new Date(internalDate).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
-  if (NEXT_MORNING_SUBJECT.test(String(subject).trim())) return received
-  const d = new Date(`${received}T00:00:00Z`)
-  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() - 1)
-  return d.toISOString().slice(0, 10)
-}
-
 // Fetches every Evident Labs email from the last 5 days, each tagged with
 // its own real America/New_York calendar date (see fetchEvidentEmailsInRange
 // below), so the caller filters to the exact business day it needs instead
@@ -184,7 +168,7 @@ async function fetchEvidentEmailsInRange(extraQuery) {
     const res = await gmail.users.messages.get({ userId: 'me', id, format: 'full' })
     const { subject, html } = extractSubjectAndHtml(res.data)
     const internalDate = Number(res.data.internalDate)
-    const date = evidentBusinessDate(internalDate, subject)
+    const date = new Date(internalDate).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
     messages.push({ subject, html, date, internalDate })
     await sleep(THROTTLE_MS)
   }
@@ -205,7 +189,7 @@ async function fetchEvidentSubjects() {
     const batch = await Promise.all(ids.slice(i, i + 10).map(async (id) => {
       const res = await gmail.users.messages.get({ userId: 'me', id, format: 'metadata', metadataHeaders: ['Subject'] })
       const subject = ((res.data.payload.headers || []).find((h) => h.name.toLowerCase() === 'subject') || {}).value || ''
-      const date = evidentBusinessDate(Number(res.data.internalDate), subject)
+      const date = new Date(Number(res.data.internalDate)).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
       return { subject, date }
     }))
     out.push(...batch)
@@ -229,4 +213,4 @@ async function fetchEviSmartHeaders() {
   return out
 }
 
-module.exports = { evidentBusinessDate, fetchEviSmartHeaders, fetchEvidentSubjects, EVISMART_SENDERS, EVISMART_QUERY, fetchEvidentEmails, fetchDebtorsEmails, DEBTORS_QUERY, fetchEviSmartEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }
+module.exports = { fetchEviSmartHeaders, fetchEvidentSubjects, EVISMART_SENDERS, EVISMART_QUERY, fetchEvidentEmails, fetchDebtorsEmails, DEBTORS_QUERY, fetchEviSmartEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }
