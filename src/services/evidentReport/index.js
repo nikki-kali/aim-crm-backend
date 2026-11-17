@@ -15,7 +15,7 @@ const { computeProgress } = require('../goalProgress')
 const { DAILY_REPORT_REP_EMAILS, evidentMtdCompanyTotal, lastDayOfPriorMonth } = require('../salesRepDailyReport')
 const { applyBookedMtdGuard } = require('./bookedMtdGuard')
 
-const RECIPIENTS = ['ben@aimdentallab.com', 'execassistant@aimdentallab.com', 'yoel@khdentallab.com']
+const RECIPIENTS = ['ben@aimdentallab.com', 'execassistant@aimdentallab.com', 'yoel@khdentallab.com', 'jlj7188@gmail.com']
 
 // Report #3's goal-progress section (Ben Silberstein's requirement,
 // 2026-09-19) — each rep's goals whose period covers today, with real
