@@ -11,17 +11,9 @@ const { buildEvidentDay } = require('./evidentReport/evidentDay')
 const { buildHoldUrl } = require('./reportHold')
 const { todayEt } = require('./cronRuns')
 
-// "9:00 AM ET (9:00 PM Manila)": when the automatic rep report send runs,
-// in both time zones (Manila's side moves an hour when US clocks change).
-function repAutoSendLabel(now = new Date()) {
-  const day = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
-  for (let h = 0; h < 24; h++) {
-    const t = new Date(`${day}T${String(h).padStart(2, '0')}:00:00Z`)
-    if (Number(t.toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false })) === 9) {
-      return `9:00 AM ET (${t.toLocaleString('en-US', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' })} Manila)`
-    }
-  }
-  return '9:00 AM ET'
+// When the automatic rep report send runs: 7:05 PM Manila time, every weekday.
+function repAutoSendLabel() {
+  return '7:05 PM Manila time'
 }
 
 // Recipients are the two real AIM reps by email, not a role query — role
@@ -784,7 +776,7 @@ async function sendRepDailyReportForApproval(rep, dateStr = lastBusinessDayEaste
   const approveUrl = buildApproveUrl(token)
   // When the 9:00 AM ET automatic send is on, the preview says so and offers
   // a hold link (its own, separate from the leadership dashboard's).
-  const autoSend = process.env.SALES_REP_REPORT_AUTO_SEND === 'true'
+  const autoSend = process.env.SALES_REP_REPORT_AUTO_SEND !== 'false'
   const bannered = injectApprovalBanner(html, {
     reportLabel: `${rep.name || rep.email}'s Daily Sales Report`,
     approveUrl,

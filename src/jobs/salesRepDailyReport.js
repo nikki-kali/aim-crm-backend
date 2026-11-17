@@ -78,8 +78,8 @@ async function deliverRepReports({ held, dataReady, reps, claimOnce, takeOverLin
 // Needs SALES_REP_DAILY_REPORT_ENABLED and the switch SALES_REP_REPORT_AUTO_SEND.
 async function runSalesRepDailyReportSendJob({ source = 'cron' } = {}) {
   if (process.env.SALES_REP_DAILY_REPORT_ENABLED !== 'true') return 'disabled'
-  if (process.env.SALES_REP_REPORT_AUTO_SEND !== 'true') {
-    console.log('[sales-rep-daily-report-send] run skipped, SALES_REP_REPORT_AUTO_SEND is not set to true')
+  if (process.env.SALES_REP_REPORT_AUTO_SEND === 'false') {
+    console.log('[sales-rep-daily-report-send] run skipped, SALES_REP_REPORT_AUTO_SEND is set to false')
     return 'switch-off'
   }
   const day = todayEt()
@@ -99,7 +99,7 @@ async function runSalesRepDailyReportSendJob({ source = 'cron' } = {}) {
       alertApprover: (reason) => sendEmail({
         to: [APPROVER_EMAIL],
         subject: 'Rep Daily Sales Reports were NOT all sent automatically',
-        html: `<p>The automatic 9:00 AM ET rep report send for ${dateStr}: ${reason}</p><p>You can still send each one from its preview email (Approve &amp; Send).</p>`,
+        html: `<p>The automatic 7:05 PM (Manila) rep report send for ${dateStr}: ${reason}</p><p>You can still send each one from its preview email (Approve &amp; Send).</p>`,
       }),
     })
     console.log(`[sales-rep-daily-report-send] ${outcome} ${JSON.stringify(results)}`)
@@ -111,16 +111,13 @@ async function runSalesRepDailyReportSendJob({ source = 'cron' } = {}) {
 }
 
 function startSalesRepDailyReportScheduler() {
-  // Weekdays 8:00am America/New_York — same slot the old Weekly Rep
-  // Report used, now firing daily instead of just Monday.
-  cron.schedule(
-    '0 8 * * 1-5',
-    () => runSalesRepDailyReportJob({ source: 'cron' }),
-    { timezone: 'America/New_York' }
-  )
-  // Weekdays 9:00 AM America/New_York: the automatic send, an hour after the
-  // previews (only when SALES_REP_REPORT_AUTO_SEND is on).
-  cron.schedule('0 9 * * 1-5', () => runSalesRepDailyReportSendJob({ source: 'cron' }), { timezone: 'America/New_York' })
+  // Weekdays Asia/Manila: 6:30 PM the previews to the approver, 7:05 PM the
+  // automatic send to each rep (right after the leadership dashboard at 7:00),
+  // and a 7:30 PM retry. A rep already sent is skipped by the once-per-day record.
+  const manila = { timezone: 'Asia/Manila' }
+  cron.schedule('30 18 * * 1-5', () => runSalesRepDailyReportJob({ source: 'cron' }), manila)
+  cron.schedule('5 19 * * 1-5', () => runSalesRepDailyReportSendJob({ source: 'cron' }), manila)
+  cron.schedule('30 19 * * 1-5', () => runSalesRepDailyReportSendJob({ source: 'cron-retry' }), manila)
   console.log('[sales-rep-daily-report] job registered')
 }
 

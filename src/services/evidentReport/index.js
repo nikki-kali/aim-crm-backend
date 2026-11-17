@@ -316,7 +316,7 @@ async function sendEvidentReportForApproval() {
   const token = await createApprovalToken({ reportType: 'evident-report', reportDate: runDate })
   const approveUrl = buildApproveUrl(token)
   // When the automatic send is on, the preview says when leadership gets it.
-  const autoSendAt = process.env.EVIDENT_REPORT_AUTO_SEND === 'true' ? '7:00 AM ET' : undefined
+  const autoSendAt = process.env.EVIDENT_REPORT_AUTO_SEND === 'true' ? '7:00 PM Manila time' : undefined
   const holdUrl = autoSendAt ? buildHoldUrl(todayEt()) : undefined
   const bannered = injectApprovalBanner(html, { reportLabel: 'Daily Leadership Dashboard', approveUrl, autoSendAt, holdUrl })
 

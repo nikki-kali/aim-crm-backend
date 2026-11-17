@@ -97,7 +97,7 @@ async function runEvidentReportSendJob({ source = 'cron', force = false, final =
       alertApprover: (reason) => sendEmail({
         to: [APPROVER_EMAIL],
         subject: 'Daily Leadership Dashboard was NOT sent to leadership',
-        html: `<p>The automatic 7:00 AM send was held back: ${reason}</p><p>Nothing went to leadership. Once the EviSmart Daily Sales Report is available, you can send it from the preview email (Approve &amp; Send), or ask me to re-run it.</p>`,
+        html: `<p>The automatic 7:00 PM (Manila) send was held back: ${reason}</p><p>Nothing went to leadership. Once the EviSmart Daily Sales Report is available, you can send it from the preview email (Approve &amp; Send), or ask me to re-run it.</p>`,
       }),
     })
     console.log(`[evident-report-send] ${outcome}`)
@@ -111,18 +111,20 @@ async function runEvidentReportSendJob({ source = 'cron', force = false, final =
 }
 
 function startEvidentReportScheduler() {
-  // Weekdays America/New_York: 6:00 AM the approval preview to the approver,
-  // 7:00 AM the automatic send to leadership (an hour to review or send it
-  // sooner). The report covers the previous business day, using EviSmart's
-  // end-of-day email sent the evening before.
-  cron.schedule('0 6 * * 1-5', () => runEvidentReportJob({ source: 'cron' }), { timezone: 'America/New_York' })
-  // EviSmart's email can arrive after 7:00 (it landed at 7:01 on 6 Oct), so
-  // the send retries at 7:20 and 7:40 and gives up, alerting, at 8:00. A day
-  // already sent, or held, is left alone by every attempt.
-  cron.schedule('0 7 * * 1-5', () => runEvidentReportSendJob({ source: 'cron', final: false }), { timezone: 'America/New_York' })
-  cron.schedule('20 7 * * 1-5', () => runEvidentReportSendJob({ source: 'cron-retry', final: false }), { timezone: 'America/New_York' })
-  cron.schedule('40 7 * * 1-5', () => runEvidentReportSendJob({ source: 'cron-retry', final: false }), { timezone: 'America/New_York' })
-  cron.schedule('0 8 * * 1-5', () => runEvidentReportSendJob({ source: 'cron-retry', final: true }), { timezone: 'America/New_York' })
+  // Weekdays 7:00 PM Asia/Manila (6:00 AM New York in winter, 7:00 AM in
+  // summer; the same Eastern weekday and date either way): the automatic send
+  // to leadership. The report covers the previous business day, so Monday's
+  // run reports Friday, whose Evident emails arrive early Saturday Manila time.
+  // All of Evident's emails for the day are in by 6:00 PM Manila. The preview
+  // to the approver goes 45 minutes earlier. The send retries at 7:20, 7:40
+  // and gives up, alerting, at 8:00 PM; a day already sent or held is left
+  // alone by every attempt.
+  const manila = { timezone: 'Asia/Manila' }
+  cron.schedule('15 18 * * 1-5', () => runEvidentReportJob({ source: 'cron' }), manila)
+  cron.schedule('0 19 * * 1-5', () => runEvidentReportSendJob({ source: 'cron', final: false }), manila)
+  cron.schedule('20 19 * * 1-5', () => runEvidentReportSendJob({ source: 'cron-retry', final: false }), manila)
+  cron.schedule('40 19 * * 1-5', () => runEvidentReportSendJob({ source: 'cron-retry', final: false }), manila)
+  cron.schedule('0 20 * * 1-5', () => runEvidentReportSendJob({ source: 'cron-retry', final: true }), manila)
   console.log('[evident-report] job registered')
 }
 
