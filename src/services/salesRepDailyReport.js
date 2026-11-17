@@ -23,7 +23,7 @@ function repAutoSendLabel() {
 const DAILY_REPORT_REP_EMAILS = ['james@aimdentallab.com', 'williama@aimdentallab.com']
 // Yoel is cc'd on both reps' emails for visibility, not sent his own
 // personalized report for his own KH doctors.
-const REPORT_CC = ['yoel@khdentallab.com', 'execassistant@aimdentallab.com', 'ben@aimdentallab.com']
+const REPORT_CC = ['yoel@khdentallab.com', 'execassistant@aimdentallab.com', 'ben@aimdentallab.com', 'jlj7188@gmail.com']
 
 // Maps a rep's CRM email to the key parseEvident.js groups per-rep Evident
 // figures under (derived from each report's own "Delaney, James" /
