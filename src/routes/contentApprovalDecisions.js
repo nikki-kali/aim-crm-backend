@@ -19,6 +19,8 @@ const POST_IDS = [
   'art-7questions', 'art-guarantee', 'art-zirconia', 'art-turnaround', 'art-diabetes',
   // November 2026 posts (Marketing OS src/data/novemberApprovals.js)
   'nov03', 'nov04', 'nov05', 'nov06', 'nov07', 'nov09', 'nov10', 'nov11', 'nov12', 'nov13', 'nov14', 'nov16', 'nov17', 'nov19', 'nov20', 'nov21', 'nov25', 'nov27',
+  // GNYDM 2026 email campaign (Marketing OS src/data/emailApprovals.js, page /email-approvals)
+  'email-announcement', 'email-p1', 'email-p2', 'email-1', 'email-2', 'email-3', 'email-4', 'email-5', 'email-6',
 ]
 
 // The review page is open to anyone with the link (no sign-in required).
