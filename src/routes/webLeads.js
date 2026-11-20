@@ -294,6 +294,7 @@ router.post(
         try {
           await sendEmail({
             to: email,
+            fromName: pickupBrand(leadBrand).name,
             subject: `${pickupBrand(leadBrand).name} — pickup request received`,
             html: pickupRequestedEmail({
               doctorName: escapeHtml(name.trim()),

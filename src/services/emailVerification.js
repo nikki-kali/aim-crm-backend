@@ -74,6 +74,7 @@ async function requestVerification(email) {
 
   await sendEmail({
     to: email,
+    fromName: 'AIM Dental Laboratory',
     subject: 'Your AIM Dental Laboratory verification code',
     html: verificationEmail(code),
   })

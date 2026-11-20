@@ -30,7 +30,7 @@ function getResend() {
 // (info@) already exist and are proven working (same account the newsletter
 // signup sync in routes/newsletter.js already uses), so it works as a
 // fallback while Resend's domain verification is stuck pending.
-async function sendViaBrevo({ to, subject, html, cc, bcc, attachments, replyTo, headers }) {
+async function sendViaBrevo({ to, subject, html, cc, bcc, attachments, replyTo, headers, fromName }) {
   // `to` may be a single address or an array — Resend accepts either
   // directly, but Brevo wants an array of {email} objects regardless, so
   // normalize here rather than assuming a single string (a multi-recipient
@@ -47,7 +47,7 @@ async function sendViaBrevo({ to, subject, html, cc, bcc, attachments, replyTo, 
       Accept: 'application/json',
     },
     body: JSON.stringify({
-      sender: { name: 'Aim Dental CRM', email: 'info@aimdentallab.com' },
+      sender: { name: fromName || 'Aim Dental CRM', email: 'info@aimdentallab.com' },
       to: toList.map((email) => ({ email })),
       ...(replyTo ? { replyTo: { email: replyTo } } : {}),
       ...(headers ? { headers } : {}),
@@ -75,9 +75,22 @@ async function sendViaBrevo({ to, subject, html, cc, bcc, attachments, replyTo, 
 // notification email; every other call site omits this.
 // `headers` (optional): extra mail headers, e.g. { 'In-Reply-To': id, References: id }
 // so a reply lands on an existing thread.
-async function sendEmail({ to, subject, html, cc, bcc, attachments, replyTo, headers }) {
+//
+// `fromName` (optional): display name only, e.g. 'AIM Dental Laboratory'. The
+// address still comes from RESEND_FROM so the verified sending domain never
+// changes. Practice-facing emails pass it so the inbox shows the lab's name
+// instead of the internal "Aim Dental CRM"; staff emails omit it.
+function resolveFrom(fromName) {
+  const base = process.env.RESEND_FROM || 'Aim Dental CRM <onboarding@resend.dev>'
+  if (!fromName) return base
+  const address = (base.match(/<([^>]+)>/) || [])[1] || base.trim()
+  const safeName = String(fromName).replace(/["<>\r\n]/g, '')
+  return `${safeName} <${address}>`
+}
+
+async function sendEmail({ to, subject, html, cc, bcc, attachments, replyTo, headers, fromName }) {
   const client = getResend()
-  const from = process.env.RESEND_FROM || 'Aim Dental CRM <onboarding@resend.dev>'
+  const from = resolveFrom(fromName)
   const { error } = await client.emails.send({
     from,
     to: to || process.env.ALERT_EMAIL,
@@ -95,7 +108,7 @@ async function sendEmail({ to, subject, html, cc, bcc, attachments, replyTo, hea
     throw new Error(error.message)
   }
   console.warn('sendEmail: Resend failed, falling back to Brevo —', error.message)
-  await sendViaBrevo({ to, subject, html, cc, bcc, attachments, replyTo, headers })
+  await sendViaBrevo({ to, subject, html, cc, bcc, attachments, replyTo, headers, fromName })
 }
 
 function coldLeadEmail(leads) {
@@ -1346,6 +1359,7 @@ function noActionLeadEmail(leads) {
 
 module.exports = {
   sendEmail,
+  resolveFrom,
   primaryFrontendUrl,
   coldLeadEmail,
   caseDueEmail,

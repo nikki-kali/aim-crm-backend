@@ -71,7 +71,7 @@ async function advancePickupStage(id, stage, { requireAssignedTo = null, actorId
 
   if (updated.email) {
     const { subjectFor, build } = STAGE_EMAIL[stage]
-    sendEmail({ to: updated.email, subject: subjectFor(updated.brand), html: build(updated) })
+    sendEmail({ to: updated.email, subject: subjectFor(updated.brand), html: build(updated), fromName: pickupBrand(updated.brand).name })
       .catch((err) => console.error(`pickup ${stage}: requester email failed`, err))
   }
 
