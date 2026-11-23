@@ -27,7 +27,10 @@ const SCANNER_DOCTORS = [
   { code: 'A1202', name: 'Dr. Betzalel Krasnow', rep: null },
   { code: 'A1297', name: 'Ezra Medical Center', rep: null },
   { code: 'KH2216', name: 'Jodal Dental', rep: null },
-  { code: 'KH2217', name: 'Dr. Abe Husney', rep: null },
+  // One office, three Evident accounts (Nadine, 2026-11-24): Dr. Tran (KH2291),
+  // Dr. Abe Husney (KH2217) and the Harbor Dental main account (KH2290). Shown
+  // and counted as a single scanner account; their cases are summed.
+  { code: 'KH2291', codes: ['KH2291', 'KH2217', 'KH2290'], name: 'Harbor Dental (Dr. Tran, Dr. Husney, main account)', rep: null },
   { code: 'KH2248', name: 'Adler Dental Group', rep: null },
 ]
 
@@ -76,8 +79,14 @@ function scannerDoctorRows(mtdHtml, dailyHtml, doctors = SCANNER_DOCTORS) {
   const today = casesByCode(dailyHtml) || new Map()
   return doctors
     .map((d) => {
-      const t = today.get(d.code) || { count: 0, value: 0 }
-      return { ...d, todayCases: t.count, todayValue: t.value, mtdValue: Math.round((mtd.get(d.code) || 0) * 100) / 100 }
+      // An office with several Evident accounts adds them together.
+      const codes = d.codes || [d.code]
+      const t = codes.reduce((acc, c) => {
+        const x = today.get(c) || { count: 0, value: 0 }
+        return { count: acc.count + x.count, value: Math.round((acc.value + x.value) * 100) / 100 }
+      }, { count: 0, value: 0 })
+      const mtdValue = Math.round(codes.reduce((sum, c) => sum + (mtd.get(c) || 0), 0) * 100) / 100
+      return { ...d, todayCases: t.count, todayValue: t.value, mtdValue }
     })
     .sort((a, b) => b.mtdValue - a.mtdValue || a.name.localeCompare(b.name))
 }

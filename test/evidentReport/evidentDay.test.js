@@ -268,3 +268,25 @@ test('Scanner doctors: MTD from MTD Booked Daily Update, the day from Daily Book
   try { html = buildCombinedLeadershipEmail(agg, [], []).html } catch (e) { return } // full builder needs more data; section helper checked below
   assert.match(html, /Intraoral Scanner Accounts · 1 of 9 sent cases on Wed, Nov 4/)
 })
+
+test('Scanner doctors: Harbor Dental is one office (Dr. Tran + Dr. Husney + main account), summed', () => {
+  const { scannerDoctorRows } = require('../../src/services/evidentReport/scannerDoctors')
+  const mtd = table(['Ref', 'Customer', 'Sales Value (Total)', 'N/A'], [
+    ['KH2291', 'KH2291 - , DR. TRAN', '2753', '2753'],
+    ['KH2217', 'KH2217 - , Dr. Abe Husney', '180', '180'],
+    ['KH2290', 'KH2290 - , HARBOR DENTAL', '45', '45'],
+    ['', '', '2978', '2978'],
+  ])
+  const daily = table(['Ref', 'Customer Code', 'Customer Name', 'Sales Value (Total)', 'Salesperson'], [
+    ['1', 'KH2291', 'DR. TRAN', '78', ''],
+    ['2', 'KH2290', 'HARBOR DENTAL', '45', ''],
+    ['', '', '', '123', ''],
+  ])
+  const rows = scannerDoctorRows(mtd, daily)
+  const harbor = rows.filter((r) => /Harbor/.test(r.name))
+  assert.equal(harbor.length, 1)
+  assert.equal(harbor[0].mtdValue, 2978)
+  assert.equal(harbor[0].todayCases, 2)
+  assert.equal(harbor[0].todayValue, 123)
+  assert.equal(rows.find((r) => r.code === 'KH2217'), undefined, 'Dr. Husney is no longer listed on his own')
+})

@@ -767,7 +767,7 @@ function scannerDoctorsSection(rows, runDate) {
         <tr>${head('Doctor', '38%')}${head('Sales rep', '20%')}${head(escapeHtml(day), '20%', true)}${head('MTD', '22%', true)}</tr>
         ${rows.map((r) => `
           <tr>
-            ${cell(escapeHtml(`${r.name} (${r.code})`), '38%')}
+            ${cell(escapeHtml(r.codes && r.codes.length > 1 ? r.name : `${r.name} (${r.code})`), '38%')}
             ${cell(r.rep ? escapeHtml(r.rep) : `<span style="color:${BRAND.slate}">Not assigned</span>`, '20%')}
             ${r.todayCases > 0
               ? cell(`${r.todayCases} · ${fmtMoney(r.todayValue)}`, '20%', true, `color:${BRAND.slate};`)
