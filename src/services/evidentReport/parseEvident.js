@@ -128,6 +128,9 @@ function repKeyFromSalesperson(salesperson) {
   const first = String(salesperson || '').trim().toLowerCase().split(/\s+/)[0];
   if (first === 'james') return 'james';
   if (first === 'william') return 'william';
+  // Frederick Zareh, new sales rep (Ben, 2026-11-23). Evident may label him
+  // "Zareh, Frederick", "Frederick Zareh" or "Fred Zareh".
+  if (/\bzare[h]?\b/i.test(String(salesperson || '')) || first === 'fred' || first === 'frederick') return 'fred';
   return null;
 }
 
@@ -198,9 +201,11 @@ function extractRepColumns(headers, totalsRow) {
   const naCol = findCol(headers, 'N/A');
   const jamesCol = findCol(headers, 'Delaney');
   const williamCol = findCol(headers, 'Alexander');
-  if (!naCol && !jamesCol && !williamCol) return null;
+  const fredCol = findCol(headers, 'Zare');
+  if (!naCol && !jamesCol && !williamCol && !fredCol) return null;
   const val = (col) => (col ? toNum(totalsRow[col]) : 0);
-  return { na: val(naCol), james: val(jamesCol), william: val(williamCol) };
+  // Frederick's figure is only present once Evident has a column for him.
+  return { na: val(naCol), james: val(jamesCol), william: val(williamCol), ...(fredCol ? { fred: val(fredCol) } : {}) };
 }
 
 // Reads the "Totals" table from a real "EviSmart Daily Sales Report"

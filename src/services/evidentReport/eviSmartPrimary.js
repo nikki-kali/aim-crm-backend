@@ -15,7 +15,7 @@ function applyEviSmartMtdPrimary(agg, eviSmart) {
   const take = (label, kind, totalKey, byRepKey) => {
     if (!rep[kind]) return
     out[totalKey] = rep[kind].company
-    out[byRepKey] = { na: rep[kind].na, james: rep[kind].james, william: rep[kind].william }
+    out[byRepKey] = { na: rep[kind].na, james: rep[kind].james, william: rep[kind].william, ...(rep[kind].fred !== undefined ? { fred: rep[kind].fred } : {}) }
     out.missing = out.missing.filter((l) => l !== label)
   }
   take('MTD Booked Daily Update', 'booked', 'companyMtdBooked', 'companyMtdBookedByRep')

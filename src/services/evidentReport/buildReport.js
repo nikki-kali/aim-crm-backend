@@ -296,7 +296,7 @@ function buildReport1Body(agg, historyRows = [], overrides = {}) {
   const bookedRowsTable = bookedByCustomer.length === 0 ? '' : `
     <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
       ${sectionLabel(`Today's Booked Cases (${bookedCaseCount} cases, ${bookedByCustomer.length} customers)`)}
-      ${agg.labTotals !== undefined ? `<p style="margin:-8px 0 12px;font-size:11px;line-height:1.45;color:${BRAND.slate}">Every case booked that day, including repeats, remakes and cases returning for production, so the total is higher than New Jobs.</p>` : ''}
+      ${agg.labTotals !== undefined ? `<p style="margin:-8px 0 12px;font-size:11px;line-height:1.45;color:${BRAND.slate}">Every case that arrived that day, including repeats, remakes and cases returning for production.</p>` : ''}
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed">
         <tr>
           <td width="56%" style="padding:0 0 5px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}">Customer</td>
@@ -446,7 +446,7 @@ function labTotalsSection(lt) {
     <div style="padding:6px 16px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed">
         ${row('Receipts', 'Money collected', money(part(t.receipts, 'mtd')))}
-        ${row('New Jobs', 'New business only (Report 10), month to date', money(part(nj.mtd, 'value')) + cases(part(nj.mtd, 'count')) + (nj.day ? sub(`${newJobsDay(t.runDate)}: ${money(nj.day.value)}, ${Number(nj.day.count).toLocaleString('en-US')} case${nj.day.count === 1 ? '' : 's'}`) : ''))}
+        ${row('New Jobs', 'Booked by arrival date, month to date (same as the MTD Booked report)', money(part(nj.mtd, 'value')) + cases(part(nj.mtd, 'count')) + (nj.day ? sub(`${newJobsDay(t.runDate)}: ${money(nj.day.value)}${nj.day.count == null ? '' : `, ${Number(nj.day.count).toLocaleString('en-US')} case${nj.day.count === 1 ? '' : 's'}`}`) : ''))}
         ${row('Work in progress: In Lab', t.inLab ? `${Number(t.inLab.count).toLocaleString('en-US')} cases, by due date` : 'By due date', inLab)}
         ${row('Work in progress: On Hold', 'Waiting for new impressions from the doctor', money(part(t.onHold, 'value')) + cases(part(t.onHold, 'count')))}
         ${row('Invoiced', 'Billed', money(part(t.invoiced, 'mtd')), true)}
@@ -491,7 +491,7 @@ function buildReport1Email(agg, historyRows = [], overrides = {}) {
 // fetchRepGoalsWithProgress pulled from the users table.
 function buildReport2Body(agg, repGoals = []) {
   const groupRowsByRep = (rows, valueField = 'value') => {
-    const g = { james: { count: 0, value: 0 }, william: { count: 0, value: 0 } };
+    const g = { james: { count: 0, value: 0 }, william: { count: 0, value: 0 }, fred: { count: 0, value: 0 } };
     for (const r of rows) {
       const key = repKeyFromSalesperson(r.salesperson);
       if (!key) continue;
@@ -543,6 +543,7 @@ function buildReport2Body(agg, repGoals = []) {
 
   const jamesGoals = goalsFor('James Delaney');
   const williamGoals = goalsFor('William Alexander');
+  const fredGoals = goalsFor('Frederick Zareh');
   const noGoalsNote = repGoals.length === 0 || (jamesGoals.length === 0 && williamGoals.length === 0)
     ? `<p style="margin:10px 0 0;font-size:9.5px;color:${BRAND.slate}">No active goals for James or William this period.</p>`
     : '';
@@ -568,6 +569,12 @@ function buildReport2Body(agg, repGoals = []) {
     mtdBooked: agg.companyMtdBookedByRep ? agg.companyMtdBookedByRep.william : null,
     mtdBilled: agg.companyMtdBilledByRep ? agg.companyMtdBilledByRep.william : null,
   }, williamGoals))}
+  ${repCard(14, repBlock('Frederick Zareh', {
+    booked: dailyBookedByRep.fred,
+    billed: dailyBilledByRep.fred,
+    mtdBooked: agg.companyMtdBookedByRep && agg.companyMtdBookedByRep.fred !== undefined ? agg.companyMtdBookedByRep.fred : null,
+    mtdBilled: agg.companyMtdBilledByRep && agg.companyMtdBilledByRep.fred !== undefined ? agg.companyMtdBilledByRep.fred : null,
+  }, fredGoals))}
   <div style="margin:10px 36px 0">
     <p style="margin:0;font-size:9.5px;color:${BRAND.slate}">Total Daily Booked/Billed = the day's case count and value. "-" = no per-rep MTD breakdown today.</p>
     ${noGoalsNote}
@@ -852,7 +859,7 @@ function buildCombinedLeadershipEmail(agg, historyRows = [], repGoals = [], over
     const labSourceNote = `
   <div style="margin:24px 36px 0;padding:14px 18px;background:${BRAND.blueMist};border:1px solid ${HAIRLINE};border-radius:14px">
     <p style="margin:0 0 6px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${BRAND.slate}">Where these numbers come from</p>
-    <p style="margin:0;font-size:11px;line-height:1.5;color:${BRAND.slate}">Debtors, Receipts, In Lab, On Hold and Invoiced come from Evident&#39;s This Month report (Case Reports). New Jobs is new business only, as in Evident&#39;s Report 10: the month to date, with the day beneath it. It leaves out repeats, remakes and cases returning for production. James and William&#39;s figures come from their own Evident emails, and the booked cases list from Evident&#39;s daily booking email. YTD and goal progress are unchanged.</p>
+    <p style="margin:0;font-size:11px;line-height:1.5;color:${BRAND.slate}">Debtors, Receipts, In Lab, On Hold and Invoiced come from Evident&#39;s This Month report (Case Reports). New Jobs is booked by arrival date, the same as Evident&#39;s MTD Booked report: the month to date, with the day beneath it. James and William&#39;s figures come from their own Evident emails, and the booked cases list from Evident&#39;s daily booking email. YTD and goal progress are unchanged.</p>
   </div>`;
     const labBody = `
   ${debtorsSection(agg.debtors)}

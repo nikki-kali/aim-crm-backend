@@ -48,10 +48,11 @@ function parseLastMonthVsMtd(html, runDate, kind) {
   const naCol = findCol(headers, 'N/A')
   const jamesCol = findCol(headers, 'Delaney')
   const williamCol = findCol(headers, 'Alexander')
+  const fredCol = findCol(headers, 'Zare')
   const read = (obj) => ({
     value: toNum(obj[valueCol]),
     count: countCol ? toNum(obj[countCol]) : null,
-    byRep: { na: naCol ? toNum(obj[naCol]) : 0, james: jamesCol ? toNum(obj[jamesCol]) : 0, william: williamCol ? toNum(obj[williamCol]) : 0 },
+    byRep: { na: naCol ? toNum(obj[naCol]) : 0, james: jamesCol ? toNum(obj[jamesCol]) : 0, william: williamCol ? toNum(obj[williamCol]) : 0, ...(fredCol ? { fred: toNum(obj[fredCol]) } : {}) },
   })
   let last = null
   let current = null
@@ -187,6 +188,7 @@ function parseArrivalsByDay(html) {
   const naCol = findCol(headers, 'N/A')
   const jamesCol = findCol(headers, 'Delaney')
   const williamCol = findCol(headers, 'Alexander')
+  const fredCol = findCol(headers, 'Zare')
   const out = []
   for (const row of rows) {
     const obj = rowToObj(headers, row)
@@ -196,7 +198,7 @@ function parseArrivalsByDay(html) {
       date,
       count: countCol ? toNum(obj[countCol]) : null,
       value: toNum(obj[valueCol]),
-      byRep: { na: naCol ? toNum(obj[naCol]) : 0, james: jamesCol ? toNum(obj[jamesCol]) : 0, william: williamCol ? toNum(obj[williamCol]) : 0 },
+      byRep: { na: naCol ? toNum(obj[naCol]) : 0, james: jamesCol ? toNum(obj[jamesCol]) : 0, william: williamCol ? toNum(obj[williamCol]) : 0, ...(fredCol ? { fred: toNum(obj[fredCol]) } : {}) },
     })
   }
   return out
@@ -223,7 +225,7 @@ function arrivalsFor(messages, runDate) {
       mtd: {
         count: month.every((r) => r.count !== null) ? month.reduce((t, r) => t + r.count, 0) : null,
         value: sum((r) => r.value),
-        byRep: { na: sum((r) => r.byRep.na), james: sum((r) => r.byRep.james), william: sum((r) => r.byRep.william) },
+        byRep: { na: sum((r) => r.byRep.na), james: sum((r) => r.byRep.james), william: sum((r) => r.byRep.william), ...(month.some((r) => r.byRep.fred !== undefined) ? { fred: sum((r) => r.byRep.fred) } : {}) },
       },
     }
   }
@@ -258,7 +260,7 @@ function buildEvidentDay(messages, runDate, arrivalsMessages = []) {
 
   if (!has('Daily Booking Report - Nadine') || !has('Daily Billed Report - Nadine') || (!mtdBooked && !mtdBilled)) return null
 
-  const rep = (m) => (m ? { james: m.james, william: m.william, na: m.na, company: m.company } : null)
+  const rep = (m) => (m ? { james: m.james, william: m.william, ...(m.fred !== undefined ? { fred: m.fred } : {}), na: m.na, company: m.company } : null)
   const totals = {
     dailyBookedCount: agg.companyDailyBookedCount,
     dailyBookedValue: agg.companyDailyBooked,
