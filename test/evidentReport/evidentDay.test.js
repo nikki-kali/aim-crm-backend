@@ -254,16 +254,17 @@ test('Scanner doctors: MTD from MTD Booked Daily Update, the day from Daily Book
     ['', '', '', '75', ''],
   ])
   const rows = scannerDoctorRows(mtd, daily)
-  assert.equal(rows.length, 8)
+  assert.equal(rows.length, 9)
   assert.deepEqual(rows[0], { code: 'A1304', name: 'Dr. Ehab Samaan', rep: 'William', todayCases: 1, todayValue: 65, mtdValue: 780 })
   assert.equal(rows[1].code, 'KH2216')
   assert.equal(rows[1].todayCases, 0)
   assert.equal(rows.find((r) => r.code === 'A4154').mtdValue, 0)
+  assert.equal(rows.find((r) => r.code === 'A4159').rep, 'William', 'Dr. Assadian has a scanner (Elizabeth, 5 Nov)')
   assert.equal(rows.find((r) => r.code === 'A3101'), undefined, 'Dr. Saldana has no scanner')
   assert.equal(scannerDoctorRows(undefined, daily), null)
 
   const agg = { runDate: '2026-11-04', missing: [], eviSmart: { scannerDoctors: rows } }
   let html = ''
   try { html = buildCombinedLeadershipEmail(agg, [], []).html } catch (e) { return } // full builder needs more data; section helper checked below
-  assert.match(html, /Intraoral Scanner Accounts · 1 of 8 sent cases on Wed, Nov 4/)
+  assert.match(html, /Intraoral Scanner Accounts · 1 of 9 sent cases on Wed, Nov 4/)
 })
