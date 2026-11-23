@@ -6,6 +6,8 @@
 // corrected by Nadine on 2026-11-06: Dr. Saldana (A3101) has no scanner even
 // though Evident tags him, and Dr. Lopez (A4154) has one though Evident does
 // not tag her. So this list, not the Evident tag (or #112), is the source.
+// Dr. Assadian (A4159, William's) was added 2026-11-23, as Elizabeth asked on
+// 2026-11-05: he has a scanner and sends cases almost daily.
 // Update it here when Ben gives a doctor a scanner or confirms a rep.
 //
 // Figures come from emails that already arrive every night, not from
@@ -21,6 +23,7 @@ const SCANNER_DOCTORS = [
   { code: 'A1304', name: 'Dr. Ehab Samaan', rep: 'William' },
   { code: 'A1298', name: 'Dr. Alberto Gonzalez', rep: 'William' },
   { code: 'A4154', name: 'Dr. Leslie Grace Lopez', rep: 'William' },
+  { code: 'A4159', name: 'Dr. A.R. Assadian', rep: 'William' },
   { code: 'A1202', name: 'Dr. Betzalel Krasnow', rep: null },
   { code: 'A1297', name: 'Ezra Medical Center', rep: null },
   { code: 'KH2216', name: 'Jodal Dental', rep: null },
