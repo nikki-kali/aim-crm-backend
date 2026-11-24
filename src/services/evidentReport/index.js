@@ -180,19 +180,13 @@ async function applyLabTotals(aggregate, evidentMessages, runDate) {
   aggregate.debtors = latestDebtors(thisMonthMessages)
   if (!aggregate.debtors) console.warn('[evident-report] no Debtors ("This Month") email found in the last 5 days')
   aggregate.labTotals = labTotalsFor({ thisMonthMessages, evidentMessages, runDate })
-  // New Jobs follows the MTD Booked report, by ARRIVAL date (Ben, 2026-11-23:
-  // "does not match the MTD report", 155k vs 145k; the Nov 4 alignment call also
-  // chose arrival for every report). So the month and the day are the same
-  // figures as the per-rep MTD Booked lines and "Today's Booked Cases". A figure
-  // that is missing or failed the plausibility check shows N/A, never the old
-  // booking-date number.
-  const es = aggregate.eviSmart
-  if (aggregate.labTotals && es) {
-    const part = (value, count) => (value === null || value === undefined ? null : { value, count: count === undefined ? null : count })
-    aggregate.labTotals.newJobs = {
-      day: part(es.dailyBookedValue, es.dailyBookedCount),
-      mtd: aggregate.bookedMtdRejected ? null : part(es.mtdBookedValue, es.mtdBookedCount),
-    }
+  // Report 12 disagreed with the booking-date copy of Report 10: its figures are
+  // not trusted anywhere, so the Scanner section (which reads Report 12's
+  // per-customer rows) is left out rather than sent with a wrong total
+  // (2026-11-24: $50,923 instead of about $10,000 went to leadership).
+  if (aggregate.labTotals && aggregate.labTotals.report12Rejected) {
+    console.warn(`[evident-report] Report 12 (MTD Booked) for ${runDate} does not agree with report 114; New Jobs uses report 114 and the Scanner section is left out`)
+    if (aggregate.eviSmart) aggregate.eviSmart.scannerDoctors = null
   }
 }
 

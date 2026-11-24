@@ -151,24 +151,57 @@ function newJobsFor(messages, runDate) {
   return day || mtd ? { day, mtd } : null
 }
 
-function newJobsWithMonth(day, booked) {
-  const mtd = booked && booked.mtd ? booked.mtd : null
-  return day || mtd ? { day: day || null, mtd } : null
+// Report 12, "MTD Booked Daily Update": Elizabeth switched it to booking date
+// on 2026-11-23 ("date (booked) >=MTD"), and on 2026-11-24 asked for the month's
+// New Jobs to come from it. Its totals row as { value, count }, or null when the
+// day's email is missing or still counts by arrival date.
+const REPORT_12 = /^MTD Booked Daily Update/i
+function report12MonthFor(messages, runDate) {
+  const m = (messages || [])
+    .filter((x) => x.date === runDate && REPORT_12.test(String(x.subject || '').trim()))
+    .sort((a, b) => (b.internalDate || 0) - (a.internalDate || 0))[0]
+  if (!m) return null
+  if (!/date\s*\(\s*book(?:ed|ing)\s*\)/i.test(textOf(m.html))) return null
+  const table = parseTable(m.html || '')
+  if (!table || table.rows.length < 2) return null
+  const { headers, rows } = table
+  const valueCol = headers.indexOf(findCol(headers, 'Sales Value (Total)'))
+  const countCol = headers.indexOf(findCol(headers, 'Cases'))
+  if (valueCol < 0) return null
+  const total = rows[rows.length - 1]
+  return { value: toNum(total[valueCol]), count: countCol >= 0 ? toNum(total[countCol]) : null }
+}
+
+// Report 12 is used only when it agrees with our booking-date copy of Report 10
+// (report 114) to within 5%. Its first booked email (23 Nov) read $776,081 for
+// the month against $153,038 in report 114, and that must never reach leadership.
+// Otherwise report 114 is shown (the same booking-date count, within ~$130 of
+// Report 12 when Report 12 is right).
+const REPORT_12_TOLERANCE = 0.05
+function newJobsMonth(report12, report114) {
+  if (report12 && report114 && report114.value > 0
+    && Math.abs(report12.value - report114.value) / report114.value <= REPORT_12_TOLERANCE) {
+    return { month: { ...report12, source: 'report12' }, report12Rejected: false }
+  }
+  return { month: report114 ? { ...report114, source: 'report114' } : null, report12Rejected: Boolean(report12) }
 }
 
 // Everything the dashboard's top section shows, or null for a part that is
 // missing (shown as N/A, never as zero).
 function labTotalsFor({ thisMonthMessages = [], evidentMessages = [], runDate }) {
   const tm = thisMonthFor(thisMonthMessages, runDate)
+  // New Jobs counted by BOOKING date (Ben via Elizabeth, 2026-11-24):
+  // - the month to date from Report 12 (MTD Booked), checked against report 114;
+  // - the day from Report 10's booked cases for that day ("Booked Today - AIM
+  //   CRM", report 113, Report 10's own filters), or the This Month report's
+  //   WIP New Jobs line, which gives the same figure, when that email is missing.
+  const booked = newJobsFor(evidentMessages, runDate)
+  const { month, report12Rejected } = newJobsMonth(report12MonthFor(evidentMessages, runDate), booked && booked.mtd)
+  const day = (booked && booked.day) || (tm && tm.newJobs) || null
   return {
     runDate,
-    // New Jobs from the This Month report too (user, 2026-11-13): its WIP
-    // "New Jobs" line, the day's new business, the same figure as Report 10.
-    // Month to date from "Booked This Month - AIM CRM" (report 114, Report
-    // 10's filters for the whole month, without "not Sent" since 2026-11-13,
-    // so shipped cases stay in: $90,123 / 930 cases on 13 Nov, as Ben
-    // expects). The day from the This Month report's WIP New Jobs line.
-    newJobs: newJobsWithMonth(tm && tm.newJobs, newJobsFor(evidentMessages, runDate)),
+    newJobs: day || month ? { day, mtd: month } : null,
+    report12Rejected,
     receipts: tm ? tm.receipts : null,
     invoiced: tm ? tm.invoiced : null,
     inLab: tm ? tm.inLab : null,
@@ -177,4 +210,4 @@ function labTotalsFor({ thisMonthMessages = [], evidentMessages = [], runDate })
   }
 }
 
-module.exports = { parseThisMonth, thisMonthFor, parseNewJobsTotal, newJobsFor, labTotalsFor, NEW_JOBS_TODAY, NEW_JOBS_MONTH }
+module.exports = { parseThisMonth, thisMonthFor, parseNewJobsTotal, newJobsFor, labTotalsFor, report12MonthFor, newJobsMonth, NEW_JOBS_TODAY, NEW_JOBS_MONTH }

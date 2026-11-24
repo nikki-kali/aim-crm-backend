@@ -446,7 +446,7 @@ function labTotalsSection(lt) {
     <div style="padding:6px 16px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed">
         ${row('Receipts', 'Money collected', money(part(t.receipts, 'mtd')))}
-        ${row('New Jobs', 'Booked by arrival date, month to date (same as the MTD Booked report)', money(part(nj.mtd, 'value')) + cases(part(nj.mtd, 'count')) + (nj.day ? sub(`${newJobsDay(t.runDate)}: ${money(nj.day.value)}${nj.day.count == null ? '' : `, ${Number(nj.day.count).toLocaleString('en-US')} case${nj.day.count === 1 ? '' : 's'}`}`) : ''))}
+        ${row('New Jobs', `Counted by booking date, month to date (${part(nj.mtd, 'source') === 'report114' ? 'booking-date copy of Report 10' : 'Report 12'})`, money(part(nj.mtd, 'value')) + cases(part(nj.mtd, 'count')) + (nj.day ? sub(`${newJobsDay(t.runDate)}: ${money(nj.day.value)}${nj.day.count == null ? '' : `, ${Number(nj.day.count).toLocaleString('en-US')} case${nj.day.count === 1 ? '' : 's'}`}`) : ''))}
         ${row('Work in progress: In Lab', t.inLab ? `${Number(t.inLab.count).toLocaleString('en-US')} cases, by due date` : 'By due date', inLab)}
         ${row('Work in progress: On Hold', 'Waiting for new impressions from the doctor', money(part(t.onHold, 'value')) + cases(part(t.onHold, 'count')))}
         ${row('Invoiced', 'Billed', money(part(t.invoiced, 'mtd')), true)}
@@ -859,7 +859,7 @@ function buildCombinedLeadershipEmail(agg, historyRows = [], repGoals = [], over
     const labSourceNote = `
   <div style="margin:24px 36px 0;padding:14px 18px;background:${BRAND.blueMist};border:1px solid ${HAIRLINE};border-radius:14px">
     <p style="margin:0 0 6px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${BRAND.slate}">Where these numbers come from</p>
-    <p style="margin:0;font-size:11px;line-height:1.5;color:${BRAND.slate}">Debtors, Receipts, In Lab, On Hold and Invoiced come from Evident&#39;s This Month report (Case Reports). New Jobs is booked by arrival date, the same as Evident&#39;s MTD Booked report: the month to date, with the day beneath it. James and William&#39;s figures come from their own Evident emails, and the booked cases list from Evident&#39;s daily booking email. YTD and goal progress are unchanged.</p>
+    <p style="margin:0;font-size:11px;line-height:1.5;color:${BRAND.slate}">Debtors, Receipts, In Lab, On Hold and Invoiced come from Evident&#39;s This Month report (Case Reports). New Jobs is counted by booking date: the month to date from Evident&#39;s Report 12 (MTD Booked), with the day&#39;s booked cases from Report 10 beneath it. James and William&#39;s figures come from their own Evident emails, and the booked cases list from Evident&#39;s daily booking email. YTD and goal progress are unchanged.</p>
   </div>`;
     const labBody = `
   ${debtorsSection(agg.debtors)}
