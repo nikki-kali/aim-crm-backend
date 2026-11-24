@@ -91,11 +91,11 @@ test('New Jobs comes from the evening This Month email (WIP New Jobs line, day o
 <H3>WIP</H3>New Jobs: <B>7,336 (60)</B><BR>On Hold: <B>1,409 (22)</B><BR>In Lab: <B>64,085+1,405 (540)</B>`
   const morning = html.replace('12 Nov 2026 22:01', '13 Nov 2026 04:00').replace('This Month - 12 Nov', 'This Month - 13 Nov').replace('7,336 (60)', '0 (0)')
   const t = labTotalsFor({ thisMonthMessages: [{ html, internalDate: 1 }], runDate: '2026-11-12' })
-  assert.deepEqual(t.newJobs, { day: { value: 7336, count: 60 }, mtd: null })
+  assert.deepEqual(t.newJobs, { day: { value: 7336, count: 60, source: 'thisMonth' }, mtd: null })
   // Since 2026-11-24 the day comes from Report 10's "Booked Today" email first.
   const noEvening = labTotalsFor({ thisMonthMessages: [{ html: morning, internalDate: 2 }], evidentMessages: [{ subject: 'Booked Today - AIM CRM', date: '2026-11-12', html: '<table><tr><td>Sales Value</td><td>Cases</td></tr><tr><td>5</td><td>1</td></tr><tr><td>7,000</td><td>58</td></tr></table>' }], runDate: '2026-11-12' })
-  assert.deepEqual(noEvening.newJobs, { day: { value: 7000, count: 58 }, mtd: null })
+  assert.deepEqual(noEvening.newJobs, { day: { value: 7000, count: 58, source: 'report10' }, mtd: null })
   // With the 11 PM "Booked This Month" email, the month total comes from it.
   const withMonth = labTotalsFor({ thisMonthMessages: [{ html, internalDate: 1 }], evidentMessages: [{ subject: 'Booked This Month - AIM CRM', date: '2026-11-12', html: newJobs([['Rep A', '90,000', '900']], ['90,123.65', '930']) }], runDate: '2026-11-12' })
-  assert.deepEqual(withMonth.newJobs, { day: { value: 7336, count: 60 }, mtd: { value: 90123.65, count: 930, source: 'report114' } })
+  assert.deepEqual(withMonth.newJobs, { day: { value: 7336, count: 60, source: 'thisMonth' }, mtd: { value: 90123.65, count: 930, source: 'report114' } })
 })

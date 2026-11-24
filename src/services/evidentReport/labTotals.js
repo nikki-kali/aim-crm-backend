@@ -175,8 +175,9 @@ function report12MonthFor(messages, runDate) {
 // Report 12 is used only when it agrees with our booking-date copy of Report 10
 // (report 114) to within 5%. Its first booked email (23 Nov) read $776,081 for
 // the month against $153,038 in report 114, and that must never reach leadership.
-// Otherwise report 114 is shown (the same booking-date count, within ~$130 of
-// Report 12 when Report 12 is right).
+// Otherwise report 114 is shown, labelled as such. Report 114 sums Sales Value
+// (Product) while Report 12 sums Sales Value (Total) (Elizabeth, 2026-11-25), so
+// the two differ slightly (about $130 on 23 Nov); Report 12 is the figure to match.
 const REPORT_12_TOLERANCE = 0.05
 function newJobsMonth(report12, report114) {
   if (report12 && report114 && report114.value > 0
@@ -186,18 +187,57 @@ function newJobsMonth(report12, report114) {
   return { month: report114 ? { ...report114, source: 'report114' } : null, report12Rejected: Boolean(report12) }
 }
 
+const round2 = (n) => Math.round(n * 100) / 100
+
+// True when no weekday comes before runDate in its month.
+function isFirstBusinessDayOfMonth(runDate) {
+  const d = new Date(`${runDate}T12:00:00Z`)
+  for (let day = 1; day < d.getUTCDate(); day++) {
+    const wd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), day)).getUTCDay()
+    if (wd !== 0 && wd !== 6) return false
+  }
+  return true
+}
+
+// The day's New Jobs from the same 8 PM Report 12 run as the month (Elizabeth,
+// 2026-11-25: "use Report 12 for the daily figure too", so the headline and the
+// totals come from one run): tonight's month to date minus the previous Report 12
+// email's month to date in the same month. On the month's first business day the
+// day is the month so far. null when the previous email is missing, does not count
+// by booking date, or did not agree with report 114 (the caller then falls back).
+function report12DayFor(messages, runDate, month) {
+  if (!month || month.source !== 'report12') return null
+  if (isFirstBusinessDayOfMonth(runDate)) return { value: month.value, count: month.count, source: 'report12' }
+  const earlier = (messages || [])
+    .filter((m) => m.date && m.date < runDate && m.date.slice(0, 7) === runDate.slice(0, 7) && REPORT_12.test(String(m.subject || '').trim()))
+    .map((m) => m.date)
+    .sort()
+  const prevDate = earlier[earlier.length - 1]
+  if (!prevDate) return null
+  const prevBooked = newJobsFor(messages, prevDate)
+  const prev = newJobsMonth(report12MonthFor(messages, prevDate), prevBooked && prevBooked.mtd).month
+  if (!prev || prev.source !== 'report12') return null
+  const value = round2(month.value - prev.value)
+  const count = month.count !== null && prev.count !== null ? month.count - prev.count : null
+  if (value < 0 || (count !== null && count < 0)) return null
+  return { value, count, source: 'report12' }
+}
+
 // Everything the dashboard's top section shows, or null for a part that is
 // missing (shown as N/A, never as zero).
 function labTotalsFor({ thisMonthMessages = [], evidentMessages = [], runDate }) {
   const tm = thisMonthFor(thisMonthMessages, runDate)
   // New Jobs counted by BOOKING date (Ben via Elizabeth, 2026-11-24):
   // - the month to date from Report 12 (MTD Booked), checked against report 114;
-  // - the day from Report 10's booked cases for that day ("Booked Today - AIM
-  //   CRM", report 113, Report 10's own filters), or the This Month report's
-  //   WIP New Jobs line, which gives the same figure, when that email is missing.
+  // - the day from the same Report 12 run (report12DayFor); only when that
+  //   can't be worked out, Report 10's booked cases for the day (report 113) or
+  //   the This Month report's WIP New Jobs line.
   const booked = newJobsFor(evidentMessages, runDate)
   const { month, report12Rejected } = newJobsMonth(report12MonthFor(evidentMessages, runDate), booked && booked.mtd)
-  const day = (booked && booked.day) || (tm && tm.newJobs) || null
+  const tag = (x, source) => (x ? { ...x, source } : null)
+  const day = report12DayFor(evidentMessages, runDate, month)
+    || tag(booked && booked.day, 'report10')
+    || tag(tm && tm.newJobs, 'thisMonth')
   return {
     runDate,
     newJobs: day || month ? { day, mtd: month } : null,
@@ -210,4 +250,4 @@ function labTotalsFor({ thisMonthMessages = [], evidentMessages = [], runDate })
   }
 }
 
-module.exports = { parseThisMonth, thisMonthFor, parseNewJobsTotal, newJobsFor, labTotalsFor, report12MonthFor, newJobsMonth, NEW_JOBS_TODAY, NEW_JOBS_MONTH }
+module.exports = { parseThisMonth, thisMonthFor, parseNewJobsTotal, newJobsFor, labTotalsFor, report12MonthFor, report12DayFor, newJobsMonth, NEW_JOBS_TODAY, NEW_JOBS_MONTH }
