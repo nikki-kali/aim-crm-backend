@@ -425,7 +425,7 @@ const newJobsDay = (runDate) => {
 function labTotalsSection(lt) {
   const t = lt || {};
   const money = (n) => (n === null || n === undefined ? 'N/A' : '$' + Math.round(n).toLocaleString('en-US'));
-  const sub = (text) => `<br><span style="font-size:10.5px;font-weight:400;color:${BRAND.slate}">${text}</span>`;
+  const sub = (text) => `<br><span style="font-size:10.5px;font-weight:400;color:${BRAND.slate};white-space:normal">${text}</span>`;
   const cases = (n) => (n === null || n === undefined ? '' : sub(`${Number(n).toLocaleString('en-US')} case${n === 1 ? '' : 's'}`));
   const part = (o, k) => (o ? o[k] : null);
   const row = (label, note, value, last) => `
@@ -754,25 +754,28 @@ function scannerDoctorsSection(rows, runDate) {
   const dayTotal = round(rows.reduce((s, r) => s + r.todayValue, 0));
   const dayCases = rows.reduce((s, r) => s + r.todayCases, 0);
   const activeMtd = rows.filter((r) => r.mtdValue > 0).length;
+  // Whole dollars and the day's cases over its value: at phone width each
+  // column is ~60px, and cents ran the day into the MTD column (Ben, 2026-11-25).
+  const whole = (n) => '$' + Math.round(n).toLocaleString('en-US');
   const head = (text, width, right) => `<td width="${width}" style="padding:0 0 5px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:${BRAND.slate}${right ? ';text-align:right' : ''}">${text}</td>`;
-  const cell = (html, width, right, extra = '') => `<td width="${width}" style="padding:5px 0;border-bottom:1px solid ${HAIRLINE};font-size:11.5px;line-height:1.35;color:${BRAND.ink};${right ? `text-align:right;font-family:${FONT_DATA};white-space:nowrap;` : 'word-break:break-word;'}${extra}">${html}</td>`;
+  const cell = (html, width, right, extra = '') => `<td width="${width}" style="padding:5px 0;border-bottom:1px solid ${HAIRLINE};font-size:11.5px;line-height:1.35;color:${BRAND.ink};${right ? `text-align:right;font-family:${FONT_DATA};` : 'word-break:break-word;'}${extra}">${html}</td>`;
   return `
     <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
       ${sectionLabel(`Intraoral Scanner Accounts · ${rows.length - quiet} of ${rows.length} sent cases on ${escapeHtml(day)}`)}
       <div style="margin:0 0 14px">${cardRow([
-        statCard('Scanner Accounts MTD', fmtMoney(mtdTotal), [{ text: `${activeMtd} of ${rows.length} accounts sent cases this month` }]),
-        statCard(escapeHtml(day), fmtMoney(dayTotal), [{ text: `${dayCases} case${dayCases === 1 ? '' : 's'} from ${rows.length - quiet} account${rows.length - quiet === 1 ? '' : 's'}` }]),
+        statCard('Scanner Accounts MTD', whole(mtdTotal), [{ text: `${activeMtd} of ${rows.length} accounts sent cases this month` }]),
+        statCard(escapeHtml(day), whole(dayTotal), [{ text: `${dayCases} case${dayCases === 1 ? '' : 's'} from ${rows.length - quiet} account${rows.length - quiet === 1 ? '' : 's'}` }]),
       ])}</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed">
-        <tr>${head('Doctor', '38%')}${head('Sales rep', '20%')}${head(escapeHtml(day), '20%', true)}${head('MTD', '22%', true)}</tr>
+        <tr>${head('Doctor', '36%')}${head('Sales rep', '20%')}${head(escapeHtml(day), '22%', true)}${head('MTD', '22%', true)}</tr>
         ${rows.map((r) => `
           <tr>
-            ${cell(escapeHtml(r.codes && r.codes.length > 1 ? r.name : `${r.name} (${r.code})`), '38%')}
+            ${cell(escapeHtml(r.codes && r.codes.length > 1 ? r.name : `${r.name} (${r.code})`), '36%')}
             ${cell(r.rep ? escapeHtml(r.rep) : `<span style="color:${BRAND.slate}">Not assigned</span>`, '20%')}
             ${r.todayCases > 0
-              ? cell(`${r.todayCases} · ${fmtMoney(r.todayValue)}`, '20%', true, `color:${BRAND.slate};`)
-              : cell('No case', '20%', true, `color:${BRAND.danger};font-weight:600;`)}
-            ${cell(fmtMoney(r.mtdValue), '22%', true, `color:${BRAND.slate};`)}
+              ? cell(`${r.todayCases} case${r.todayCases === 1 ? '' : 's'}<br>${whole(r.todayValue)}`, '22%', true, `color:${BRAND.slate};`)
+              : cell('No case', '22%', true, `color:${BRAND.danger};font-weight:600;`)}
+            ${cell(whole(r.mtdValue), '22%', true, `color:${BRAND.slate};`)}
           </tr>`).join('')}
       </table>
       <p style="margin:10px 0 0;font-size:10.5px;line-height:1.5;color:${BRAND.slate}">Doctors who received an intraoral scanner from AIM, with the rep from their customer record. Values count cases by booking date: the month to date from Report 12 (MTD Booked), the day from the Daily Booking Report.</p>
