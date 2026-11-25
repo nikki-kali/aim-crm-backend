@@ -295,7 +295,7 @@ function buildReport1Body(agg, historyRows = [], overrides = {}) {
 
   const bookedRowsTable = bookedByCustomer.length === 0 ? '' : `
     <div style="margin:24px 36px 0;padding:16px 18px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
-      ${sectionLabel(`Today's Booked Cases (${bookedCaseCount} cases, ${bookedByCustomer.length} customers)`)}
+      ${sectionLabel(`Booked Cases · ${newJobsDay(agg.runDate)} (${bookedCaseCount} cases, ${bookedByCustomer.length} customers)`)}
       ${agg.labTotals !== undefined ? `<p style="margin:-8px 0 12px;font-size:11px;line-height:1.45;color:${BRAND.slate}">Every case that arrived that day, including repeats, remakes and cases returning for production.</p>` : ''}
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed">
         <tr>
@@ -636,7 +636,7 @@ function buildReport2Body(agg, repGoals = []) {
     mtdBilled: agg.companyMtdBilledByRep && agg.companyMtdBilledByRep.fred !== undefined ? agg.companyMtdBilledByRep.fred : null,
   }, fredGoals))}
   <div style="margin:10px 36px 0">
-    <p style="margin:0;font-size:9.5px;color:${BRAND.slate}">Total Daily Booked/Billed = the day's case count and value. "-" = no per-rep MTD breakdown today.</p>
+    <p style="margin:0;font-size:9.5px;color:${BRAND.slate}">Total Daily Booked/Billed = the day's case count and value. "-" = no per-rep MTD breakdown that day.</p>
     ${noGoalsNote}
   </div>`;
 

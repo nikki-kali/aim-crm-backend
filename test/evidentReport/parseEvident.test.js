@@ -85,7 +85,7 @@ test("Today's Booked Cases table comes from EviSmart's own Daily Booked by Custo
   const { html } = buildReport1Email(agg, []);
   // Real email: 53 customers, 116 cases, $8,414.19 (reconciles exactly
   // with the email's own Daily Booked total).
-  assert.match(html, /Today's Booked Cases \(116 cases, 53 customers\)/);
+  assert.match(html, /Booked Cases · [A-Za-z]{3}, [A-Za-z]{3} \d+ \(116 cases, 53 customers\)/);
   assert.match(html, />A1116 - BROOKDALE MAIN</);
   assert.match(html, />A1116 - BROOKDALE MAIN<[\s\S]{0,300}?>12<[\s\S]{0,300}?\$966\.43/);
   assert.match(html, />A1147 - DR\. JENNIFER FLIGR</);
@@ -93,12 +93,12 @@ test("Today's Booked Cases table comes from EviSmart's own Daily Booked by Custo
   // A real no-bookings day (Sept 23 fixture) has no table at all.
   const emptyAgg = { ...agg, eviSmart: extractEviSmartTotals(fixture('evismart-daily-sales-report.html')) };
   const { html: emptyHtml } = buildReport1Email(emptyAgg, []);
-  assert.doesNotMatch(emptyHtml, /Today's Booked Cases/);
+  assert.doesNotMatch(emptyHtml, /Booked Cases · /);
 
   // No EviSmart pull at all: no table, and the old Evident row list is no
   // longer used to fill it in.
   const { html: noEsHtml } = buildReport1Email({ ...agg, eviSmart: null }, []);
-  assert.doesNotMatch(noEsHtml, /Today's Booked Cases/);
+  assert.doesNotMatch(noEsHtml, /Booked Cases · /);
 });
 
 test("Today's Booked Cases table HTML-escapes customer names (not a trusted constant — real EviSmart data)", () => {
@@ -189,7 +189,7 @@ test('By Sales Rep MTD columns show "-" (not a fabricated $0) when the report ha
   const agg = parseAndAggregate(messagesWithoutMtdBooked, { runDate: '2026-09-11' });
   assert.equal(agg.companyMtdBookedByRep, null);
   const { html } = buildReport2Email(agg);
-  assert.match(html, /"-" = no per-rep MTD breakdown today/);
+  assert.match(html, /"-" = no per-rep MTD breakdown that day/);
 });
 
 test('Goal Progress section (Report #3) renders real goal data passed in by the caller and is omitted when there are none', () => {
@@ -355,7 +355,7 @@ test('Report #1/#2/#3 are three separate emails with distinct subjects (Ben Silb
   assert.match(r3.subject, /^Goal Progress Report/);
 
   // Each report's own content stays out of the other two's emails.
-  assert.doesNotMatch(r2.html, /Today's Booked Cases/);
+  assert.doesNotMatch(r2.html, /Booked Cases · /);
   assert.doesNotMatch(r2.html, /Goal Progress/);
   assert.doesNotMatch(r3.html, /By Sales Rep/);
   assert.doesNotMatch(r1.html, /Booked &amp; Billed by Month/);
@@ -373,7 +373,7 @@ test('buildCombinedLeadershipEmail merges all 3 reports into one email with one 
 
   assert.match(subject, /^Daily Leadership Dashboard - /);
   // All 3 reports' real content present in the one email.
-  assert.match(html, /Today's Booked Cases/);
+  assert.match(html, /Booked Cases · /);
   assert.match(html, /YTD Sales Value Total/);
   assert.doesNotMatch(html, /By Sales Rep/);
   assert.match(html, /James Delaney/);
@@ -398,7 +398,7 @@ test('buildCombinedLeadershipEmail merges all 3 reports into one email with one 
   const repIdx = html.indexOf('Sales Performance by Representative');
   const jamesGoalIdx = html.indexOf('36 New Doctors by Dec 2026');
   const jamesMtdIdx = html.lastIndexOf('MTD Booked', jamesGoalIdx);
-  const customerTableIdx = html.indexOf("Today's Booked Cases");
+  const customerTableIdx = html.indexOf("Booked Cases · ");
   assert.ok(goalIdx > 0 && kpiIdx > goalIdx, 'KPI trend/comparison section should come right after the $2.7M goal bar');
   assert.ok(kpiIdx < repIdx, 'headline section (incl. KPI) should come before Sales Performance by Representative');
   assert.ok(repIdx < jamesMtdIdx && jamesMtdIdx < jamesGoalIdx, 'James\'s own goal should render right after his own MTD cards, inside the Sales Performance by Representative section');
@@ -543,7 +543,7 @@ test('combined email explains where the numbers come from, and flags cumulative 
   assert.match(buildCombinedLeadershipEmail(arrivalsDay, [], [], {}).html, /counts cases by arrival date, from Evident&#39;s next-morning &quot;Daily Arrivals by Day&quot; report/);
   assert.match(html, /as of 23 Sep, the most recent full EviSmart pull\. Daily figures are for 22 Sep\./);
   // Source note is the last thing in the body, after the customer table.
-  assert.ok(html.indexOf("Today's Booked Cases") < html.indexOf('Where these numbers come from'));
+  assert.ok(html.indexOf("Booked Cases · ") < html.indexOf('Where these numbers come from'));
 
   // Same-day pull: the source note shows, but no as-of warning.
   const sep23 = parseAndAggregate(ALL_MESSAGES, { runDate: '2026-09-23' });
