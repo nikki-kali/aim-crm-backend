@@ -449,7 +449,7 @@ function labTotalsSection(lt) {
         ${row('New Jobs', `Counted by booking date, month to date (${part(nj.mtd, 'source') === 'report114' ? 'booking-date copy of Report 10' : 'Report 12'})`, money(part(nj.mtd, 'value')) + cases(part(nj.mtd, 'count')) + (nj.day ? sub(`${newJobsDay(t.runDate)}: ${money(nj.day.value)}${nj.day.count == null ? '' : `, ${Number(nj.day.count).toLocaleString('en-US')} case${nj.day.count === 1 ? '' : 's'}`}`) : ''))}
         ${row('Work in progress: In Lab', t.inLab ? `${Number(t.inLab.count).toLocaleString('en-US')} cases, by due date` : 'By due date', inLab)}
         ${row('Work in progress: On Hold', 'Waiting for new impressions from the doctor', money(part(t.onHold, 'value')) + cases(part(t.onHold, 'count')))}
-        ${row('Invoiced (MTD Sales)', 'Billed, month to date (KPI page)', money(part(t.invoiced, 'mtd')), true)}
+        ${row('Invoiced (MTD Sales)', 'Billed, month to date (KPI page), with the day&#39;s billing beneath it', money(part(t.invoiced, 'mtd')) + (t.invoiced && t.invoiced.day !== null && t.invoiced.day !== undefined ? sub(`${newJobsDay(t.runDate)}: ${money(t.invoiced.day)} billed`) : ''), true)}
       </table>
     </div>
   </div>`;
