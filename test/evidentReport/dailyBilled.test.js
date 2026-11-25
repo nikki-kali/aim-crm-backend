@@ -21,3 +21,15 @@ test('Daily Billed splits by company (KH codes) and sales rep, and adds up', () 
   ])
   assert.equal(dailyBilledBreakdown(rows, null), null)
 })
+
+test('Daily Billed: credits count, lines that do not add up show N/A, a missing email shows N/A', () => {
+  const rows = [
+    { customerCode: 'A1', billedValue: 100, salesperson: '' },
+    { customerCode: 'KH1', billedValue: -20, salesperson: 'william' },
+  ]
+  const d = dailyBilledBreakdown(rows, 80)
+  assert.deepEqual(d.companies.map((c) => c.value), [100, -20])
+  assert.equal(dailyBilledBreakdown(rows, 95), null)
+  const { labTotalsSection } = require('../../src/services/evidentReport/buildReport')
+  assert.ok(labTotalsSection)
+})

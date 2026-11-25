@@ -465,30 +465,33 @@ const DAILY_BILLED_REPS = [['william', 'William Alexander'], ['james', 'James De
 function dailyBilledBreakdown(rows, total) {
   if (!Array.isArray(rows) || total === null || total === undefined) return null;
   const sum = (list) => Math.round(list.reduce((n, r) => n + (Number(r.billedValue) || 0), 0) * 100) / 100;
-  const billed = rows.filter((r) => Number(r.billedValue) > 0);
+  // Every billed line, credits (negative) included, so the parts add up.
+  const billed = rows.filter((r) => Number(r.billedValue) !== 0 && r.billedValue !== null && r.billedValue !== undefined);
   const kh = billed.filter((r) => /^KH/i.test(r.customerCode || ''));
   const aim = billed.filter((r) => !/^KH/i.test(r.customerCode || ''));
   const reps = DAILY_BILLED_REPS.map(([key, name]) => {
     const list = billed.filter((r) => repKeyFromSalesperson(r.salesperson) === key);
     return { name, value: sum(list), count: list.length };
   }).filter((r) => r.count > 0);
-  const repTotal = reps.reduce((n, r) => n + r.value, 0);
-  const noRep = billed.filter((r) => !repKeyFromSalesperson(r.salesperson));
+  const noRep = billed.filter((r) => !DAILY_BILLED_REPS.some(([key]) => key === repKeyFromSalesperson(r.salesperson)));
+  // The lines must add up to Evident's own total; otherwise show N/A.
+  if (Math.abs(sum(billed) - total) > 0.01) return null;
   return {
     total, count: billed.length,
     companies: [{ name: 'AIM Dental', value: sum(aim), count: aim.length }, { name: 'Kings Highway', value: sum(kh), count: kh.length }],
-    reps: [...reps, { name: 'No sales rep', value: Math.round((sum(billed) - repTotal) * 100) / 100, count: noRep.length }],
+    reps: [...reps, { name: 'No sales rep', value: sum(noRep), count: noRep.length }],
   };
 }
 
 function dailyBilledSection(agg) {
-  const d = dailyBilledBreakdown(agg.companyDailyBilledRows, agg.companyDailyBilled);
+  const missing = (agg.missing || []).some((m) => /Daily Billed Report/i.test(typeof m === 'string' ? m : (m && m.label) || ''));
+  const d = missing ? null : dailyBilledBreakdown(agg.companyDailyBilledRows, agg.companyDailyBilled);
   const day = newJobsDay(agg.runDate);
   if (!d) {
     return `
   <div style="padding:20px 36px 0">
     ${sectionLabel(`Daily Billed · ${day}`)}
-    <div style="padding:14px 16px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px"><p style="margin:0;font-size:13px;color:${BRAND.slate}">N/A: Evident&#39;s Daily Billed email for that day didn&#39;t come in.</p></div>
+    <div style="padding:14px 16px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px"><p style="margin:0;font-size:13px;color:${BRAND.slate}">N/A: Evident&#39;s Daily Billed email for that day didn&#39;t come in, or its lines didn&#39;t add up to its total.</p></div>
   </div>`;
   }
   const line = (label, value, count, bold) => `
