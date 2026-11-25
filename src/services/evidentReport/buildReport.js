@@ -767,15 +767,14 @@ function scannerDoctorsSection(rows, runDate) {
         statCard(escapeHtml(day), whole(dayTotal), [{ text: `${dayCases} case${dayCases === 1 ? '' : 's'} from ${rows.length - quiet} account${rows.length - quiet === 1 ? '' : 's'}` }]),
       ])}</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed">
-        <tr>${head('Doctor', '36%')}${head('Sales rep', '20%')}${head(escapeHtml(day), '22%', true)}${head('MTD', '22%', true)}</tr>
+        <tr>${head('Doctor · sales rep', '52%')}${head(escapeHtml(day), '24%', true)}${head('MTD', '24%', true)}</tr>
         ${rows.map((r) => `
           <tr>
-            ${cell(escapeHtml(r.codes && r.codes.length > 1 ? r.name : `${r.name} (${r.code})`), '36%')}
-            ${cell(r.rep ? escapeHtml(r.rep) : `<span style="color:${BRAND.slate}">Not assigned</span>`, '20%')}
+            ${cell(`${escapeHtml(r.codes && r.codes.length > 1 ? r.name : `${r.name} (${r.code})`)}<br><span style="font-size:10.5px;color:${BRAND.slate}">${r.rep ? escapeHtml(r.rep) : 'No rep assigned'}</span>`, '52%')}
             ${r.todayCases > 0
-              ? cell(`${r.todayCases} case${r.todayCases === 1 ? '' : 's'}<br>${whole(r.todayValue)}`, '22%', true, `color:${BRAND.slate};`)
-              : cell('No case', '22%', true, `color:${BRAND.danger};font-weight:600;`)}
-            ${cell(whole(r.mtdValue), '22%', true, `color:${BRAND.slate};`)}
+              ? cell(`${r.todayCases} case${r.todayCases === 1 ? '' : 's'}<br>${whole(r.todayValue)}`, '24%', true, `color:${BRAND.slate};`)
+              : cell('No<br>case', '24%', true, `color:${BRAND.danger};font-weight:600;`)}
+            ${cell(whole(r.mtdValue), '24%', true, `color:${BRAND.slate};`)}
           </tr>`).join('')}
       </table>
       <p style="margin:10px 0 0;font-size:10.5px;line-height:1.5;color:${BRAND.slate}">Doctors who received an intraoral scanner from AIM, with the rep from their customer record. Values count cases by booking date: the month to date from Report 12 (MTD Booked), the day from the Daily Booking Report.</p>
