@@ -161,7 +161,9 @@ function report12MonthFor(messages, runDate) {
     .filter((x) => x.date === runDate && REPORT_12.test(String(x.subject || '').trim()))
     .sort((a, b) => (b.internalDate || 0) - (a.internalDate || 0))[0]
   if (!m) return null
-  if (!/date\s*\(\s*book(?:ed|ing)\s*\)/i.test(textOf(m.html))) return null
+  // "date (booked) >=MTD" (23 Nov) or "month (booking)=MTD" (24 Nov, the same
+  // filter as report 114). Both count by booking date.
+  if (!/(?:date\s*\(\s*book(?:ed|ing)\s*\)|month\s*\(\s*booking\s*\))/i.test(textOf(m.html))) return null
   const table = parseTable(m.html || '')
   if (!table || table.rows.length < 2) return null
   const { headers, rows } = table
@@ -179,9 +181,18 @@ function report12MonthFor(messages, runDate) {
 // (Product) while Report 12 sums Sales Value (Total) (Elizabeth, 2026-11-25), so
 // the two differ slightly (about $130 on 23 Nov); Report 12 is the figure to match.
 const REPORT_12_TOLERANCE = 0.05
-function newJobsMonth(report12, report114) {
+// When that evening's report 114 is missing (24 Nov: schedule 51 did not send),
+// Report 12 is checked against the most recent earlier report 114 of the same
+// month instead: it may only be higher by one day's bookings at most.
+const MAX_DAY_GROWTH = (prior) => Math.max(prior * 0.15, 25000)
+function newJobsMonth(report12, report114, prior114 = null) {
   if (report12 && report114 && report114.value > 0
     && Math.abs(report12.value - report114.value) / report114.value <= REPORT_12_TOLERANCE) {
+    return { month: { ...report12, source: 'report12' }, report12Rejected: false }
+  }
+  if (report12 && !report114 && prior114 && prior114.value > 0
+    && report12.value >= prior114.value && report12.value - prior114.value <= MAX_DAY_GROWTH(prior114.value)
+    && (report12.count === null || prior114.count === null || report12.count >= prior114.count)) {
     return { month: { ...report12, source: 'report12' }, report12Rejected: false }
   }
   return { month: report114 ? { ...report114, source: 'report114' } : null, report12Rejected: Boolean(report12) }
@@ -223,6 +234,17 @@ function report12DayFor(messages, runDate, month) {
   return { value, count, source: 'report12' }
 }
 
+// The latest report 114 month to date before runDate, in runDate's month.
+function prior114For(messages, runDate) {
+  const dates = (messages || [])
+    .filter((m) => m.date && m.date < runDate && m.date.slice(0, 7) === runDate.slice(0, 7) && NEW_JOBS_MONTH.test(String(m.subject || '').trim()))
+    .map((m) => m.date)
+    .sort()
+  const prev = dates[dates.length - 1]
+  const b = prev ? newJobsFor(messages, prev) : null
+  return b && b.mtd ? b.mtd : null
+}
+
 // Everything the dashboard's top section shows, or null for a part that is
 // missing (shown as N/A, never as zero).
 function labTotalsFor({ thisMonthMessages = [], evidentMessages = [], runDate }) {
@@ -233,7 +255,7 @@ function labTotalsFor({ thisMonthMessages = [], evidentMessages = [], runDate })
   //   can't be worked out, Report 10's booked cases for the day (report 113) or
   //   the This Month report's WIP New Jobs line.
   const booked = newJobsFor(evidentMessages, runDate)
-  const { month, report12Rejected } = newJobsMonth(report12MonthFor(evidentMessages, runDate), booked && booked.mtd)
+  const { month, report12Rejected } = newJobsMonth(report12MonthFor(evidentMessages, runDate), booked && booked.mtd, booked && booked.mtd ? null : prior114For(evidentMessages, runDate))
   const tag = (x, source) => (x ? { ...x, source } : null)
   const day = report12DayFor(evidentMessages, runDate, month)
     || tag(booked && booked.day, 'report10')

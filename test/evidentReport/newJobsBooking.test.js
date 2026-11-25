@@ -79,3 +79,30 @@ test('first business day of the month: the day is the month so far', () => {
   assert.deepEqual(report12DayFor([], '2026-12-01', { value: 5000, count: 40, source: 'report12' }), { value: 5000, count: 40, source: 'report12' })
   assert.equal(report12DayFor([], '2026-12-02', { value: 5000, count: 40, source: 'report12' }), null)
 })
+
+// 24 Nov 2026: Report 12 switched to "month (booking)=MTD" (report 114's own
+// filter) and that evening's report 114 never arrived.
+const r12Month = (total, cases, date = '2026-11-24') => ({
+  subject: 'MTD Booked Daily Update', date, internalDate: 9,
+  html: '<p>MTD Booked Daily Update</p><p>month (booking)=MTD</p>' + tbl(
+    ['Ref', 'Customer', 'Sales Value (Total)', 'Cases (Total)', 'Sales Value (Total Billed)', 'N/A'],
+    [['A1', 'A1 - X', '100', '2', '90', '90'], ['', '', total, cases, '1', '1']],
+  ),
+})
+
+test('Report 12 with the month (booking) filter is read', () => {
+  assert.deepEqual(report12MonthFor([r12Month('162,764.48', '1629')], '2026-11-24'), { value: 162764.48, count: 1629 })
+})
+
+test('no report 114 that evening: Report 12 is checked against the previous one', () => {
+  const t = labTotalsFor({ evidentMessages: [r12Month('162,764.48', '1629'), r114('153,037.58', '1524', '2026-11-23')], runDate: '2026-11-24' })
+  assert.deepEqual(t.newJobs.mtd, { value: 162764.48, count: 1629, source: 'report12' })
+  assert.equal(t.report12Rejected, false)
+  const broken = labTotalsFor({ evidentMessages: [r12Month('776,081.01', '7563'), r114('153,037.58', '1524', '2026-11-23')], runDate: '2026-11-24' })
+  assert.equal(broken.newJobs && broken.newJobs.mtd, null)
+  assert.equal(broken.report12Rejected, true)
+  const lower = labTotalsFor({ evidentMessages: [r12Month('150,000', '1500'), r114('153,037.58', '1524', '2026-11-23')], runDate: '2026-11-24' })
+  assert.equal(lower.report12Rejected, true)
+  const none = labTotalsFor({ evidentMessages: [r12Month('162,764.48', '1629')], runDate: '2026-11-24' })
+  assert.equal(none.report12Rejected, true, 'nothing to check against: not used')
+})
