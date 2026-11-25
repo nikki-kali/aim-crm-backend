@@ -835,7 +835,7 @@ function scannerDoctorsSection(rows, runDate) {
             ${cell(fmtMoney(r.mtdValue), '22%', true, `color:${BRAND.slate};`)}
           </tr>`).join('')}
       </table>
-      <p style="margin:10px 0 0;font-size:10.5px;line-height:1.5;color:${BRAND.slate}">Doctors who received an intraoral scanner from AIM, with the rep from their customer record. Values count cases by arrival date, the same as the Scanner Doctors report (#112).</p>
+      <p style="margin:10px 0 0;font-size:10.5px;line-height:1.5;color:${BRAND.slate}">Doctors who received an intraoral scanner from AIM, with the rep from their customer record. Values count cases by booking date: the month to date from Report 12 (MTD Booked), the day from the Daily Booking Report.</p>
     </div>`;
 }
 
