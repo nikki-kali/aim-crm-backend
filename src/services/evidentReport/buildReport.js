@@ -343,8 +343,7 @@ function buildReport1Body(agg, historyRows = [], overrides = {}) {
   if (agg.labTotals !== undefined) {
     return {
       headlineSection: `
-  ${labTotalsSection(agg.labTotals)}
-  ${dailyBilledSection(agg)}
+  ${labTotalsSection({ ...agg.labTotals, dailyBilled: (agg.missing || []).includes('Daily Billed Report - Nadine') ? null : agg.companyDailyBilled })}
 
   <div style="padding:20px 36px 0">
     ${cardRow([
@@ -450,66 +449,7 @@ function labTotalsSection(lt) {
         ${row('New Jobs', `Counted by booking date, month to date (${part(nj.mtd, 'source') === 'report114' ? 'booking-date copy of Report 10' : 'Report 12'})`, money(part(nj.mtd, 'value')) + cases(part(nj.mtd, 'count')) + (nj.day ? sub(`${newJobsDay(t.runDate)}: ${money(nj.day.value)}${nj.day.count == null ? '' : `, ${Number(nj.day.count).toLocaleString('en-US')} case${nj.day.count === 1 ? '' : 's'}`}`) : ''))}
         ${row('Work in progress: In Lab', t.inLab ? `${Number(t.inLab.count).toLocaleString('en-US')} cases, by due date` : 'By due date', inLab)}
         ${row('Work in progress: On Hold', 'Waiting for new impressions from the doctor', money(part(t.onHold, 'value')) + cases(part(t.onHold, 'count')))}
-        ${row('Invoiced (MTD Sales)', 'Billed, month to date (KPI page)', money(part(t.invoiced, 'mtd')), true)}
-      </table>
-    </div>
-  </div>`;
-}
-
-// Daily Billed the way Ben reads it in custom report #118 ("Daily Billed -
-// Today", 2026-11-25): the day's billed total, by company and by sales rep.
-// From Evident's Daily Billed Report (date (invoice)=Today), which lists the
-// same cases: Kings Highway customers have KH codes, everyone else is AIM.
-// null rows (the email missing) show N/A, never $0.
-const DAILY_BILLED_REPS = [['william', 'William Alexander'], ['james', 'James Delaney'], ['fred', 'Frederick Zareh']];
-function dailyBilledBreakdown(rows, total) {
-  if (!Array.isArray(rows) || total === null || total === undefined) return null;
-  const sum = (list) => Math.round(list.reduce((n, r) => n + (Number(r.billedValue) || 0), 0) * 100) / 100;
-  // Every billed line, credits (negative) included, so the parts add up.
-  const billed = rows.filter((r) => Number(r.billedValue) !== 0 && r.billedValue !== null && r.billedValue !== undefined);
-  const kh = billed.filter((r) => /^KH/i.test(r.customerCode || ''));
-  const aim = billed.filter((r) => !/^KH/i.test(r.customerCode || ''));
-  const reps = DAILY_BILLED_REPS.map(([key, name]) => {
-    const list = billed.filter((r) => repKeyFromSalesperson(r.salesperson) === key);
-    return { name, value: sum(list), count: list.length };
-  }).filter((r) => r.count > 0);
-  const noRep = billed.filter((r) => !DAILY_BILLED_REPS.some(([key]) => key === repKeyFromSalesperson(r.salesperson)));
-  // The lines must add up to Evident's own total; otherwise show N/A.
-  if (Math.abs(sum(billed) - total) > 0.01) return null;
-  return {
-    total, count: billed.length,
-    companies: [{ name: 'AIM Dental', value: sum(aim), count: aim.length }, { name: 'Kings Highway', value: sum(kh), count: kh.length }],
-    reps: [...reps, { name: 'No sales rep', value: sum(noRep), count: noRep.length }],
-  };
-}
-
-function dailyBilledSection(agg) {
-  const missing = (agg.missing || []).some((m) => /Daily Billed Report/i.test(typeof m === 'string' ? m : (m && m.label) || ''));
-  const d = missing ? null : dailyBilledBreakdown(agg.companyDailyBilledRows, agg.companyDailyBilled);
-  const day = newJobsDay(agg.runDate);
-  if (!d) {
-    return `
-  <div style="padding:20px 36px 0">
-    ${sectionLabel(`Daily Billed · ${day}`)}
-    <div style="padding:14px 16px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px"><p style="margin:0;font-size:13px;color:${BRAND.slate}">N/A: Evident&#39;s Daily Billed email for that day didn&#39;t come in, or its lines didn&#39;t add up to its total.</p></div>
-  </div>`;
-  }
-  const line = (label, value, count, bold) => `
-        <tr>
-          <td width="60%" style="padding:7px 0;border-bottom:1px solid ${HAIRLINE};font-size:13px;${bold ? 'font-weight:600;' : ''}color:${BRAND.ink}">${label}${count === null ? '' : `<span style="font-size:10.5px;font-weight:400;color:${BRAND.slate}"> · ${count} case${count === 1 ? '' : 's'}</span>`}</td>
-          <td width="40%" style="padding:7px 0;border-bottom:1px solid ${HAIRLINE};text-align:right;font-family:${FONT_DATA};font-size:13.5px;${bold ? 'font-weight:600;' : ''}color:${BRAND.ink};white-space:nowrap">${fmtMoney(value)}</td>
-        </tr>`;
-  const head = (text) => `<tr><td colspan="2" style="padding:12px 0 2px;font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:${BRAND.slate}">${text}</td></tr>`;
-  return `
-  <div style="padding:20px 36px 0">
-    ${sectionLabel(`Daily Billed · ${day}`)}
-    <div style="padding:6px 16px 10px;background:${BRAND.glassBg};border:1px solid ${BRAND.glassBorder};border-radius:16px;box-shadow:${BRAND.glassShadow}">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed">
-        ${line('Total billed', d.total, d.count, true)}
-        ${head('By company')}
-        ${d.companies.map((c) => line(c.name, c.value, c.count)).join('')}
-        ${head('By sales rep')}
-        ${d.reps.map((r) => line(r.name, r.value, r.count)).join('')}
+        ${row('Invoiced (MTD Sales)', 'Billed, month to date (KPI page), with the day&#39;s billing beneath it', money(part(t.invoiced, 'mtd')) + (t.dailyBilled === null || t.dailyBilled === undefined ? '' : sub(`${newJobsDay(t.runDate)}: ${money(t.dailyBilled)} billed`)), true)}
       </table>
     </div>
   </div>`;
@@ -919,7 +859,7 @@ function buildCombinedLeadershipEmail(agg, historyRows = [], repGoals = [], over
     const labSourceNote = `
   <div style="margin:24px 36px 0;padding:14px 18px;background:${BRAND.blueMist};border:1px solid ${HAIRLINE};border-radius:14px">
     <p style="margin:0 0 6px;font-family:${FONT_DATA};font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:${BRAND.slate}">Where these numbers come from</p>
-    <p style="margin:0;font-size:11px;line-height:1.5;color:${BRAND.slate}">Debtors, Receipts, In Lab, On Hold and Invoiced come from Evident&#39;s This Month report (Case Reports). Daily Billed comes from Evident&#39;s Daily Billed Report (the same cases and total as report #118); Kings Highway is customers with KH codes. New Jobs is counted by booking date: the month to date from ${agg.labTotals && agg.labTotals.report12Rejected ? 'our booking-date copy of Report 10, because Evident&#39;s Report 12 (MTD Booked) did not add up that day' : 'Evident&#39;s Report 12 (MTD Booked)'}, with the day beneath it ${agg.labTotals && agg.labTotals.newJobs && agg.labTotals.newJobs.day && agg.labTotals.newJobs.day.source === 'report12' ? 'from the same 8 PM Report 12 run (that evening&#39;s month to date minus the previous evening&#39;s)' : agg.labTotals && agg.labTotals.newJobs && agg.labTotals.newJobs.day && agg.labTotals.newJobs.day.source === 'thisMonth' ? 'from the This Month report&#39;s New Jobs line for that day' : 'from Report 10&#39;s booked cases for that day'}. James and William&#39;s figures come from their own Evident emails, and the booked cases list from Evident&#39;s daily booking email. YTD and goal progress are unchanged.</p>
+    <p style="margin:0;font-size:11px;line-height:1.5;color:${BRAND.slate}">Debtors, Receipts, In Lab, On Hold and Invoiced come from Evident&#39;s This Month report (Case Reports). The day&#39;s billing under MTD Sales comes from Evident&#39;s Daily Billed Report (the same total as report #118). New Jobs is counted by booking date: the month to date from ${agg.labTotals && agg.labTotals.report12Rejected ? 'our booking-date copy of Report 10, because Evident&#39;s Report 12 (MTD Booked) did not add up that day' : 'Evident&#39;s Report 12 (MTD Booked)'}, with the day beneath it ${agg.labTotals && agg.labTotals.newJobs && agg.labTotals.newJobs.day && agg.labTotals.newJobs.day.source === 'report12' ? 'from the same 8 PM Report 12 run (that evening&#39;s month to date minus the previous evening&#39;s)' : agg.labTotals && agg.labTotals.newJobs && agg.labTotals.newJobs.day && agg.labTotals.newJobs.day.source === 'thisMonth' ? 'from the This Month report&#39;s New Jobs line for that day' : 'from Report 10&#39;s booked cases for that day'}. James and William&#39;s figures come from their own Evident emails, and the booked cases list from Evident&#39;s daily booking email. YTD and goal progress are unchanged.</p>
   </div>`;
     const labBody = `
   ${debtorsSection(agg.debtors)}
@@ -958,4 +898,4 @@ function buildCombinedLeadershipEmail(agg, historyRows = [], repGoals = [], over
 }
 
 module.exports = {
-  dailyBilledBreakdown, buildReport1Email, buildReport2Email, buildReport3Email, buildCombinedLeadershipEmail, goalBar, emailShell, debtorsSection, labTotalsSection };
+  buildReport1Email, buildReport2Email, buildReport3Email, buildCombinedLeadershipEmail, goalBar, emailShell, debtorsSection, labTotalsSection };
