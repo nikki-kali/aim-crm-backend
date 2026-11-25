@@ -188,6 +188,21 @@ async function applyLabTotals(aggregate, evidentMessages, runDate) {
     console.warn(`[evident-report] Report 12 (MTD Booked) for ${runDate} does not agree with report 114; New Jobs uses report 114 and the Scanner section is left out`)
     if (aggregate.eviSmart) aggregate.eviSmart.scannerDoctors = null
   }
+  // MTD Sales (Ben, 2026-11-25): the This Month report's Invoiced total (the
+  // KPI page, same as Financials > Daily Activity > Totals > This Month), not
+  // report #40, which overstated November by about $4,640. Used for the
+  // month-over-month Billed card, the trend chart and the daily log. Each
+  // rep's Monthly Sales bar still reads #40's per-rep columns (no per-rep
+  // split in the This Month report).
+  const invoicedMtd = aggregate.labTotals && aggregate.labTotals.invoiced ? aggregate.labTotals.invoiced.mtd : null
+  if (invoicedMtd !== null && invoicedMtd !== undefined) {
+    if (aggregate.companyMtdBilled != null) console.log(`[evident-report] MTD Sales ${invoicedMtd} from the This Month report (report #40 said ${aggregate.companyMtdBilled})`)
+    aggregate.companyMtdBilled = invoicedMtd
+    if (aggregate.eviSmart) aggregate.eviSmart.mtdBilledValue = invoicedMtd
+  } else if (aggregate.eviSmart) {
+    console.warn(`[evident-report] no This Month Invoiced total for ${runDate}; MTD Sales shows N/A rather than report #40`)
+    aggregate.eviSmart.mtdBilledValue = null
+  }
 }
 
 async function runEvidentReport({ requireEviSmart = false } = {}) {
