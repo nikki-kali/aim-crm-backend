@@ -455,9 +455,9 @@ test('extractBookingRows reads every real row from Daily Booking Report - Nadine
 test('extractBilledRows reads every real row from Daily Billed Report - Nadine, dropping the totals row', () => {
   const rows = extractBilledRows(fixture('company-daily-billed-nadine.html'));
   assert.equal(rows.length, 34); // 35 total rows in the fixture minus 1 totals row
-  assert.deepEqual(rows[0], { ref: '4067', customerName: 'WYCKOFF HOSPITAL', value: 102.14, billedValue: 102.14, salesperson: '' });
+  assert.deepEqual(rows[0], { ref: '4067', customerName: 'WYCKOFF HOSPITAL', customerCode: 'A1292', value: 102.14, billedValue: 102.14, salesperson: '' });
   // Real row with a salesperson attributed and a blank (unbilled-this-row) billed value.
-  assert.deepEqual(rows[rows.length - 1], { ref: '5663', customerName: 'Dr. ALBERTO GONZALEZ', value: 0, billedValue: 0, salesperson: 'william' });
+  assert.deepEqual(rows[rows.length - 1], { ref: '5663', customerName: 'Dr. ALBERTO GONZALEZ', customerCode: 'A1298', value: 0, billedValue: 0, salesperson: 'william' });
 });
 
 test('extractBookingRows / extractBilledRows return an empty array when there is no real data', () => {

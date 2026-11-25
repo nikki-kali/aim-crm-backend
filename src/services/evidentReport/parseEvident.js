@@ -169,6 +169,7 @@ function extractBilledRows(html) {
   const valueCol = findCol(headers, 'Sales Value (Total)');
   const billedCol = findCol(headers, 'Sales Value (Total Billed)');
   const salespersonCol = findCol(headers, 'Salesperson');
+  const codeCol = findCol(headers, 'Customer Code');
   return rows
     .slice(0, -1)
     .map((row) => {
@@ -176,6 +177,7 @@ function extractBilledRows(html) {
       return {
         ref: (obj[refCol] || '').trim(),
         customerName: (obj[nameCol] || '').trim(),
+        customerCode: (obj[codeCol] || '').trim(),
         value: toNum(obj[valueCol]),
         billedValue: toNum(obj[billedCol]),
         salesperson: (obj[salespersonCol] || '').trim(),
