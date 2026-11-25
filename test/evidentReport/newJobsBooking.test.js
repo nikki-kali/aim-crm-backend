@@ -106,3 +106,8 @@ test('no report 114 that evening: Report 12 is checked against the previous one'
   const none = labTotalsFor({ evidentMessages: [r12Month('162,764.48', '1629')], runDate: '2026-11-24' })
   assert.equal(none.report12Rejected, true, 'nothing to check against: not used')
 })
+
+test('a report 114 more than 4 days old is not used as the check', () => {
+  const t = labTotalsFor({ evidentMessages: [r12Month('162,764.48', '1629'), r114('153,037.58', '1524', '2026-11-18')], runDate: '2026-11-24' })
+  assert.equal(t.report12Rejected, true)
+})

@@ -163,7 +163,7 @@ function report12MonthFor(messages, runDate) {
   if (!m) return null
   // "date (booked) >=MTD" (23 Nov) or "month (booking)=MTD" (24 Nov, the same
   // filter as report 114). Both count by booking date.
-  if (!/(?:date\s*\(\s*book(?:ed|ing)\s*\)|month\s*\(\s*booking\s*\))/i.test(textOf(m.html))) return null
+  if (!/(?:date\s*\(\s*book(?:ed|ing)\s*\)\s*(?:>|&gt;)?=|month\s*\(\s*booking\s*\)\s*=)\s*MTD/i.test(textOf(m.html))) return null
   const table = parseTable(m.html || '')
   if (!table || table.rows.length < 2) return null
   const { headers, rows } = table
@@ -241,7 +241,9 @@ function prior114For(messages, runDate) {
     .map((m) => m.date)
     .sort()
   const prev = dates[dates.length - 1]
-  const b = prev ? newJobsFor(messages, prev) : null
+  // A stale baseline is no check at all: at most 4 days back (Friday's for Monday).
+  if (!prev || (Date.parse(`${runDate}T00:00:00Z`) - Date.parse(`${prev}T00:00:00Z`)) / 86400000 > 4) return null
+  const b = newJobsFor(messages, prev)
   return b && b.mtd ? b.mtd : null
 }
 
