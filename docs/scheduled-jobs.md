@@ -12,7 +12,7 @@ All timers: Monday to Friday, time zone **America/New_York**, notifications on f
 | 2 | AIM · 5:30 Evident email check | 5:30 | `POST /api/cron/evident-email-check?alert=true` | Checks the Evident emails for the last business day arrived; the server emails the approver if any are missing. |
 | 3 | AIM · 6:00 Leadership preview | 6:00 | `POST /api/cron/evident-report` | Leadership Dashboard preview to the approver. |
 | 4 | AIM · 7:00 Leadership send | 7:00 | `POST /api/cron/evident-report-send` | Automatic send to leadership (unless held, already sent, or the figures are unusable). |
-| 5 | AIM · 7:00 CRM sync | 7:00 | `POST /api/cron/evident-crm-sync` | Evident to CRM sync. |
+| 5 | AIM · 7:00 CRM sync | 7:00 | `POST /api/cron/evident-crm-sync` | Evident to CRM case sync (`services/evidentCaseSync.js`) from the four "- AIM CRM" reports, catching up every day not yet applied. A dry run emailed to the approver unless `EVIDENT_CASE_SYNC_APPLY` = `true` on Render; once applying, it emails the approver only when the CRM and Evident disagree. Safe to "Test run": it never emails anyone else. |
 | 6 | AIM · 8:00 Rep report previews | 8:00 | `POST /api/cron/sales-rep-daily-report` | Rep report previews to the approver. |
 | 7 | AIM · 9:00 Rep report auto-send | 9:00 | `POST /api/cron/sales-rep-daily-report-send` | Automatic send of each rep's report. Does nothing unless `SALES_REP_REPORT_AUTO_SEND` = `true` on Render. |
 | 8 | AIM · WhatsApp post tries | 6:15 to 9:45, every 30 min | `POST /api/cron/whatsapp-post` | WhatsApp progress picture to nadinekate.d.limjoco@gmail.com, once the day's figures are in. |
