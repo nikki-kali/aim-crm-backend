@@ -12,6 +12,46 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+// Gmail's per-user, per-minute quota ("Quota exceeded for quota metric
+// 'Total Query Cost' and limit 'Units per minute per user'"). Since Evident's
+// extra scheduled reports started on 2026-11-25 the 5-day fetch is long
+// enough to pass it, and on 2026-11-27 every Leadership Dashboard attempt
+// failed on it. The limit resets each minute, so wait it out and carry on.
+function isQuotaError(err) {
+  if (!err) return false
+  const reasons = (err.errors || []).map((e) => e && e.reason).join(' ')
+  return err.code === 429 || Number(err.status) === 429 ||
+    /rateLimitExceeded|userRateLimitExceeded|quotaExceeded/i.test(reasons) ||
+    /Quota exceeded|Rate Limit Exceeded/i.test(String(err.message || ''))
+}
+
+const QUOTA_WAIT_MS = 61000
+
+async function withQuotaRetry(fn, { wait = sleep, retries = 3 } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      if (!isQuotaError(err) || attempt >= retries) throw err
+      console.warn(`[gmail] per-minute quota reached; waiting ${QUOTA_WAIT_MS / 1000}s and retrying (${attempt + 1} of ${retries})`)
+      await wait(QUOTA_WAIT_MS)
+    }
+  }
+}
+
+// Every Gmail call in this file goes through the quota retry above.
+function gmailClient(auth) {
+  const gmail = google.gmail({ version: 'v1', auth })
+  return {
+    users: {
+      messages: {
+        list: (params) => withQuotaRetry(() => gmail.users.messages.list(params)),
+        get: (params) => withQuotaRetry(() => gmail.users.messages.get(params)),
+      },
+    },
+  }
+}
+
 // Read-only Gmail fetch, ported from the standalone evident-report-project's
 // gmail.js with its send half removed entirely (sending now goes through
 // this repo's existing services/email.js instead of the Gmail API) — so
@@ -89,7 +129,7 @@ const DEBTORS_QUERY = 'from:(support@evidentlabs.com OR noreply@evidentlabs.com)
 
 async function fetchDebtorsEmails() {
   const auth = getGmailAuth()
-  const gmail = google.gmail({ version: 'v1', auth })
+  const gmail = gmailClient(auth)
   const listRes = await gmail.users.messages.list({ userId: 'me', q: DEBTORS_QUERY, maxResults: 12 })
   const ids = (listRes.data.messages || []).map((m) => m.id)
   const messages = []
@@ -131,7 +171,7 @@ const EVISMART_QUERY = `from:(${EVISMART_SENDERS.join(' OR ')}) subject:"EviSmar
 
 async function fetchEviSmartEmails() {
   const auth = getGmailAuth()
-  const gmail = google.gmail({ version: 'v1', auth })
+  const gmail = gmailClient(auth)
   const listRes = await gmail.users.messages.list({
     userId: 'me',
     q: EVISMART_QUERY,
@@ -155,7 +195,7 @@ async function fetchEviSmartEmails() {
 // today's.
 async function fetchEvidentEmailsInRange(extraQuery) {
   const auth = getGmailAuth()
-  const gmail = google.gmail({ version: 'v1', auth })
+  const gmail = gmailClient(auth)
   const listRes = await gmail.users.messages.list({
     userId: 'me',
     q: `from:support@evidentlabs.com ${extraQuery}`,
@@ -181,7 +221,7 @@ async function fetchEvidentEmailsInRange(extraQuery) {
 // cold start already eats most of a request's time.
 async function fetchEvidentSubjects() {
   const auth = getGmailAuth()
-  const gmail = google.gmail({ version: 'v1', auth })
+  const gmail = gmailClient(auth)
   const listRes = await gmail.users.messages.list({ userId: 'me', q: 'from:support@evidentlabs.com newer_than:5d', maxResults: 500 })
   const ids = (listRes.data.messages || []).map((m) => m.id)
   const out = []
@@ -202,7 +242,7 @@ async function fetchEvidentSubjects() {
 // from an address the automation does not accept".
 async function fetchEviSmartHeaders() {
   const auth = getGmailAuth()
-  const gmail = google.gmail({ version: 'v1', auth })
+  const gmail = gmailClient(auth)
   const listRes = await gmail.users.messages.list({ userId: 'me', q: 'subject:"EviSmart Daily Sales Report" newer_than:5d', maxResults: 50 })
   const out = []
   for (const { id } of listRes.data.messages || []) {
@@ -213,4 +253,4 @@ async function fetchEviSmartHeaders() {
   return out
 }
 
-module.exports = { fetchEviSmartHeaders, fetchEvidentSubjects, EVISMART_SENDERS, EVISMART_QUERY, fetchEvidentEmails, fetchDebtorsEmails, DEBTORS_QUERY, fetchEviSmartEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }
+module.exports = { withQuotaRetry, isQuotaError, fetchEviSmartHeaders, fetchEvidentSubjects, EVISMART_SENDERS, EVISMART_QUERY, fetchEvidentEmails, fetchDebtorsEmails, DEBTORS_QUERY, fetchEviSmartEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }
