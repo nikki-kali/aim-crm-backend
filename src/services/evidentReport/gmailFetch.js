@@ -209,28 +209,72 @@ async function fetchEvidentEmailsInRange(extraQuery) {
     const { subject, html } = extractSubjectAndHtml(res.data)
     const internalDate = Number(res.data.internalDate)
     const date = new Date(internalDate).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
-    messages.push({ subject, html, date, internalDate, authResults: gmailAuthResults(res.data) })
+    messages.push({ subject, html, date, internalDate, authResults: gmailAuthResults(res.data), from: fromAddress(res.data), sentDate: sentDateEt(res.data) })
     await sleep(THROTTLE_MS)
   }
   return messages
 }
 
-// Gmail's own verdict on where a message came from: the first
-// "Authentication-Results" header, which Gmail's receiving server puts above
-// any a sender could have written. '' when there is none.
+// Gmail's own verdict on where a message came from: the Authentication-Results
+// header Gmail's receiving server adds. A message carrying more than one is
+// rejected (''), since any beyond Gmail's own were written by the sender.
 function gmailAuthResults(message) {
   const headers = (message.payload && message.payload.headers) || []
-  const h = headers.find((x) => String(x.name).toLowerCase() === 'authentication-results')
+  const all = headers.filter((x) => String(x.name).toLowerCase() === 'authentication-results')
+  return all.length === 1 ? String(all[0].value || '') : ''
+}
+
+const headerValue = (message, name) => {
+  const h = ((message.payload && message.payload.headers) || []).find((x) => String(x.name).toLowerCase() === name)
   return h ? String(h.value || '') : ''
 }
 
-// True only when Gmail verified the message as really sent by evidentlabs.com
-// (DKIM signed by it and DMARC aligned with it), as Evident's own emails are.
+// The sender's mailbox from the From header ("evidentlabs.com" <support@evidentlabs.com>).
+function fromAddress(message) {
+  const v = headerValue(message, 'from')
+  const m = v.match(/<([^<>\s]+@[^<>\s]+)>\s*$/) || v.match(/^\s*([^<>\s"]+@[^<>\s"]+)\s*$/)
+  return m ? m[1].toLowerCase() : ''
+}
+
+// The email's own Date header as a New York calendar date (Evident signs it
+// with DKIM), or null. Used to tie a report to the day it was sent.
+function sentDateEt(message) {
+  const t = Date.parse(headerValue(message, 'date'))
+  return Number.isNaN(t) ? null : new Date(t).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+}
+
+// Gmail's verdict split into clauses ({ method, result, props }), after
+// removing comments "(...)" and quoted strings, which can carry text the
+// sender chose. The first part is the server that wrote it (authserv-id).
+function parseAuthResults(value) {
+  const cleaned = String(value || '')
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+    .replace(/\((?:[^()\\]|\\.)*\)/g, ' ')
+  const [authserv, ...rest] = cleaned.split(';')
+  const clauses = rest.map((c) => {
+    const tokens = c.trim().split(/\s+/).filter(Boolean)
+    const [method, result] = (tokens[0] || '').toLowerCase().split('=')
+    const props = {}
+    for (const t of tokens.slice(1)) {
+      const i = t.indexOf('=')
+      if (i > 0) props[t.slice(0, i).toLowerCase()] = t.slice(i + 1).toLowerCase()
+    }
+    return { method, result, props }
+  })
+  return { authserv: String(authserv || '').trim().toLowerCase(), clauses }
+}
+
+// True only when Gmail itself verified the message as sent by evidentlabs.com:
+// a DKIM signature by evidentlabs.com that passed, DMARC passed for it, and no
+// evidentlabs.com check failed.
 function isVerifiedEvident(authResults) {
-  const a = String(authResults || '')
-  return /^\s*mx\.google\.com\s*;/i.test(a)
-    && /\bdkim=pass\b[^;]*header\.i=@evidentlabs\.com(?=[\s;]|$)/i.test(a)
-    && /\bdmarc=pass\b[^;]*header\.from=evidentlabs\.com(?=[\s;]|$)/i.test(a)
+  const { authserv, clauses } = parseAuthResults(authResults)
+  if (authserv !== 'mx.google.com') return false
+  const dkimOk = clauses.some((c) => c.method === 'dkim' && c.result === 'pass' && (c.props['header.i'] === '@evidentlabs.com' || c.props['header.d'] === 'evidentlabs.com'))
+  const dmarcOk = clauses.some((c) => c.method === 'dmarc' && c.result === 'pass' && c.props['header.from'] === 'evidentlabs.com')
+  const anyFail = clauses.some((c) => (c.method === 'dkim' || c.method === 'dmarc') && c.result !== 'pass'
+    && (c.props['header.i'] === '@evidentlabs.com' || c.props['header.d'] === 'evidentlabs.com' || c.props['header.from'] === 'evidentlabs.com'))
+  return dkimOk && dmarcOk && !anyFail
 }
 
 // Subjects and ET dates only (Gmail "metadata" format: no email bodies), so a
@@ -271,4 +315,4 @@ async function fetchEviSmartHeaders() {
   return out
 }
 
-module.exports = { gmailAuthResults, isVerifiedEvident, withQuotaRetry, isQuotaError, fetchEviSmartHeaders, fetchEvidentSubjects, EVISMART_SENDERS, EVISMART_QUERY, fetchEvidentEmails, fetchDebtorsEmails, DEBTORS_QUERY, fetchEviSmartEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }
+module.exports = { gmailAuthResults, parseAuthResults, fromAddress, sentDateEt, isVerifiedEvident, withQuotaRetry, isQuotaError, fetchEviSmartHeaders, fetchEvidentSubjects, EVISMART_SENDERS, EVISMART_QUERY, fetchEvidentEmails, fetchDebtorsEmails, DEBTORS_QUERY, fetchEviSmartEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }

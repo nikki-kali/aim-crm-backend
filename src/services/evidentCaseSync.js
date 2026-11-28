@@ -331,19 +331,26 @@ async function checkEvidentDay(plan, reports) {
   return problems.concat(plan.notes)
 }
 
-// The four reports for one Evident business day, each the newest email of
-// that exact subject dated `date` (America/New_York) that Gmail verified as
-// really sent by evidentlabs.com, parsed; null when missing. Only these emails
-// can change the CRM, so a message merely claiming to be from Evident is ignored.
+// True for a report email that can be trusted for `date`: from Evident's own
+// mailbox, verified by Gmail as sent by evidentlabs.com, and sent (by its own
+// signed Date header) on that day, so an old genuine email re-sent later
+// cannot be applied to a new day.
+function isTrustedReport(m, date) {
+  return m.from === 'support@evidentlabs.com' && isVerifiedEvident(m.authResults) && m.sentDate === date
+}
+
+// The four reports for one Evident business day, each the newest trusted email
+// (see isTrustedReport) of that exact subject received on `date` (New York),
+// parsed; null when missing. Any other email is ignored and logged.
 async function fetchEvidentDay(date) {
   const bounds = gmailDateBounds(date)
   const out = {}
   for (const [key, subject] of Object.entries(REPORT_SUBJECTS)) {
     const found = (await fetchEvidentEmailsInRange(`subject:"${subject}" ${bounds}`))
       .filter((m) => m.date === date && String(m.subject || '').trim() === subject)
-    const msgs = found.filter((m) => isVerifiedEvident(m.authResults))
+    const msgs = found.filter((m) => isTrustedReport(m, date))
       .sort((a, b) => (b.internalDate || 0) - (a.internalDate || 0))
-    if (found.length > msgs.length) console.warn(`[evident-case-sync] ignored ${found.length - msgs.length} "${subject}" email(s) for ${date} that Gmail did not verify as sent by evidentlabs.com`)
+    if (found.length > msgs.length) console.warn(`[evident-case-sync] ignored ${found.length - msgs.length} "${subject}" email(s) for ${date} that were not verified as Evident\'s own for that day`)
     out[key] = msgs[0] ? (key === 'invoices' ? parseInvoiceReport(msgs[0].html) : parseCaseReport(msgs[0].html)) : null
   }
   return out
@@ -381,5 +388,5 @@ async function syncEvidentCasesForDate(date, { apply = true } = {}) {
 
 module.exports = {
   REPORT_SUBJECTS, MAX_CLOSURES_PER_DAY, STATUS_TO_STAGE, PROTECTED_CLIENTS, CLIENT_FOR_CODE, HISTORY_LOADED_THROUGH,
-  parseCaseReport, parseInvoiceReport, planEvidentDay, applyEvidentPlan, checkEvidentDay, syncEvidentCasesForDate, isOpen,
+  isTrustedReport, parseCaseReport, parseInvoiceReport, planEvidentDay, applyEvidentPlan, checkEvidentDay, syncEvidentCasesForDate, isOpen,
 }

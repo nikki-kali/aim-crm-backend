@@ -118,6 +118,29 @@ test('only emails Gmail verified as sent by evidentlabs.com count', () => {
   assert.equal(isVerifiedEvident(real.replace('header.from=evidentlabs.com', 'header.from=evidentlabs.com.evil.example')), false)
   assert.equal(isVerifiedEvident('mx.google.com; dkim=pass header.i=@evil.example; dmarc=pass header.from=evil.example'), false)
   assert.equal(isVerifiedEvident(''), false)
+  // Sender-chosen text in comments or quoted strings never counts.
+  assert.equal(isVerifiedEvident('mx.google.com; spf=pass (x; dkim=pass header.i=@evidentlabs.com; dmarc=pass header.from=evidentlabs.com) smtp.mailfrom=a@evil.example'), false)
+  assert.equal(isVerifiedEvident('mx.google.com; spf=pass smtp.mailfrom="x;dkim=pass header.i=@evidentlabs.com;dmarc=pass header.from=evidentlabs.com"'), false)
+  assert.equal(isVerifiedEvident('evil.example; dkim=pass header.i=@evidentlabs.com; dmarc=pass header.from=evidentlabs.com'), false, 'only Gmail\'s own verdict')
+})
+
+test('a report is trusted only from Evident\'s mailbox, Gmail-verified, and sent that day', () => {
+  const { isTrustedReport } = require('../src/services/evidentCaseSync')
+  const { gmailAuthResults, fromAddress, sentDateEt } = require('../src/services/evidentReport/gmailFetch')
+  const auth = 'mx.google.com; dkim=pass header.i=@evidentlabs.com header.s=s1; dmarc=pass (p=REJECT) header.from=evidentlabs.com'
+  const msg = (headers) => ({ payload: { headers } })
+  const real = msg([
+    { name: 'Authentication-Results', value: auth },
+    { name: 'From', value: '"evidentlabs.com" <support@evidentlabs.com>' },
+    { name: 'Date', value: 'Thu, 26 Nov 2026 01:04:06 +0000 (UTC)' },
+  ])
+  const m = { authResults: gmailAuthResults(real), from: fromAddress(real), sentDate: sentDateEt(real) }
+  assert.equal(m.sentDate, '2026-11-25', '8:04 PM in New York')
+  assert.equal(isTrustedReport(m, '2026-11-25'), true)
+  assert.equal(isTrustedReport(m, '2026-11-27'), false, 'an old email re-sent later is not that day\'s report')
+  assert.equal(isTrustedReport({ ...m, from: 'support@evidentlabs.com.evil.example' }, '2026-11-25'), false)
+  const twoVerdicts = msg([...real.payload.headers, { name: 'Authentication-Results', value: auth }])
+  assert.equal(gmailAuthResults(twoVerdicts), '', 'a second verdict header means one was written by the sender')
 })
 
 test('the test account and nameless new cases are skipped; a cancelled case is worth $0', () => {
