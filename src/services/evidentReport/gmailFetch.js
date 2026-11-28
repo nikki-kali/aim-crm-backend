@@ -209,10 +209,28 @@ async function fetchEvidentEmailsInRange(extraQuery) {
     const { subject, html } = extractSubjectAndHtml(res.data)
     const internalDate = Number(res.data.internalDate)
     const date = new Date(internalDate).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
-    messages.push({ subject, html, date, internalDate })
+    messages.push({ subject, html, date, internalDate, authResults: gmailAuthResults(res.data) })
     await sleep(THROTTLE_MS)
   }
   return messages
+}
+
+// Gmail's own verdict on where a message came from: the first
+// "Authentication-Results" header, which Gmail's receiving server puts above
+// any a sender could have written. '' when there is none.
+function gmailAuthResults(message) {
+  const headers = (message.payload && message.payload.headers) || []
+  const h = headers.find((x) => String(x.name).toLowerCase() === 'authentication-results')
+  return h ? String(h.value || '') : ''
+}
+
+// True only when Gmail verified the message as really sent by evidentlabs.com
+// (DKIM signed by it and DMARC aligned with it), as Evident's own emails are.
+function isVerifiedEvident(authResults) {
+  const a = String(authResults || '')
+  return /^\s*mx\.google\.com\s*;/i.test(a)
+    && /\bdkim=pass\b[^;]*header\.i=@evidentlabs\.com(?=[\s;]|$)/i.test(a)
+    && /\bdmarc=pass\b[^;]*header\.from=evidentlabs\.com(?=[\s;]|$)/i.test(a)
 }
 
 // Subjects and ET dates only (Gmail "metadata" format: no email bodies), so a
@@ -253,4 +271,4 @@ async function fetchEviSmartHeaders() {
   return out
 }
 
-module.exports = { withQuotaRetry, isQuotaError, fetchEviSmartHeaders, fetchEvidentSubjects, EVISMART_SENDERS, EVISMART_QUERY, fetchEvidentEmails, fetchDebtorsEmails, DEBTORS_QUERY, fetchEviSmartEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }
+module.exports = { gmailAuthResults, isVerifiedEvident, withQuotaRetry, isQuotaError, fetchEviSmartHeaders, fetchEvidentSubjects, EVISMART_SENDERS, EVISMART_QUERY, fetchEvidentEmails, fetchDebtorsEmails, DEBTORS_QUERY, fetchEviSmartEmails, fetchEvidentEmailsInRange, extractSubjectAndHtml, sleep, THROTTLE_MS }

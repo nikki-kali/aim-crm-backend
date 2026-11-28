@@ -15,7 +15,7 @@
 // cases (pure), applyEvidentPlan() writes them.
 const db = require('../config/db')
 const { parseTable } = require('./evidentReport/parseEvident')
-const { fetchEvidentEmailsInRange } = require('./evidentReport/gmailFetch')
+const { fetchEvidentEmailsInRange, isVerifiedEvident } = require('./evidentReport/gmailFetch')
 const { normalizeDoctorName, resolveRepId, isTestAccount, gmailDateBounds } = require('./evidentCrmSync')
 const { syncClientRevenue } = require('./clientRevenue')
 
@@ -51,9 +51,13 @@ const CLIENT_FOR_CODE = { KH2237: 'Chemed Health' }
 // cases.billed_value, so only later invoice days add to it.
 const HISTORY_LOADED_THROUGH = '2026-11-25'
 
-// If Open Cases lists fewer than this share of the cases the CRM has open, the
-// email is treated as broken and no case is closed from it.
-const MIN_OPEN_SHARE = 0.5
+// Cases are closed from an Open Cases email only when it looks whole: it has
+// its totals row and its rows add up to it, and it lists at least this share
+// of the cases the CRM has open. Even then, at most MAX_CLOSURES_PER_DAY are
+// closed; more than that closes none and alerts the approver. (A day normally
+// closes only a handful: a case sent that day shows in Cases Sent Today.)
+const MIN_OPEN_SHARE = 0.9
+const MAX_CLOSURES_PER_DAY = 75
 
 const num = (s) => {
   const n = parseFloat(String(s == null ? '' : s).replace(/[,$]/g, '').trim())
@@ -167,15 +171,21 @@ function planEvidentDay({ date, booked = null, sent = null, open = null, invoice
     // A case with no Evident status yet (in the CRM but not in the 2026-11-25
     // export) counts as open until Evident's open list says otherwise.
     const crmOpen = [...current.entries()].filter(([, c]) => isOpen(c.evident_status) || !c.evident_status)
-    const looksWhole = open.consistent && openRefs.size >= Math.floor(crmOpen.length * MIN_OPEN_SHARE)
+    const looksWhole = open.consistent && open.total !== null && openRefs.size >= crmOpen.length * MIN_OPEN_SHARE
     if (!looksWhole) {
-      notes.push(`open-cases: lists ${openRefs.size} cases against ${crmOpen.length} open in the CRM; no case was closed from it`)
+      notes.push(`open-cases: lists ${openRefs.size} cases against ${crmOpen.length} open in the CRM${open.total === null ? ', and has no totals row' : ''}; no case was closed from it`)
     } else {
+      const candidates = []
       for (const [ref, c] of crmOpen) {
         if (openRefs.has(ref)) continue
         const m = merged.get(ref)
         if (m && m.evidentStatus && !isOpen(m.evidentStatus)) continue // Sent/Cancelled today, already an upsert
-        closures.push({ ref, fromStatus: c.evident_status })
+        candidates.push({ ref, fromStatus: c.evident_status })
+      }
+      if (candidates.length > MAX_CLOSURES_PER_DAY) {
+        notes.push(`open-cases: ${candidates.length} open CRM cases are missing from it, more than the ${MAX_CLOSURES_PER_DAY} allowed in a day; none was closed (e.g. ${candidates.slice(0, 10).map((c) => c.ref).join(', ')})`)
+      } else {
+        closures.push(...candidates)
       }
     }
   }
@@ -322,14 +332,18 @@ async function checkEvidentDay(plan, reports) {
 }
 
 // The four reports for one Evident business day, each the newest email of
-// that subject dated `date` (America/New_York), parsed; null when missing.
+// that exact subject dated `date` (America/New_York) that Gmail verified as
+// really sent by evidentlabs.com, parsed; null when missing. Only these emails
+// can change the CRM, so a message merely claiming to be from Evident is ignored.
 async function fetchEvidentDay(date) {
   const bounds = gmailDateBounds(date)
   const out = {}
   for (const [key, subject] of Object.entries(REPORT_SUBJECTS)) {
-    const msgs = (await fetchEvidentEmailsInRange(`subject:"${subject}" ${bounds}`))
-      .filter((m) => m.date === date && String(m.subject || '').trim().startsWith(subject))
+    const found = (await fetchEvidentEmailsInRange(`subject:"${subject}" ${bounds}`))
+      .filter((m) => m.date === date && String(m.subject || '').trim() === subject)
+    const msgs = found.filter((m) => isVerifiedEvident(m.authResults))
       .sort((a, b) => (b.internalDate || 0) - (a.internalDate || 0))
+    if (found.length > msgs.length) console.warn(`[evident-case-sync] ignored ${found.length - msgs.length} "${subject}" email(s) for ${date} that Gmail did not verify as sent by evidentlabs.com`)
     out[key] = msgs[0] ? (key === 'invoices' ? parseInvoiceReport(msgs[0].html) : parseCaseReport(msgs[0].html)) : null
   }
   return out
@@ -366,6 +380,6 @@ async function syncEvidentCasesForDate(date, { apply = true } = {}) {
 }
 
 module.exports = {
-  REPORT_SUBJECTS, STATUS_TO_STAGE, PROTECTED_CLIENTS, CLIENT_FOR_CODE, HISTORY_LOADED_THROUGH,
+  REPORT_SUBJECTS, MAX_CLOSURES_PER_DAY, STATUS_TO_STAGE, PROTECTED_CLIENTS, CLIENT_FOR_CODE, HISTORY_LOADED_THROUGH,
   parseCaseReport, parseInvoiceReport, planEvidentDay, applyEvidentPlan, checkEvidentDay, syncEvidentCasesForDate, isOpen,
 }

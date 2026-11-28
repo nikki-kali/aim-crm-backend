@@ -56,7 +56,11 @@ test('Invoices Today reads each case billed that day and its total', () => {
   assert.equal(r.consistent, true)
 })
 
-const openCases = (rows) => parseCaseReport(evidentTable(CASE_HEADERS, rows))
+// An Open Cases email with its totals row.
+const openCases = (rows) => {
+  const total = rows.reduce((n, r) => n + (parseFloat(r[7]) || 0), 0).toFixed(2)
+  return parseCaseReport(evidentTable(CASE_HEADERS, [...rows, ['', '', '', '', '', '', total, total, '', '', '', '', '', '']]))
+}
 const many = (n, from = 20000) => Array.from({ length: n }, (_, i) => caseRow(String(from + i), 'P', 'A1116', 'BROOKDALE MAIN', 'Crown', '10', '2026-11-20', '2026-12-01', 'Arrived'))
 
 test('the plan: new cases, status changes, and cases that left the open list', () => {
@@ -65,11 +69,11 @@ test('the plan: new cases, status changes, and cases that left the open list', (
     ['9000', { evident_status: 'Arrived' }], // sent today
     ['9001', { evident_status: 'Arrived' }], // gone from Open Cases, not sent today
     ['9002', { evident_status: 'Sent' }],
-    ...many(10).map((r) => [r[0], { evident_status: 'Arrived' }]),
+    ...many(30).map((r) => [r[0], { evident_status: 'Arrived' }]),
   ])
   const sent = openCases([caseRow('9000', 'P', 'A1116', 'BROOKDALE MAIN', 'Crown', '70', '2026-11-18', '2026-11-25', '')])
   sent.cases[0].evidentStatus = 'Sent' // the fixture headers have no Sent column
-  const open = openCases([...many(10), caseRow('10061', 'TROUCHEN, JOCELYN', 'A1199', 'KINGSBROOK JEWISH MEDICAL CTR.', 'Denture Repair', '50.99', '2026-11-25', '2026-12-03', 'Held')])
+  const open = openCases([...many(30), caseRow('10061', 'TROUCHEN, JOCELYN', 'A1199', 'KINGSBROOK JEWISH MEDICAL CTR.', 'Denture Repair', '50.99', '2026-11-25', '2026-12-03', 'Held')])
   const plan = planEvidentDay({ date: '2026-11-26', booked: parseCaseReport(booked), sent, open, current })
 
   const byRef = Object.fromEntries(plan.upserts.map((u) => [u.ref, u]))
@@ -84,9 +88,36 @@ test('the plan: new cases, status changes, and cases that left the open list', (
 
 test('a broken Open Cases email closes nothing', () => {
   const current = new Map(many(20).map((r) => [r[0], { evident_status: 'Arrived' }]))
-  const plan = planEvidentDay({ date: '2026-11-26', open: openCases(many(3)), current })
+  const short = planEvidentDay({ date: '2026-11-26', open: openCases(many(17)), current })
+  assert.deepEqual(short.closures, [], 'lists under 90% of the open cases')
+  assert.match(short.notes.join(' '), /no case was closed/)
+  const noTotals = planEvidentDay({ date: '2026-11-26', open: parseCaseReport(evidentTable(CASE_HEADERS, many(19))), current })
+  assert.deepEqual(noTotals.closures, [], 'no totals row to check it against')
+  assert.match(noTotals.notes.join(' '), /no totals row/)
+})
+
+test('more closures in a day than allowed closes none', () => {
+  const { MAX_CLOSURES_PER_DAY } = require('../src/services/evidentCaseSync')
+  const n = MAX_CLOSURES_PER_DAY * 20
+  const current = new Map(many(n).map((r) => [r[0], { evident_status: 'Arrived' }]))
+  const open = openCases(many(n - MAX_CLOSURES_PER_DAY - 1))
+  const plan = planEvidentDay({ date: '2026-11-26', open, current })
   assert.deepEqual(plan.closures, [])
-  assert.match(plan.notes.join(' '), /no case was closed/)
+  assert.match(plan.notes.join(' '), /more than the 75 allowed/)
+  const ok = planEvidentDay({ date: '2026-11-26', open: openCases(many(n - MAX_CLOSURES_PER_DAY)), current })
+  assert.equal(ok.closures.length, MAX_CLOSURES_PER_DAY)
+})
+
+test('only emails Gmail verified as sent by evidentlabs.com count', () => {
+  const { isVerifiedEvident } = require('../src/services/evidentReport/gmailFetch')
+  // Gmail's real verdict on Evident's 2026-11-25 "Daily Billed - Today" email.
+  const real = 'mx.google.com;\r\n       dkim=pass header.i=@evidentlabs.com header.s=s1 header.b=AZOmO+Dj;\r\n       spf=pass (google.com: domain of bounces+3535763-12b6-media=aimdentallab.com@mail.evidentlabs.com designates 167.89.111.230 as permitted sender) smtp.mailfrom="bounces+3535763-12b6-media=aimdentallab.com@mail.evidentlabs.com";\r\n       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=evidentlabs.com'
+  assert.equal(isVerifiedEvident(real), true)
+  assert.equal(isVerifiedEvident(real.replace('dmarc=pass', 'dmarc=fail')), false)
+  assert.equal(isVerifiedEvident(real.replace('header.i=@evidentlabs.com', 'header.i=@evidentlabs.com.evil.example')), false)
+  assert.equal(isVerifiedEvident(real.replace('header.from=evidentlabs.com', 'header.from=evidentlabs.com.evil.example')), false)
+  assert.equal(isVerifiedEvident('mx.google.com; dkim=pass header.i=@evil.example; dmarc=pass header.from=evil.example'), false)
+  assert.equal(isVerifiedEvident(''), false)
 })
 
 test('the test account and nameless new cases are skipped; a cancelled case is worth $0', () => {
