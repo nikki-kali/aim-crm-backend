@@ -141,6 +141,16 @@ test('a report is trusted only from Evident\'s mailbox, Gmail-verified, and sent
   assert.equal(isTrustedReport({ ...m, from: 'support@evidentlabs.com.evil.example' }, '2026-11-25'), false)
   const twoVerdicts = msg([...real.payload.headers, { name: 'Authentication-Results', value: auth }])
   assert.equal(gmailAuthResults(twoVerdicts), '', 'a second verdict header means one was written by the sender')
+  const twoDates = msg([...real.payload.headers, { name: 'Date', value: 'Fri, 27 Nov 2026 01:00:00 +0000' }])
+  assert.equal(sentDateEt(twoDates), null, 'a repeated Date header is not trusted')
+  const twoFroms = msg([...real.payload.headers, { name: 'From', value: 'support@evidentlabs.com' }])
+  assert.equal(fromAddress(twoFroms), '')
+})
+
+test('a verdict clause that names a property twice is not read', () => {
+  const { isVerifiedEvident } = require('../src/services/evidentReport/gmailFetch')
+  assert.equal(isVerifiedEvident('mx.google.com; dkim=pass header.i=@evil.example header.i=@evidentlabs.com; dmarc=pass header.from=evidentlabs.com'), false)
+  assert.equal(isVerifiedEvident('mx.google.com; dkim=pass header.i=@evidentlabs.com; dmarc=pass header.from=evil.example header.from=evidentlabs.com'), false)
 })
 
 test('the test account and nameless new cases are skipped; a cancelled case is worth $0', () => {

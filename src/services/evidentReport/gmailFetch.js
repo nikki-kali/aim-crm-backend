@@ -224,9 +224,11 @@ function gmailAuthResults(message) {
   return all.length === 1 ? String(all[0].value || '') : ''
 }
 
+// A header that must appear exactly once ('' when missing or repeated: a
+// repeated From or Date is how a signed message gets altered).
 const headerValue = (message, name) => {
-  const h = ((message.payload && message.payload.headers) || []).find((x) => String(x.name).toLowerCase() === name)
-  return h ? String(h.value || '') : ''
+  const all = ((message.payload && message.payload.headers) || []).filter((x) => String(x.name).toLowerCase() === name)
+  return all.length === 1 ? String(all[0].value || '') : ''
 }
 
 // The sender's mailbox from the From header ("evidentlabs.com" <support@evidentlabs.com>).
@@ -255,11 +257,16 @@ function parseAuthResults(value) {
     const tokens = c.trim().split(/\s+/).filter(Boolean)
     const [method, result] = (tokens[0] || '').toLowerCase().split('=')
     const props = {}
+    let repeated = false
     for (const t of tokens.slice(1)) {
       const i = t.indexOf('=')
-      if (i > 0) props[t.slice(0, i).toLowerCase()] = t.slice(i + 1).toLowerCase()
+      if (i <= 0) continue
+      const key = t.slice(0, i).toLowerCase()
+      if (key in props) repeated = true
+      props[key] = t.slice(i + 1).toLowerCase()
     }
-    return { method, result, props }
+    // A clause naming the same property twice is not read at all.
+    return repeated ? { method: 'invalid', result: 'invalid', props: {} } : { method, result, props }
   })
   return { authserv: String(authserv || '').trim().toLowerCase(), clauses }
 }
