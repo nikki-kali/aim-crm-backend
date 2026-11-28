@@ -3,6 +3,8 @@ const cors = require('cors')
 const db = require('../config/db')
 const rateLimiter = require('../middleware/rateLimiter')
 const { STAGES } = require('../constants/caseStages')
+const { evidentRefFromInput, contactMatches, evidentTrackingView } = require('../services/caseTracking')
+const { todayEt } = require('../services/cronRuns')
 
 const router = express.Router()
 
@@ -37,8 +39,38 @@ router.post(
   async (req, res, next) => {
     try {
       const { caseNumber, contact } = req.body
-      if (!caseNumber?.trim() || !contact?.trim()) {
+      if (typeof caseNumber !== 'string' || typeof contact !== 'string' || !caseNumber.trim() || !contact.trim()) {
         return res.status(400).json({ error: 'caseNumber and contact are required' })
+      }
+
+      // Evident cases, looked up by the plain Evident number. Off until
+      // TRACK_CASE_EVIDENT_ENABLED is 'true' on Render; until then the
+      // lookup works exactly as before.
+      const evidentRef = process.env.TRACK_CASE_EVIDENT_ENABLED === 'true' ? evidentRefFromInput(caseNumber) : null
+      if (evidentRef) {
+        const { rows: found } = await db.query(
+          `SELECT c.id, c.evident_case_number, c.status, c.evident_status, c.booked_on, c.arrived_on, c.ship_date,
+                  c.doctor_email, c.doctor_phone,
+                  COALESCE(array_agg(cl.email) FILTER (WHERE cl.email IS NOT NULL), '{}') AS client_emails,
+                  COALESCE(array_agg(cl.phone) FILTER (WHERE cl.phone IS NOT NULL), '{}') AS client_phones
+           FROM cases c
+           LEFT JOIN clients cl ON (c.evident_customer_code IS NOT NULL AND cl.evident_customer_code = c.evident_customer_code)
+                                OR (c.evident_customer_code IS NULL AND cl.doctor_name = c.client_name)
+           WHERE c.evident_case_number = $1 AND c.case_number LIKE 'EVD-%'
+           GROUP BY c.id`,
+          [evidentRef]
+        )
+        const ev = found[0]
+        const matches = ev && contactMatches(contact, {
+          emails: [ev.doctor_email, ...ev.client_emails],
+          phones: [ev.doctor_phone, ...ev.client_phones],
+        })
+        if (!matches) return res.status(404).json({ error: NOT_FOUND_MESSAGE })
+        const { rows: events } = await db.query(
+          'SELECT to_status, status_date::text AS status_date FROM case_status_events WHERE case_id = $1 ORDER BY status_date, id',
+          [ev.id]
+        )
+        return res.json(evidentTrackingView(ev, events, todayEt()))
       }
 
       const { rows } = await db.query(
